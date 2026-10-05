@@ -39,3 +39,6 @@
 [data-screen="HOME"] .lbl, [data-screen="HOME"] .st { color: var(--dm-fg-body); }
 [data-screen="HOME"] .home-attn .card { max-height: 42vh; overflow-y: auto; }
 [data-screen="HOME"] .home-more { margin-top: 8px; }
+[data-screen="HOME"] .home-walk { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 8px; border: 1px solid color-mix(in srgb, var(--dm-active) 35%, transparent); background: color-mix(in srgb, var(--dm-active) 8%, transparent); font-size: var(--dm-text-sm); }
+[data-screen="HOME"] .home-walk[hidden] { display: none; }
+[data-screen="HOME"] .home-walk-t { flex: 1; min-width: 0; color: var(--dm-fg-body); overflow-wrap: anywhere; }

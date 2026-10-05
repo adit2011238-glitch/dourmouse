@@ -10,9 +10,14 @@ specific reason, never a 200 with ``ok: false``.
 
 from __future__ import annotations
 
+import contextlib
+import threading
+import time
 from typing import Any
 
 from . import ApiError, Request, route
+
+INDICATOR_EVENT = "app_driver_indicator"
 
 
 def _call(fn, *args, **kwargs) -> Any:
@@ -148,3 +153,73 @@ def act(req: Request) -> tuple[int, dict[str, Any]]:
                    text=text, direction=_text(req, "direction", 10) or "down", amount=amount,
                    dry_run=dry_run, actor=_actor(req))
     return 200, result
+
+
+# Live driving indicator (phase F2). The shell's strip follows the app_driver
+# indicator through the server's existing SSE hub: ``bind_indicator_hub`` is
+# the one registration call webui.py makes. The indicator keeps "driving" true
+# for LINGER_SECONDS after the last action but calls no listener when that
+# lapses, so a timer sends one more event at the lapse and the strip goes
+# away without polling.
+
+_bind_lock = threading.Lock()
+_bound: dict[str, Any] = {"listener": None, "timer": None}
+
+
+def indicator_event(state: dict[str, Any] | None = None) -> dict[str, Any]:
+    """The SSE payload for an indicator state (a fresh read when none is given)."""
+    from dourmouse import app_driver
+
+    if state is None:
+        state = {**app_driver.indicator(), "killed": app_driver.is_killed()}
+    killed = bool(state.get("killed"))
+    driving = bool(state.get("driving")) and not killed
+    return {
+        "type": INDICATOR_EVENT,
+        "driving": driving,
+        "killed": killed,
+        "app": state.get("app") if driving else None,
+        "action": state.get("action") if driving else None,
+        "active": bool(state.get("active")) and driving,
+        "since": state.get("since"),
+        "last_action_at": state.get("last_action_at"),
+    }
+
+
+def bind_indicator_hub(hub: Any) -> None:
+    """Forward every app_driver indicator change to ``hub.broadcast``. Binding
+    again replaces the previous binding, so a second server in one process
+    (the tests) does not leave the first one listening."""
+    from dourmouse import app_driver
+    from dourmouse.app_driver import safety
+
+    def send(event: dict[str, Any]) -> None:
+        with contextlib.suppress(Exception):  # a UI push must never break an action
+            hub.broadcast(event)
+
+    def lapse() -> None:
+        send(indicator_event())
+
+    def forward(state: dict[str, Any]) -> None:
+        event = indicator_event(state)
+        send(event)
+        with _bind_lock:
+            timer = _bound["timer"]
+            if timer is not None:
+                timer.cancel()
+                _bound["timer"] = None
+            if event["driving"] and not event["active"]:
+                wait = max(0.0, safety.LINGER_SECONDS - (time.time() - float(event["last_action_at"] or 0))) + 0.3
+                timer = threading.Timer(wait, lapse)
+                timer.daemon = True
+                _bound["timer"] = timer
+                timer.start()
+
+    with _bind_lock:
+        previous, timer = _bound["listener"], _bound["timer"]
+        _bound["listener"], _bound["timer"] = forward, None
+    if previous is not None:
+        app_driver.remove_indicator_listener(previous)
+    if timer is not None:
+        timer.cancel()
+    app_driver.add_indicator_listener(forward)

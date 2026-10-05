@@ -8,6 +8,7 @@ import { states } from '../../kit/states.js';
 import { ago } from '../../kit/format.js';
 import { mountThreadView } from '../../kit/thread-view.js';
 import { isAbort } from '../../core/api.js';
+import { readSeen, markSeen } from '../apps/walkthrough.js';
 import { seedAllHands, applyAllHands, counts as ahCounts, newestRuns, runWord, goalLine } from '../orchestration/allhands.js';
 
 function el(tag, cls, text) {
@@ -30,7 +31,9 @@ export default {
     const ahEl = el('div', 'home-ah');
     ahEl.hidden = true;
     const threadEl = el('div', 'home-thread');
-    root.replaceChildren(scopeEl, ahEl, attnEl, threadEl);
+    const walkEl = el('div', 'home-walk');
+    walkEl.hidden = true;
+    root.replaceChildren(scopeEl, walkEl, ahEl, attnEl, threadEl);
     root.dataset.state = 'populated';
 
     /* ---------------- scope (project) ---------------- */
@@ -114,6 +117,28 @@ export default {
       attnEl.replaceChildren(card);
     }
 
+    /* ---------------- first-run permissions guide ----------------
+       Offered once, ever: it is recorded as seen the moment it is shown (in the
+       server's settings store), so it never comes back. The guide itself stays
+       on the APPS screen. A read that fails or comes from a stale copy offers
+       nothing rather than guessing. */
+    async function offerWalkthrough() {
+      const seen = await readSeen(ctx);
+      if (seen !== false || ctx.signal.aborted) return;
+      const text = el('span', 'home-walk-t', 'New here? See which macOS permissions Dourmouse uses and what each one lets it do. macOS only asks when a feature needs one.');
+      const go = el('a', 'os-btn', 'OPEN THE PERMISSIONS GUIDE');
+      go.href = '#/apps';
+      go.dataset.spec = 'Opens APPS, where each macOS permission Dourmouse uses is explained with a button to its System Settings page. It changes no permission.';
+      const later = el('button', 'os-btn', 'NOT NOW');
+      later.type = 'button';
+      later.dataset.spec = 'Hides this for good. The guide stays on the APPS screen.';
+      later.addEventListener('click', () => { walkEl.hidden = true; });
+      walkEl.replaceChildren(text, go, later);
+      walkEl.hidden = false;
+      const err = await markSeen(ctx);
+      if (err) ctx.notify({ level: 'warn', title: 'Permissions guide', detail: 'Could not save that this was shown, so it may appear again: ' + err });
+    }
+
     /* ---------------- all hands (/all) ----------------
        /all <goal> starts a run that works in the background. The server's
        reply says it streams in a window the shell does not have, so HOME
@@ -185,6 +210,7 @@ export default {
     await view.start();
     await refreshAttention();
     readRuns();
+    offerWalkthrough();
     /* the shell moves focus to the stage title once a screen has mounted; ask again after that so typing starts at once */
     ctx.chrome.focusComposer();
     setTimeout(() => { if (!ctx.signal.aborted) ctx.chrome.focusComposer(); }, 120);

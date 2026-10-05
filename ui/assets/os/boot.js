@@ -37,6 +37,7 @@ import { createControlCentre } from './chrome/control-centre.js';
 import { createNotifCentre } from './chrome/notif-centre.js';
 import { createWallpaperPicker } from './chrome/wallpaper.js';
 import { createStartupCheck } from './chrome/startup-check.js';
+import { createDrivingStrip } from './chrome/driving-strip.js';
 import { putPaneRequest } from './core/pane-inbox.js';
 import { createPalette } from './chrome/palette.js';
 import { createShortcutsPanel } from './chrome/shortcuts-panel.js';
@@ -77,6 +78,8 @@ function boot() {
   composer.reset();
   const menubar = createMenubar({ root: $('menubar'), status, timers, panels });
   createSpecOverlay({ button: $('specBtn'), legend: $('speclegend'), keymap });
+  /* F2: "Model is driving <App>" with STOP, over every screen while the app_driver indicator is on */
+  const drivingStrip = createDrivingStrip({ after: $('menubar'), api, events, toasts });
 
   const notif = createNotifCentre({ root: $('notifcenter'), api, events, toasts, prefs, dock, timers });
   const picker = createWallpaperPicker({ root: $('wallpicker'), prefs, toasts, reducedMotion });
@@ -243,6 +246,7 @@ function boot() {
 
   events.start();
   status.start();
+  drivingStrip.read();
   prefs.hydrate().then((changed) => {
     if (changed.length) picker.sync();
   }).catch((err) => console.warn('prefs hydrate', err && err.message));

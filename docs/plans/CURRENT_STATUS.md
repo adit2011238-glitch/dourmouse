@@ -496,3 +496,6 @@ Extensions, profiles, Chrome import, DRM readiness. Suite 7605 passed, 12 skippe
 
 ## 2026-10-05 Wave 3 C1 and C2 (findings #165 to #167)
 Stable element ids, agent follows the owner's active tab, N3 git hardening, user/model lock with Stop and Take control, editor typing, YouTube control. Seen live on isolated copies including real YouTube. Suite 7837 passed. Evidence EVIDENCE/167_c2_*.
+
+## 2026-10-05 Wave 3 complete (finding #168)
+Tool skill: new browser tools registered, look-alike descriptions, tool-use guide, Enter gates, calendar-aware slots, routing fixes. Suite 7934 passed. Not measured with a real model yet.

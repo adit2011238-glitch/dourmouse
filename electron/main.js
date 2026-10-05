@@ -3262,7 +3262,7 @@ ipcMain.handle("bridge:open_external", async (_evt, url) => {
   // browser ever turns out not to be Chrome for a real user and that
   // causes a real Google-sign-in problem (Chrome itself isn't required by
   // Google, only "not an embedded webview" is).
-  if (typeof url !== "string" || !/^https?:\/\//i.test(url)) return false;
+  if (typeof url !== "string" || !(/^https?:\/\//i.test(url) || policy.systemSettingsUrlAllowed(url))) return false;
   try {
     await shell.openExternal(url);
     return true;

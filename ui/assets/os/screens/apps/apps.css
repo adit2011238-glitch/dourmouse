@@ -1,0 +1,23 @@
+/* APPS. Everything is scoped to [data-screen="APPS"] so it cannot restyle the
+   chrome or another screen. Tints are color-mix() on --dm-active. */
+
+[data-screen="APPS"] .apps-note { margin-bottom: 12px; padding: 8px 12px; border-radius: 8px; font-size: var(--dm-text-sm); color: var(--dm-fg-body); border: 1px solid var(--os-edge-lo); background: rgba(255,255,255,.04); overflow-wrap: anywhere; }
+[data-screen="APPS"] .apps-note[hidden] { display: none; }
+[data-screen="APPS"] .apps-note[data-tone="ok"] { border-color: rgba(16,185,129,.4); }
+[data-screen="APPS"] .apps-note[data-tone="error"] { border-color: rgba(239,68,68,.45); color: var(--dm-error); }
+[data-screen="APPS"] #appsConfirm:not(:empty) { margin-bottom: 12px; }
+[data-screen="APPS"] .apps-gap { margin-top: 12px; }
+[data-screen="APPS"] .apps-help { margin: 2px 0 6px; font-size: var(--dm-text-xs); overflow-wrap: anywhere; }
+[data-screen="APPS"] .apps-block { display: block; font-size: var(--dm-text-xs); }
+[data-screen="APPS"] .apps-btns { display: flex; gap: 8px; margin-top: 8px; }
+[data-screen="APPS"] .apps-btns .os-btn[disabled] { opacity: .45; cursor: not-allowed; }
+[data-screen="APPS"] .os-row .os-btn[disabled] { opacity: .45; cursor: not-allowed; }
+[data-screen="APPS"] .apps-perms { display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap: 12px; margin-top: 8px; }
+[data-screen="APPS"] .apps-perm { display: flex; flex-direction: column; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--os-edge-lo); background: rgba(0,0,0,.16); }
+[data-screen="APPS"] .apps-perm-h { display: flex; align-items: center; gap: 8px; color: var(--dm-fg); font-size: var(--dm-text-base); }
+[data-screen="APPS"] .apps-perm .apps-btns { margin-top: auto; padding-top: 8px; }
+[data-screen="APPS"] .apps-pane-note { margin-top: 6px; padding: 6px 10px; border-radius: 8px; border: 1px solid color-mix(in srgb, var(--dm-active) 35%, transparent); background: color-mix(in srgb, var(--dm-active) 8%, transparent); font-size: var(--dm-text-xs); overflow-wrap: anywhere; }
+[data-screen="APPS"] .apps-pane-note[hidden] { display: none; }
+/* the shared dim token is about 2:1 on this background; informational text on this screen uses the body color */
+[data-screen="APPS"] .muted, [data-screen="APPS"] .st .st-d { color: var(--dm-fg-body); }
+[data-screen="APPS"] .lbl, [data-screen="APPS"] .st { color: var(--dm-fg-body); }

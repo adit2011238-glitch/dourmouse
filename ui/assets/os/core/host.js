@@ -45,7 +45,10 @@ export function createHost({ win = globalThis.window } = {}) {
        window-open handler, so that would spawn an unmanaged window. */
     openExternal(url) {
       const u = String(url || '');
-      if (!/^https?:\/\//i.test(u)) return false;
+      /* http(s), or exactly a macOS Privacy & Security pane (finding #169; the main process checks again) */
+      const settingsPane = /^x-apple\.systempreferences:com\.apple\.preference\.security\?Privacy_[A-Za-z]{1,40}$/.test(u);
+      if (!/^https?:\/\//i.test(u) && !settingsPane) return false;
+      if (settingsPane && kind === 'browser') return false; /* a plain browser tab cannot open it */
       const b = bridge();
       if (b && typeof b.open_external === 'function') {
         b.open_external(u);

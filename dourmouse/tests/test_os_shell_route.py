@@ -142,7 +142,7 @@ class TestStaticImportGraph:
     def test_every_built_screen_named_by_the_registry_has_an_entry_file(self):
         reg = (_OS / "core" / "registry.js").read_text(encoding="utf-8")
         named = set(re.findall(r"screens/([a-z0-9_-]+)/index\.js", reg))
-        assert len(named) == 18
+        assert len(named) == 19  # the mockup's eighteen plus APPS (F2)
         for folder in (_OS / "screens").iterdir():
             if folder.is_dir():
                 assert folder.name in named, f"screens/{folder.name} is not in the registry"

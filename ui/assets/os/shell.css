@@ -276,3 +276,17 @@ body[data-annotate="true"] [data-spec] { outline-color: color-mix(in srgb, var(-
 .os-btn.is-on, .os-btn[aria-pressed="true"] { border-color: var(--dm-active); color: var(--dm-active); }
 .os-btn--primary { border-color: transparent; }
 .os-btn--primary.is-on, .os-btn--primary[aria-pressed="true"] { color: var(--dm-active-ink); }
+
+/* The driving strip (phase F2): across the top, under the menu bar, while the model drives an app.
+   The shell moves down to make room, so the strip never covers a screen. --os-warn is the fixed warning colour. */
+#drivingstrip {
+  position: fixed; top: 28px; left: 0; right: 0; height: 28px; z-index: 940; box-sizing: border-box;
+  display: flex; align-items: center; gap: 10px; padding: 0 14px;
+  background: color-mix(in srgb, var(--os-warn) 22%, #0b0b0d); border-bottom: 1px solid color-mix(in srgb, var(--os-warn) 60%, transparent);
+  color: var(--dm-fg); font-size: var(--dm-text-sm);
+}
+#drivingstrip .ds-dot { width: 8px; height: 8px; border-radius: 999px; background: var(--os-warn); flex: none; }
+#drivingstrip .ds-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#drivingstrip .ds-detail { color: var(--dm-fg-body); }
+#drivingstrip .ds-stop { padding: 1px 12px; flex: none; }
+body[data-driving="true"] #shell { top: 56px; }

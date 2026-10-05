@@ -47,6 +47,14 @@ function navigationAllowed(url, port) {
 
 // Anything else is handed to the OS browser, and only for plain web links:
 // never file:, javascript:, data: or a custom scheme handler.
+// Finding #169: the APPS screen's permission buttons open exactly one kind of non-web link,
+// the macOS Privacy & Security panes. Nothing else outside http(s) is ever handed to the OS.
+const SYSTEM_SETTINGS_PRIVACY_RE = /^x-apple\.systempreferences:com\.apple\.preference\.security\?Privacy_[A-Za-z]{1,40}$/;
+
+function systemSettingsUrlAllowed(url) {
+  return typeof url === "string" && SYSTEM_SETTINGS_PRIVACY_RE.test(url);
+}
+
 function externalUrlAllowed(url) {
   try {
     const protocol = new URL(String(url)).protocol;
@@ -264,6 +272,7 @@ function addBookmark(list, entry) {
 }
 
 module.exports = {
+  systemSettingsUrlAllowed,
   isAppOrigin, permissionAllowed, navigationAllowed, externalUrlAllowed, APP_PERMISSIONS,
   paneUrlAllowed, isBlankUrl, isCrashReason, createLimiter, ZOOM_STEPS, nextZoom, zoomHost, safeFileName, uniqueFileName,
   isOpenableDownload, quarantineValue, whereFromPlist, percent, addVisit, updateVisitTitle, searchHistory,

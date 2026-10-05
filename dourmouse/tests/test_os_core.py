@@ -327,12 +327,14 @@ R.ms = Date.now() - t0;
 class TestRegistry:
     IMPORTS = "import { IDS, SCREENS, THREAD_SCREENS, DOCK, CONSOLE_LINKS, byId, bySlug } from 'core/registry.js';"
 
-    def test_registry_lists_exactly_the_eighteen_mockup_ids_in_mockup_order(self, tmp_path):
+    def test_registry_lists_the_eighteen_mockup_ids_in_mockup_order_plus_apps(self, tmp_path):
         mockup = _MOCKUP.read_text(encoding="utf-8")
         m = re.search(r"var ORDER = \[(.*?)\];", mockup, re.S)
         assert m, "the mockup no longer declares ORDER"
         expected = re.findall(r'"([A-Z]+)"', m.group(1))
         assert len(expected) == 18
+        # F2: APPS is the one screen beyond the mockup, in the System group right after SETTINGS
+        expected.insert(expected.index("SETTINGS") + 1, "APPS")
         out = run(tmp_path, "R.ids = IDS; R.slugs = SCREENS.map((s) => s.slug); R.threads = THREAD_SCREENS; R.dock = DOCK.map((d) => d[0]);", self.IMPORTS)
         assert out["ids"] == expected
         assert out["slugs"] == [i.lower() for i in expected]

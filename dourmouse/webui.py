@@ -8523,6 +8523,10 @@ def run_server(
     # connected HUD stream.
     events_hub = _SSEBroadcast()
     server.events_broadcast = events_hub
+    # F2: the shell's "Model is driving" strip follows the app_driver indicator on this hub.
+    from dourmouse.os_api import apps as _apps_api
+
+    _apps_api.bind_indicator_hub(events_hub)
     # v13.6: real push for the agent-swarm graph (Vision OS item 7's own
     # flagged gap — "the current implementation polls a snapshot every
     # 2s, not a genuine SSE event stream"). ActivityTracker now emits a

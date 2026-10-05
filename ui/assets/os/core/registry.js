@@ -1,4 +1,4 @@
-/* The 18 screens, written once. A screen builder never edits this file:
+/* The 18 mockup screens plus APPS (F2), written once. A screen builder never edits this file:
    each loader points at ../screens/<slug>/index.js, and a folder that does not
    exist yet fails to import, which the router renders as an honest "not built
    yet" state. Order is the mockup's (os_mockup.html ORDER). */
@@ -23,6 +23,8 @@ export const SCREENS = [
   S('NEWS', true, 'live headlines', () => import('../screens/news/index.js')),
   S('SECURITY', false, 'defensive posture', () => import('../screens/security/index.js')),
   S('SETTINGS', false, 'preferences', () => import('../screens/settings/index.js')),
+  /* F2: not one of the mockup's eighteen. It has no ICON entry, so its glyph is a raw path (four tiles). */
+  { ...S('APPS', false, 'app driving', () => import('../screens/apps/index.js')), icon: 'M4 4h6.5v6.5H4zM13.5 4H20v6.5h-6.5zM4 13.5h6.5V20H4zM13.5 13.5H20V20h-6.5z' },
   S('OFFICE', false, 'agents at work', () => import('../screens/office/index.js')),
 ];
 
