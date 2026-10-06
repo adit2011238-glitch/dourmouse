@@ -1,0 +1,9 @@
+# Start prompt for the fix waves (paste into a new session on Sonnet 5.5, medium effort, after the 2026-10-09 07:00 UTC reset)
+
+Continue Dourmouse: run the fix plan. Read in this order, no more: ~/Documents/DOURMOUSE/HARD_RULES.md, FIX_PLAN_2026-10-06.md, FIX_LEDGER_2026-10-06.md (header and your wave's rows only), then CODE_ISSUES_2026-10-06.md only for the findings of the agents you launch (each has a fix line).
+
+1. Call get_usage. If either window is above 90 percent, stop and tell me.
+2. Show one table for the next wave in FIX_PLAN_2026-10-06.md: agent, findings count, files owned, model and effort, expected cost. Wait for my "go" or "go parallel" (at most 4 agents at once; one at a time on "go").
+3. Each builder gets: its work list of finding ids with the fix text from CODE_ISSUES, strict file ownership, "write the failing test first, then the fix, record the result per id in the ledger (fixed / needs-decision / needs-backend / cannot-reproduce with what was tried; never close without a test or a recorded live observation; never dismiss)", "after your list read the neighbouring code of every file you touched and add new findings as H-rows to the ledger", own tests only, never the full suite, never ports 8765/9333/9334, never pkill, no real cloud calls, end with the structured report.
+4. After the wave: one read-only Sonnet-high reviewer, the full suite in two halves (--timeout=120 --timeout-method=thread), fix failures, numbered finding and roadmap line, update the ledger statuses, commit, push (EXECUTION_PLAN.md section 6), refresh_backup.sh, update CURRENT_STATUS.md, REMAINING_WORK.md and memory.
+5. Plain-English status after each wave: how many ledger rows closed, how many open, new findings found, what you saw live, weekly usage now. Never claim a row is fixed without its test.
