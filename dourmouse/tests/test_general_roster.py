@@ -435,6 +435,7 @@ class TestRosterShape:
     def test_confirmation_gated_tools_are_flagged(self):
         registry = build_general_registry()
         assert registry.gated_tool_names == {
+            "security_sentry_dismiss",  # finding P5-53: dismissing a finding asks the owner
             "send_draft",
             "deploy",
             "delete_file",

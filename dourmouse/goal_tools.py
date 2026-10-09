@@ -43,8 +43,14 @@ _TASK_ITEM_SCHEMA = {
 }
 
 
-def _resolve_depends_on(raw: list[str], created_ids: list[str], index: int) -> list[str] | str:
-    """Returns the resolved real-id list, or an error string."""
+def _resolve_depends_on(
+    raw: list[str], created_ids: list[str], index: int, known_ids: set[str] | None = None,
+) -> list[str] | str:
+    """Returns the resolved real-id list, or an error string.
+
+    ``known_ids`` are the task ids that already exist in THIS goal; a raw id
+    outside that set (a typo, another goal's task) would leave the task
+    PENDING forever, so it is refused (finding P3-27)."""
     resolved: list[str] = []
     for dep in raw or []:
         dep = str(dep)
@@ -57,6 +63,8 @@ def _resolve_depends_on(raw: list[str], created_ids: list[str], index: int) -> l
                 return f"ERROR: task {index} depends_on {dep!r}, which must reference an EARLIER task in this same list."
             resolved.append(created_ids[local_idx])
         else:
+            if dep not in (known_ids or set()) and dep not in created_ids:
+                return f"ERROR: task {index} depends_on {dep!r}, which is not a task of this goal."
             resolved.append(dep)
     return resolved
 
@@ -68,12 +76,17 @@ def _create_goal(arguments: dict[str, Any]) -> str:
     tasks_arg = arguments.get("tasks")
     if not isinstance(tasks_arg, list) or not tasks_arg:
         return "ERROR: create_goal requires a non-empty 'tasks' list of {description, depends_on} objects."
+    criteria = arguments.get("success_criteria") or None
+    if criteria is not None and (not isinstance(criteria, list) or not all(isinstance(c, str) and c.strip() for c in criteria)):
+        # A bare string would be stored as one string and later read one
+        # character at a time as 17 one-letter "criteria" (finding P3-27).
+        return "ERROR: success_criteria must be a list of non-empty strings, one per checkable condition."
     store = get_goal_store()
     try:
         goal = store.create_goal(
             objective,
             priority=str(arguments.get("priority") or "normal"),
-            success_criteria=arguments.get("success_criteria") or None,
+            success_criteria=criteria,
         )
     except ValueError as exc:
         return f"ERROR: {exc}"
@@ -112,13 +125,14 @@ def _add_tasks(arguments: dict[str, Any]) -> str:
     if not isinstance(tasks_arg, list) or not tasks_arg:
         return "ERROR: add_tasks requires a non-empty 'tasks' list of {description, depends_on} objects."
     created_ids: list[str] = []
+    known_ids = {t["id"] for t in store.list_tasks(goal_id)}
     for i, item in enumerate(tasks_arg):
         if not isinstance(item, dict):
             return f"ERROR: task {i} must be an object with at least 'description' ({i} task(s) already added)."
         description = str(item.get("description") or "").strip()
         if not description:
             return f"ERROR: task {i} is missing a non-empty 'description' ({i} task(s) already added)."
-        depends_on = _resolve_depends_on(item.get("depends_on") or [], created_ids, i)
+        depends_on = _resolve_depends_on(item.get("depends_on") or [], created_ids, i, known_ids)
         if isinstance(depends_on, str):
             return f"{depends_on} ({i} task(s) already added)."
         agent = str(item.get("assigned_agent") or "").strip() or None
@@ -206,7 +220,7 @@ def build_goals_subagent() -> Subagent:
                     "{description, depends_on, assigned_agent} objects. depends_on entries are "
                     "either a real task id, or '#N' meaning the Nth task in this same list "
                     "(0-indexed, must reference an earlier index). Independent tasks (no "
-                    "shared depends_on) run concurrently. Use this for real multi-step or "
+                    "shared depends_on) are not ordered against each other, but they run one after another in the background, not in parallel. Use this for real multi-step or "
                     "long-running work the user should not have to babysit turn by turn — not "
                     "for something answerable in this one turn."
                 ),

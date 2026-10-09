@@ -359,12 +359,32 @@ class OrchNet:
         }
 
     # -- persistence -------------------------------------------------------- #
-    def save(self, path: Path) -> None:
-        np.savez(
-            path,
-            W1=self.W1, b1=self.b1, w2=self.w2, b2=np.array([self.b2]),
-            W3=self.W3, b3=self.b3,
-        )
+    def save(self, path: Path, agent_names: Sequence[str] | None = None) -> None:
+        """Write the weights (and, when given, the agent vocabulary the
+        routing head's rows belong to) to ``path`` in one atomic rename.
+
+        The vocabulary lives INSIDE the weights file: with the weights in one
+        file and the names in meta.json, a reader landing between the two
+        writes paired new weights with the old names (finding P3-44)."""
+        path = Path(path)
+        tmp = path.with_name(path.stem + ".tmp.npz")
+        arrays: dict[str, Any] = {
+            "W1": self.W1, "b1": self.b1, "w2": self.w2, "b2": np.array([self.b2]),
+            "W3": self.W3, "b3": self.b3,
+        }
+        if agent_names is not None:
+            arrays["agent_names"] = np.array(json.dumps(list(agent_names)))
+        np.savez(tmp, **arrays)
+        os.replace(tmp, path)
+
+    @staticmethod
+    def saved_agent_names(path: Path) -> list[str] | None:
+        """The vocabulary stored with the weights, or None for a file written
+        before it was stored there."""
+        data = np.load(path)
+        if "agent_names" not in data.files:
+            return None
+        return [str(n) for n in json.loads(str(data["agent_names"]))]
 
     @classmethod
     def load(cls, path: Path, dim: int = _FEATURE_DIM,
@@ -413,17 +433,51 @@ class NeuroStore:
     )
     _ids: set[str] = field(default_factory=set, init=False, repr=False)
 
+    # (size, mtime_ns) of experiences.jsonl as this instance last saw it, so a
+    # change made by someone else (another process, a test) is noticed.
+    _seen: tuple[int, int] | None = field(default=None, init=False, repr=False)
+
     def __post_init__(self) -> None:
         self.base.mkdir(parents=True, exist_ok=True)
-        if self.experiences_path.is_file():
+        self._sync_ids()
+
+    def _file_signature(self) -> tuple[int, int] | None:
+        try:
+            st = self.experiences_path.stat()
+        except OSError:
+            return None
+        return (st.st_size, st.st_mtime_ns)
+
+    def _sync_ids(self) -> None:
+        """(Re)read the record ids when the file is not the one this instance
+        last wrote or read. A bad line is skipped; it does not stop the scan
+        (finding P3-43)."""
+        signature = self._file_signature()
+        if signature == self._seen and (signature is not None or not self._ids):
+            return
+        ids: set[str] = set()
+        if signature is not None:
+            for rec in self._read_records():
+                ids.add(str(rec.get("id", "")))
+        self._ids = ids
+        self._seen = signature
+
+    def _read_records(self) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
+        try:
+            text = self.experiences_path.read_text(errors="replace")
+        except OSError:
+            return out
+        for line in text.splitlines():
+            if not line.strip():
+                continue
             try:
-                for line in self.experiences_path.read_text(
-                    errors="replace"
-                ).splitlines():
-                    if line.strip():
-                        self._ids.add(str(json.loads(line).get("id", "")))
-            except (json.JSONDecodeError, OSError):
-                pass
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                continue  # one half-written line must not hide the others
+            if isinstance(rec, dict):
+                out.append(rec)
+        return out
 
     @property
     def experiences_path(self) -> Path:
@@ -468,27 +522,22 @@ class NeuroStore:
             "model": record.get("model"),
         }
         with self._lock:
+            self._sync_ids()
             if rec["id"] in self._ids:
                 return False
             self._ids.add(rec["id"])
             with self.experiences_path.open("a") as fh:
                 fh.write(json.dumps(rec) + "\n")
+            self._seen = self._file_signature()
             return True
 
     def count(self) -> int:
-        return len(self._ids)
+        with self._lock:
+            self._sync_ids()
+            return len(self._ids)
 
     def load_experiences(self) -> list[dict[str, Any]]:
-        if not self.experiences_path.is_file():
-            return []
-        out: list[dict[str, Any]] = []
-        try:
-            for line in self.experiences_path.read_text(errors="replace").splitlines():
-                if line.strip():
-                    out.append(json.loads(line))
-        except (json.JSONDecodeError, OSError):
-            return []
-        return out
+        return self._read_records()
 
     def apply_feedback(self, session_stem: str, rating: str) -> int:
         """Reweight every experience from a session with an operator rating.
@@ -503,7 +552,7 @@ class NeuroStore:
             raise ValueError("rating must be 'good' or 'bad'")
         updated = 0
         with self._lock:
-            recs = self.load_experiences()
+            recs = self._read_records()
             changed = False
             for rec in recs:
                 if rec.get("session_stem") == session_stem:
@@ -511,10 +560,16 @@ class NeuroStore:
                     updated += 1
                     changed = True
             if changed:
-                with self.experiences_path.open("w") as fh:
+                # Rewrite through a temp file and a rename, under the same
+                # lock log_experience appends under, so an append can never
+                # land in a half-truncated file.
+                tmp = self.experiences_path.with_name(self.experiences_path.name + ".tmp")
+                with tmp.open("w") as fh:
                     for rec in recs:
                         fh.write(json.dumps(rec) + "\n")
+                os.replace(tmp, self.experiences_path)
                 self._ids = {str(r.get("id", "")) for r in recs}
+                self._seen = self._file_signature()
                 meta = self._read_meta()
                 meta["dirty"] = True
                 self._write_meta(meta)
@@ -530,7 +585,9 @@ class NeuroStore:
             return {}
 
     def _write_meta(self, meta: dict[str, Any]) -> None:
-        self.meta_path.write_text(json.dumps(meta, indent=2))
+        tmp = self.meta_path.with_name(self.meta_path.name + ".tmp")
+        tmp.write_text(json.dumps(meta, indent=2))
+        os.replace(tmp, self.meta_path)
 
     # -- training ----------------------------------------------------------- #
     def train(self, agent_names: Sequence[str] | None = None) -> dict[str, Any]:
@@ -601,7 +658,7 @@ class NeuroStore:
             Xa[tr], y_ma[tr], y_aa[tr], wa[tr],
             Xa[va], y_ma[va], y_aa[va], wa[va],
         )
-        net.save(self.weights_path)
+        net.save(self.weights_path, agent_names=vocab)
         meta = self._read_meta()
         meta.update(
             {
@@ -659,12 +716,30 @@ _TRAIN_LOCK = threading.Lock()
 _MODEL_CACHE: dict[str, tuple[float, OrchNet, dict[str, Any]]] = {}
 
 
+_STORES: dict[str, NeuroStore] = {}
+_STORES_LOCK = threading.Lock()
+
+
 def open_store() -> NeuroStore | None:
-    """The live store, or None when the gate is off (honest NOT CONFIGURED)."""
+    """The live store, or None when the gate is off (honest NOT CONFIGURED).
+
+    One NeuroStore per directory for the whole process: a fresh instance per
+    call re-parsed the whole experience log on every prediction and gave each
+    caller its own lock, so two threads could append and rewrite the same
+    file at once (finding P3-43)."""
     if not orch_enabled():
         return None
     try:
-        return NeuroStore(default_store_dir())
+        base = default_store_dir()
+        key = str(base)
+        with _STORES_LOCK:
+            store = _STORES.get(key)
+            if store is None:
+                store = NeuroStore(base)
+                _STORES[key] = store
+            else:
+                base.mkdir(parents=True, exist_ok=True)
+            return store
     except OSError:
         return None
 
@@ -689,10 +764,16 @@ def _load_active_model() -> tuple[OrchNet, dict[str, Any]] | None:
     meta = store._read_meta()
     if store.count() < _MIN_EXPERIENCES:
         return None
-    agents = meta.get("agent_names") or []
-    if not agents:
-        return None
-    net = OrchNet.load(store.weights_path, n_agents=len(agents))
+    try:
+        agents = OrchNet.saved_agent_names(store.weights_path) or meta.get("agent_names") or []
+        if not agents:
+            return None
+        net = OrchNet.load(store.weights_path, n_agents=len(agents))
+    except (OSError, ValueError, KeyError):
+        return None  # a weights file caught mid-replace or unreadable: no routing evidence this time
+    if net.W3.shape[0] != len(agents):
+        return None  # weights and vocabulary from different trainings: never pair them
+    meta = {**meta, "agent_names": list(agents)}
     _MODEL_CACHE[key] = (mtime, net, meta)
     return net, meta
 

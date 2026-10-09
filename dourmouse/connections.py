@@ -342,7 +342,19 @@ def check_connections() -> dict[str, dict[str, Any]]:
         from urllib.parse import urlsplit
 
         _mp = urlsplit(_mem_remote if "://" in _mem_remote else "http://" + _mem_remote)
-        _mhost, _mport = _mp.hostname or "", _mp.port or 8765
+        try:
+            _mhost, _mport = _mp.hostname or "", _mp.port or 8765
+        except ValueError:
+            # Finding P3-15: urlsplit(...).port raises for a non-numeric or
+            # out-of-range port, which used to crash the whole report.
+            _mhost, _mport = "", 0
+    if _mem_remote and not _mport:
+        out["memory"] = {
+            "ok": False,
+            "detail": f"DOURMOUSE_MEMORY_REMOTE_URL {_mem_remote!r} is not a valid URL (bad port)",
+            "hint": "Fix the port in DOURMOUSE_MEMORY_REMOTE_URL in .env (for example host:8765), or unset it.",
+        }
+    elif _mem_remote:
         _mup = bool(_mhost) and _tcp_reachable(_mhost, _mport)
         out["memory"] = {
             "ok": _mup,
@@ -452,7 +464,13 @@ def format_connections() -> str:
     lines.append("")
     fb = freebuff_status()
     lines.append("FREEBUFF APP: " + ("running" if fb["app_running"] else "not running"))
-    lines.append(
-        "FREEBUFF API: " + ("ready" if fb.get("api_ready") else "app running · no authed account")
-    )
+    # Finding P3-14: this read "api_ready", which freebuff_status never sets,
+    # so it always said "no authed account". "ok" is the real readiness.
+    if fb.get("ok"):
+        api_line = "ready"
+    elif fb.get("app_running"):
+        api_line = "app running · no authed account"
+    else:
+        api_line = "not available (app not running)"
+    lines.append("FREEBUFF API: " + api_line)
     return "\n".join(lines)

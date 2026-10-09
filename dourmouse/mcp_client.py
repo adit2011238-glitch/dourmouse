@@ -46,11 +46,16 @@ already established for one broken approved self-extension).
 
 from __future__ import annotations
 
+import atexit
+import contextlib
 import itertools
 import json
+import logging
+import queue
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -114,6 +119,12 @@ class McpClient:
         self._ids = itertools.count(1)
         self._lock = threading.Lock()
         self.tools: list[dict[str, Any]] = []
+        # Lines are read on a worker thread so a request can wait with a real
+        # deadline (finding P4-36): a blocking readline() cannot be timed out.
+        self._lines: queue.Queue[str] = queue.Queue()
+        self._reader: threading.Thread | None = None
+        self._eof = False
+        self._closed = False
 
     def start(self, timeout: float = 15.0) -> None:
         """Spawn the server, perform the real ``initialize`` handshake,
@@ -172,18 +183,33 @@ class McpClient:
             return f"ERROR: {text or f'{tool_name} reported an error'}"
         return text
 
+    def alive(self) -> bool:
+        """False once closed, or when the server process has exited."""
+        if self._closed:
+            return False
+        return self._process is None or self._process.poll() is None
+
     def close(self) -> None:
-        for stream in (self._stdin, self._stdout):
-            try:
-                if stream is not None:
-                    stream.close()
-            except Exception:
-                pass
+        self._closed = True
+        # Order matters: closing a pipe that the reader thread is blocked in
+        # readline() on waits for that read, so stop the process first.
+        with contextlib.suppress(Exception):
+            if self._stdin is not None:
+                self._stdin.close()
         if self._process is not None:
             try:
                 self._process.terminate()
-            except Exception:
-                pass
+                self._process.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                self._process.kill()
+            except Exception as exc:  # noqa: BLE001 -- already gone; shutdown goes on
+                logging.getLogger(__name__).debug("MCP server %s: terminate failed: %s", self.name, exc)
+        if self._reader is not None:
+            self._reader.join(timeout=1)
+        if self._reader is None or not self._reader.is_alive():
+            with contextlib.suppress(Exception):
+                if self._stdout is not None:
+                    self._stdout.close()
 
     # -- real JSON-RPC transport ------------------------------------------ #
 
@@ -192,20 +218,42 @@ class McpClient:
         self._write(message)
 
     def _request(self, method: str, params: dict[str, Any], timeout: float) -> dict[str, Any]:
+        deadline = time.monotonic() + timeout
         with self._lock:
             msg_id = next(self._ids)
             self._write({"jsonrpc": "2.0", "id": msg_id, "method": method, "params": params})
-            line = self._readline(timeout)
-        if not line:
-            raise McpClientError(f"{self.name}: no response to {method!r} (server closed the connection)")
-        try:
-            message = json.loads(line)
-        except json.JSONDecodeError as exc:
-            raise McpClientError(f"{self.name}: bad JSON-RPC response to {method!r}: {exc}") from exc
+            while True:
+                line = self._readline(max(0.0, deadline - time.monotonic()))
+                if not line:
+                    raise McpClientError(f"{self.name}: no response to {method!r} (server closed the connection)")
+                try:
+                    message = json.loads(line)
+                except json.JSONDecodeError as exc:
+                    raise McpClientError(f"{self.name}: bad JSON-RPC response to {method!r}: {exc}") from exc
+                if not isinstance(message, dict):
+                    continue
+                if "method" in message:
+                    # A server notification or a server-to-client request: never
+                    # the answer to ours (finding P4-35).
+                    self._answer_server_request(message)
+                    continue
+                if message.get("id") != msg_id:
+                    continue  # a late reply to an earlier, timed-out request
+                break
         if "error" in message:
             err = message["error"] or {}
             raise McpClientError(f"{self.name}: {method} error: {err.get('message', err)}")
         return message.get("result") or {}
+
+    def _answer_server_request(self, message: dict[str, Any]) -> None:
+        """Reply to a server-initiated request (it carries an id); notifications need none."""
+        if "id" not in message:
+            return
+        if message.get("method") == "ping":
+            reply: dict[str, Any] = {"jsonrpc": "2.0", "id": message["id"], "result": {}}
+        else:
+            reply = {"jsonrpc": "2.0", "id": message["id"], "error": {"code": -32601, "message": "method not supported by this client"}}
+        self._write(reply)
 
     def _write(self, message: dict[str, Any]) -> None:
         try:
@@ -214,22 +262,32 @@ class McpClient:
         except (OSError, ValueError) as exc:
             raise McpClientError(f"{self.name}: failed writing to server: {exc}") from exc
 
+    def _pump(self) -> None:
+        """Worker thread: move lines from the server's stdout onto the queue; "" marks EOF."""
+        stdout = self._stdout
+        while True:
+            try:
+                line = stdout.readline()
+            except (OSError, ValueError):
+                line = ""
+            self._lines.put(line)
+            if not line:
+                return
+
     def _readline(self, timeout: float) -> str:
-        # Honest limitation, not hidden: stdio pipes have no portable
-        # non-blocking readline with a real timeout across platforms
-        # without extra machinery this codebase doesn't otherwise need
-        # (threads/selectors just to bound one blocking read). A genuinely
-        # hung external server blocks here, same as any other synchronous
-        # subprocess call in this codebase (e.g. code_backends.py's own
-        # CLI subprocess calls). ``timeout`` is accepted for interface
-        # symmetry with real time-budget call sites elsewhere but is not
-        # enforced on this path -- real, separate follow-on if an external
-        # MCP server is ever observed hanging in practice.
-        del timeout
+        """Next line from the server, "" on EOF; raises McpClientError after ``timeout`` seconds."""
+        if self._eof:
+            return ""
+        if self._reader is None:
+            self._reader = threading.Thread(target=self._pump, name=f"mcp-{self.name}-reader", daemon=True)
+            self._reader.start()
         try:
-            return self._stdout.readline()
-        except (OSError, ValueError) as exc:
-            raise McpClientError(f"{self.name}: failed reading from server: {exc}") from exc
+            line = self._lines.get(timeout=timeout)
+        except queue.Empty as exc:
+            raise McpClientError(f"{self.name}: timed out after {timeout:g}s waiting for the server") from exc
+        if not line:
+            self._eof = True
+        return line
 
 
 def load_external_mcp_servers(path: str | Path | None = None) -> dict[str, dict[str, Any]]:
@@ -263,19 +321,9 @@ def _wrap_external_tool(client: McpClient, tool: dict[str, Any]) -> ToolSpec:
     )
 
 
-def build_external_mcp_subagent(
-    servers: dict[str, dict[str, Any]] | None = None,
+def _build_external_mcp_subagent(
+    servers: dict[str, dict[str, Any]],
 ) -> tuple[Subagent | None, list[McpClient]]:
-    """Connect to every configured external MCP server (best-effort, one
-    server's failure never blocks another's) and return a real ``mcp_
-    tools`` Subagent wrapping every real tool they exposed, plus the list
-    of started ``McpClient``s (so the caller can ``close()`` them on
-    shutdown). Returns ``(None, [])`` when no server is configured or
-    every configured server failed to connect -- never a standing empty
-    subagent.
-    """
-    if servers is None:
-        servers = load_external_mcp_servers()
     tools: list[ToolSpec] = []
     started: list[McpClient] = []
     errors: list[str] = []
@@ -302,6 +350,67 @@ def build_external_mcp_subagent(
         description += f" {len(errors)} server(s) failed to connect: " + "; ".join(errors)
     subagent = Subagent(name="mcp_tools", domain="General", description=description, tools=tuple(tools))
     return subagent, started
+
+
+#: How long a failed connect attempt is remembered, so a server that hangs or
+#: crashes at start-up does not cost a full timeout on every registry build.
+_FAILURE_RETRY_SECONDS = 60.0
+_cache_lock = threading.Lock()
+#: (config key, subagent, clients, retry-not-before); only for the configured-servers path.
+_external_cache: tuple[str, Subagent | None, list[McpClient], float] | None = None
+
+
+def close_all_external_mcp() -> None:
+    """Close every cached external MCP server and forget the cache (shutdown, tests)."""
+    global _external_cache
+    with _cache_lock:
+        cached, _external_cache = _external_cache, None
+    if cached is not None:
+        for client in cached[2]:
+            client.close()
+
+
+atexit.register(close_all_external_mcp)
+
+
+def build_external_mcp_subagent(
+    servers: dict[str, dict[str, Any]] | None = None,
+) -> tuple[Subagent | None, list[McpClient]]:
+    """Connect to every configured external MCP server (best-effort, one
+    server's failure never blocks another's) and return a real ``mcp_
+    tools`` Subagent wrapping every real tool they exposed, plus the list
+    of started ``McpClient``s. Returns ``(None, [])`` when no server is
+    configured or every configured server failed to connect -- never a
+    standing empty subagent.
+
+    With no ``servers`` argument (the real config file) the result is cached
+    per process: ``build_general_registry()`` runs per delegated task, and
+    relaunching every server each time leaked one process per call (finding
+    P4-36). The cache is rebuilt when the config changes or a server died,
+    and ``close_all_external_mcp`` (also run at exit) closes the servers.
+    """
+    global _external_cache
+    if servers is not None:
+        return _build_external_mcp_subagent(servers)
+    loaded = load_external_mcp_servers()
+    key = json.dumps(loaded, sort_keys=True, default=str)
+    with _cache_lock:
+        cached = _external_cache
+        if cached is not None and cached[0] == key:
+            if cached[2] and all(c.alive() for c in cached[2]):
+                return cached[1], list(cached[2])
+            if not cached[2] and time.monotonic() < cached[3]:
+                return None, []
+        _external_cache = None
+    if cached is not None:
+        for client in cached[2]:
+            client.close()
+    if not loaded:
+        return None, []
+    subagent, clients = _build_external_mcp_subagent(loaded)
+    with _cache_lock:
+        _external_cache = (key, subagent, clients, time.monotonic() + _FAILURE_RETRY_SECONDS)
+    return subagent, list(clients)
 
 
 if __name__ == "__main__":

@@ -187,7 +187,7 @@ class TestRootRouteAndElectronStartPath:
 
     def test_electron_reads_a_safe_start_path_from_the_environment(self):
         src = (_UI.parent / "electron" / "main.js").read_text(encoding="utf-8")
-        assert "DOURMOUSE_ELECTRON_START_PATH" in src and src.count("${BASE_URL}${START_PATH}") == 3  # window, verify harness, console crash recovery (#171)
+        assert "DOURMOUSE_ELECTRON_START_PATH" in src and src.count("${BASE_URL}${START_PATH}") == 2  # createMainWindow (start-up and Dock activate share it: FB A-1), console crash recovery (#171)
         assert 'DEFAULT_START_PATH = "/"' in src, "the swap makes the shell the window's first page"
 
 

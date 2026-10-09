@@ -399,40 +399,53 @@ class TestClaudeMcpWiring:
 
 
 class TestCodexMcpRegistration:
-    def test_ensure_codex_mcp_registered_skips_add_when_already_listed(self, monkeypatch):
+    # Changed by FS1 (finding P4-33): these two tests pinned the old check,
+    # `"dourmouse" in <codex mcp list output>`, which never repaired a stale
+    # registration and registered without PYTHONPATH. The registration is now
+    # read back with `codex mcp get dourmouse --json` and compared exactly.
+    def test_ensure_codex_mcp_registered_skips_add_when_already_registered(self, monkeypatch):
+        import json as _json
+        import sys as _sys
+
         from dourmouse import mcp_bridge
 
         calls = []
 
-        class _Listed:
-            stdout = "dourmouse   /usr/bin/python -m dourmouse.mcp_bridge  enabled\n"
+        class _Got:
+            returncode = 0
+            stdout = _json.dumps({"transport": {
+                "command": _sys.executable, "args": ["-m", "dourmouse.mcp_bridge"],
+                "env": {"PYTHONPATH": mcp_bridge._repo_root()},
+            }})
 
         def _fake_run(argv, **kwargs):
             calls.append(argv)
-            return _Listed()
+            return _Got()
 
         monkeypatch.setattr(mcp_bridge.subprocess, "run", _fake_run)
         mcp_bridge.ensure_codex_mcp_registered("/usr/bin/codex")
-        assert calls == [["/usr/bin/codex", "mcp", "list"]]  # never re-added
+        assert calls == [["/usr/bin/codex", "mcp", "get", "dourmouse", "--json"]]  # never re-added
 
     def test_ensure_codex_mcp_registered_adds_when_missing(self, monkeypatch):
         from dourmouse import mcp_bridge
 
         calls = []
 
-        class _Empty:
-            stdout = "Name  Command\n"
+        class _Missing:
+            returncode = 1
+            stdout = ""
 
         def _fake_run(argv, **kwargs):
             calls.append(argv)
-            return _Empty()
+            return _Missing()
 
         monkeypatch.setattr(mcp_bridge.subprocess, "run", _fake_run)
         mcp_bridge.ensure_codex_mcp_registered("/usr/bin/codex")
-        assert calls[0] == ["/usr/bin/codex", "mcp", "list"]
+        assert calls[0] == ["/usr/bin/codex", "mcp", "get", "dourmouse", "--json"]
         assert calls[1][:3] == ["/usr/bin/codex", "mcp", "add"]
         assert "dourmouse" in calls[1]
         assert "-m" in calls[1] and "dourmouse.mcp_bridge" in calls[1]
+        assert f"PYTHONPATH={mcp_bridge._repo_root()}" in calls[1]
 
     def test_a_broken_codex_cli_never_raises(self, monkeypatch):
         from dourmouse import mcp_bridge
@@ -679,7 +692,13 @@ class TestClaudeSessionContinuity:
         assert len(seen) == 2
         # Same session both times — the session itself was never the
         # problem, only the MCP subprocess connection for that one call.
-        assert seen[0] == seen[1]
+        # Changed by FS1 (finding P3-11): the old assertion seen[0] == seen[1]
+        # pinned re-sending --session-id for a session the first attempt had
+        # already created (the CLI refuses that as "already in use"); the
+        # retry now resumes that same session id instead.
+        sid = seen[0][seen[0].index("--session-id") + 1]
+        assert "--session-id" not in seen[1]
+        assert seen[1][seen[1].index("--resume") + 1] == sid
 
     def test_mcp_connection_failure_retries_exactly_once_not_forever(self, monkeypatch):
         seen: list = []
@@ -1619,8 +1638,14 @@ class TestCliResolutionSurvivesAGuiLaunch:
         from dourmouse import code_backends
 
         source = inspect.getsource(code_backends)
-        # Both spawn sites (blocking _run_claude and streaming stream_claude).
-        assert source.count('"--strict-mcp-config"') == 2, (
+        # Changed by FS1 (finding P3-8): both spawn sites (blocking
+        # _run_claude_once and streaming stream_claude) now take their tool
+        # args from the one shared builder _claude_tool_args, which passes
+        # --strict-mcp-config unconditionally. The old assertion pinned two
+        # hand-kept copies, the duplication that let the deny list be
+        # dropped on a config failure.
+        assert source.count("= _claude_tool_args()") == 2
+        assert source.count('"--strict-mcp-config"') == 1, (
             "every claude invocation that loads Dourmouse's MCP config must "
             "also pass --strict-mcp-config, or the broken claude.ai Gmail "
             "connector comes back and wins again"

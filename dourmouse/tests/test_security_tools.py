@@ -59,7 +59,7 @@ class TestBuildSecuritySubagent:
         # Everything that changes the machine needs the owner (findings #103, #106).
         assert gated == {"lockdown_start", "lockdown_stop", "lockdown_edit", "security_kill_process", "security_quarantine_file",
                          "security_disable_startup_item", "security_restore", "security_block_domain",
-                         "security_unblock_domain", "security_privacy_mode"}
+                         "security_unblock_domain", "security_privacy_mode", "security_sentry_dismiss"}
         assert all(t.confirm_prompt is not None for t in subagent.tools if t.name in gated)
 
 

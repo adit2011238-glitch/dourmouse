@@ -111,7 +111,13 @@ def _posture(state: dict[str, Any]) -> list[SentryFinding]:
 
 def _changes(anomalies: list[Anomaly], state: dict[str, Any]) -> list[SentryFinding]:
     out: list[SentryFinding] = []
-    by_name = {p.get("name"): p for p in state.get("network_processes") or []}
+    # The baseline key of a network process is the lsof COMMAND column (cut to
+    # about 9 characters, spaces escaped as \x20), not psutil's full name, so a
+    # process is looked up by either (finding P5-51).
+    by_name: dict[Any, list[dict[str, Any]]] = {}
+    for p in state.get("network_processes") or []:
+        for key in {p.get("command"), p.get("name")} - {None}:
+            by_name.setdefault(key, []).append(p)
     persistence = {i["path"]: i for i in (state.get("persistence") or {}).get("items", []) if "path" in i}
     for a in anomalies:
         o = a.observation
@@ -144,13 +150,23 @@ def _changes(anomalies: list[Anomaly], state: dict[str, Any]) -> list[SentryFind
                 "A protection this Mac had is gone. Malware and remote-access tools often disable protections first.",
                 "Turn it back on unless you switched it off yourself.", o.key,
             ))
-        elif o.category == "listening_port" and a.kind in ("new", "changed"):
+        elif o.category == "listening_port" and a.kind == "new":
             command, proto, port = (o.key.split("|") + ["", "", ""])[:3]
             out.append(_finding(
                 "new_listening_port", "med", f"{command} started listening on {proto} port {port}",
                 f"This port was not open before ({o.value.lower() or 'exposure unknown'}). New listeners are how "
                 "backdoors and forgotten dev servers become reachable.",
                 f"If you did not start {command}, stop it; if you did, bind it to 127.0.0.1.", o.key, o.value,
+            ))
+        elif o.category == "listening_port" and a.kind == "changed":
+            command, proto, port = (o.key.split("|") + ["", "", ""])[:3]
+            before = (a.previous_value or "").lower() or "exposure unknown"
+            now = o.value.lower() or "exposure unknown"
+            out.append(_finding(
+                "listening_port_exposure_changed", "med", f"{command} on {proto} port {port} is now reachable differently",
+                f"This port was already open, but who can reach it changed: it was {before}, now {now}. A "
+                "service moving from this Mac only to all interfaces is how a dev server becomes reachable from the network.",
+                f"If you did not change how {command} listens, stop it; if you did, bind it to 127.0.0.1.", o.key, o.value,
             ))
         elif o.category == "persistence":
             item = persistence.get(o.key, {})
@@ -170,8 +186,19 @@ def _changes(anomalies: list[Anomaly], state: dict[str, Any]) -> list[SentryFind
                     f"{o.key} changed content since it was last seen; it now launches {prog}.",
                     "Check that the change came from an app update you expect.", o.key, o.value,
                 ))
+            elif a.kind == "gone":
+                out.append(_finding(
+                    "persistence_removed", "med", f"A startup item was removed: {o.key.rsplit('/', 1)[-1]}",
+                    f"{o.key} used to be set to start automatically and is gone. Cleaning up after malware and "
+                    "removing a security tool's launcher both look like this.",
+                    "If you did not remove it (or uninstall the app it belonged to), find out what did.", o.key, "gone",
+                ))
         elif o.category == "network_process" and a.kind == "new":
-            proc = by_name.get(o.key) or {}
+            candidates = by_name.get(o.key) or []
+            # Several processes can share one lsof command: the one that is not
+            # signed is the one worth reporting.
+            proc = next((c for c in candidates if (c.get("signature") or {}).get("kind") in ("unsigned", "adhoc", "unknown")
+                         and c.get("location") not in ("downloads", "temporary")), candidates[0] if candidates else {})
             sig = proc.get("signature") or {}
             if sig.get("kind") in ("unsigned", "adhoc", "unknown") and proc.get("location") not in ("downloads", "temporary"):
                 out.append(_finding(

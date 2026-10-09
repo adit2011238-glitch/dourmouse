@@ -17,6 +17,12 @@ Design decisions (see conversation / PROGRESS.md):
 - The trade-size confirmation threshold is *not* a rejection: a trade at or
   above the notional threshold is APPROVED but flagged ``requires_confirmation``
   so a human must say yes before Execution acts.
+
+Where it is enforced (finding P4-24, stated plainly): only where a caller
+runs ``evaluate_trade``. As of 2026-10-09 the broker order tools
+(``trading212_ops.t212_order``, ``mt5_ops.mt5_order``) do NOT call it; they
+rely on the human confirmation prompt alone, so these limits are not yet
+applied to real orders.
 """
 
 from __future__ import annotations
@@ -150,11 +156,20 @@ def _position_value_after(account: AccountState, trade: ProposedTrade) -> float:
     return existing_value + trade.signed_delta
 
 
+def _trade_sector(account: AccountState, trade: ProposedTrade) -> str:
+    """The sector the trade really adds to. Finding P4-25: for a symbol
+    already held, the position's own sector wins over the caller's label;
+    a BUY of a held "tech" name labelled "other" used to be added to
+    neither sector, so the concentration check saw no change at all."""
+    return account.sector_of(trade.symbol) or trade.sector
+
+
 def _sector_value_after(account: AccountState, trade: ProposedTrade) -> float:
     """Absolute sector exposure after the trade fills."""
+    sector = _trade_sector(account, trade)
     total = 0.0
     for sym, pos in account.positions.items():
-        if pos.sector != trade.sector:
+        if pos.sector != sector:
             continue
         if sym == trade.symbol:
             total += _position_value_after(account, trade)
@@ -223,7 +238,11 @@ def evaluate_trade(
     """
     decision = RiskDecision(approved=True, requires_confirmation=False)
 
-    # 1. Kill-switch — blocks all trading while tripped.
+    # 1. Kill-switch: blocks all trading while tripped. Finding P4-24: the
+    # account snapshot carries start_of_day_equity, so the daily-loss limit
+    # is evaluated here rather than relying on every caller to have run
+    # kill_switch.update() first (a fresh switch never tripped otherwise).
+    kill_switch.update(account.start_of_day_equity, account.equity)
     ks_ok = not kill_switch.tripped
     decision.checks["kill_switch"] = ks_ok
     if not ks_ok:
@@ -250,11 +269,12 @@ def evaluate_trade(
         )
 
     # 3. Max sector concentration — only blocks EXPOSURE INCREASES.
+    sector = _trade_sector(account, trade)
     existing_sector_abs = abs(
         sum(
             p.market_value
             for p in account.positions.values()
-            if p.sector == trade.sector
+            if p.sector == sector
         )
     )
     new_sector_abs = _sector_value_after(account, trade)
@@ -265,7 +285,7 @@ def evaluate_trade(
     if not sector_ok:
         decision.approved = False
         decision.reasons.append(
-            f"sector '{trade.sector}' exposure ${new_sector_abs:,.2f} exceeds max "
+            f"sector '{sector}' exposure ${new_sector_abs:,.2f} exceeds max "
             f"{config.max_sector_concentration_pct:.0%} of ${account.equity:,.2f} "
             f"(=${sector_limit_value:,.2f})"
         )

@@ -111,13 +111,18 @@ def parse_schedule(text: str) -> dict[str, Any]:
         }
 
     # --- "every <weekday>[s] [at HH:MM]" ---
-    m = re.fullmatch(r"every\s+([a-z]+)s?\s*(?:at\s+(.+))?", s)
-    if m and m.group(1) in _WEEKDAYS:
+    m = re.fullmatch(r"every\s+([a-z]+)\s*(?:at\s+(.+))?", s)
+    # "mondays" is "monday" plus a plural s, but "tues" and "thurs" are
+    # abbreviations that already end in s: try the word as written first.
+    day = m.group(1) if m else ""
+    if m and day not in _WEEKDAYS and day.endswith("s"):
+        day = day[:-1]
+    if m and day in _WEEKDAYS:
         time_s = _parse_clock(m.group(2)) if m.group(2) else "09:00"
         return {
             "kind": "weekday",
             "time": time_s,
-            "weekday": _WEEKDAYS[m.group(1)],
+            "weekday": _WEEKDAYS[day],
             "interval_seconds": None,
         }
 
@@ -187,6 +192,12 @@ def _now() -> datetime:
     return datetime.now()
 
 
+# Every load-modify-save of the schedule file runs under this lock: the runner
+# thread's mark_run and the tool/UI edits from request threads used to read the
+# same file and overwrite each other (finding P5-48).
+_STORE_LOCK = threading.RLock()
+
+
 class Schedules:
     """JSONL-backed store of user schedules (workspace/schedules.jsonl)."""
 
@@ -210,45 +221,67 @@ class Schedules:
         return out
 
     def _save(self, entries: list[dict[str, Any]]) -> None:
+        # Temp file then rename: a crash mid-write cannot leave a truncated
+        # file that _load would silently shorten.
         self._path.parent.mkdir(parents=True, exist_ok=True)
         lines = [json.dumps(e) for e in entries]
-        self._path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+        tmp = self._path.with_name(self._path.name + ".tmp")
+        try:
+            tmp.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+            os.replace(tmp, self._path)
+        except BaseException:
+            tmp.unlink(missing_ok=True)
+            raise
+
+    @staticmethod
+    def _next_id(entries: list[dict[str, Any]]) -> str:
+        """One more than the highest numeric suffix in use, so an id is never
+        reused after a removal (finding P5-46)."""
+        highest = 0
+        for e in entries:
+            m = re.fullmatch(r"sched-(\d+)", str(e.get("id") or ""))
+            if m:
+                highest = max(highest, int(m.group(1)))
+        return f"sched-{highest + 1:03d}"
 
     def add(self, tool: str, arguments: dict[str, Any], spec: dict[str, Any],
             schedule_text: str, created_at: str | None = None) -> dict[str, Any]:
-        entries = self._load()
-        entry = {
-            "id": f"sched-{len(entries) + 1:03d}",
-            "tool": tool,
-            "arguments": arguments,
-            "schedule_text": schedule_text,
-            "spec": spec,
-            "created_at": created_at or _now().isoformat(timespec="seconds"),
-            "last_run": None,
-            "enabled": True,
-        }
-        entries.append(entry)
-        self._save(entries)
-        return entry
+        with _STORE_LOCK:
+            entries = self._load()
+            entry = {
+                "id": self._next_id(entries),
+                "tool": tool,
+                "arguments": arguments,
+                "schedule_text": schedule_text,
+                "spec": spec,
+                "created_at": created_at or _now().isoformat(timespec="seconds"),
+                "last_run": None,
+                "enabled": True,
+            }
+            entries.append(entry)
+            self._save(entries)
+            return entry
 
     def list(self) -> list[dict[str, Any]]:
         return self._load()
 
     def remove(self, schedule_id: str) -> bool:
-        entries = self._load()
-        kept = [e for e in entries if e.get("id") != schedule_id]
-        if len(kept) == len(entries):
-            return False
-        self._save(kept)
-        return True
+        with _STORE_LOCK:
+            entries = self._load()
+            kept = [e for e in entries if e.get("id") != schedule_id]
+            if len(kept) == len(entries):
+                return False
+            self._save(kept)
+            return True
 
     def mark_run(self, schedule_id: str, at: datetime | None = None) -> None:
-        entries = self._load()
-        for e in entries:
-            if e.get("id") == schedule_id:
-                e["last_run"] = (at or _now()).isoformat(timespec="seconds")
-                break
-        self._save(entries)
+        with _STORE_LOCK:
+            entries = self._load()
+            for e in entries:
+                if e.get("id") == schedule_id:
+                    e["last_run"] = (at or _now()).isoformat(timespec="seconds")
+                    break
+            self._save(entries)
 
     def set_enabled(self, schedule_id: str, enabled: bool) -> bool:
         """Pause/resume (2026-09-18, the TIMETABLE UI's one-click pause) --
@@ -257,16 +290,17 @@ class Schedules:
         it is not the same as recreating it from scratch. _tick_once
         already skips any entry where enabled is falsy, so this alone is
         the complete implementation -- no runner change needed."""
-        entries = self._load()
-        changed = False
-        for e in entries:
-            if e.get("id") == schedule_id:
-                e["enabled"] = bool(enabled)
-                changed = True
-                break
-        if changed:
-            self._save(entries)
-        return changed
+        with _STORE_LOCK:
+            entries = self._load()
+            changed = False
+            for e in entries:
+                if e.get("id") == schedule_id:
+                    e["enabled"] = bool(enabled)
+                    changed = True
+                    break
+            if changed:
+                self._save(entries)
+            return changed
 
     def update_spec(self, schedule_id: str, schedule_text: str) -> dict[str, Any]:
         """Domain C acceptance test 4 (2026-09-18): "editing a routine's
@@ -286,18 +320,19 @@ class Schedules:
         unparseable schedule_text -- the SAME real validation the create
         path already gets, no double standard for an edit."""
         spec = parse_schedule(schedule_text)  # raises ValueError with an honest reason
-        entries = self._load()
-        updated: dict[str, Any] | None = None
-        for e in entries:
-            if e.get("id") == schedule_id:
-                e["spec"] = spec
-                e["schedule_text"] = schedule_text
-                updated = e
-                break
-        if updated is None:
-            raise ValueError(f"no such schedule: {schedule_id}")
-        self._save(entries)
-        return updated
+        with _STORE_LOCK:
+            entries = self._load()
+            updated: dict[str, Any] | None = None
+            for e in entries:
+                if e.get("id") == schedule_id:
+                    e["spec"] = spec
+                    e["schedule_text"] = schedule_text
+                    updated = e
+                    break
+            if updated is None:
+                raise ValueError(f"no such schedule: {schedule_id}")
+            self._save(entries)
+            return updated
 
 
 class SchedulerRunner:
@@ -351,7 +386,18 @@ class SchedulerRunner:
 
     def _loop(self) -> None:
         while not self._stop.wait(self._tick):
-            self._tick_once()
+            # One bad tick (a read error on the schedule file, a tracker that
+            # raises) must not end the thread: every user schedule would stop
+            # silently until the app restarted (finding P5-47).
+            try:
+                self._tick_once()
+            except Exception as exc:  # noqa: BLE001 - keep the scheduler alive, and say why
+                from dourmouse import obs
+
+                obs.log_error(
+                    source="scheduler", kind="tick_failed", what="schedule tick",
+                    detail=f"{type(exc).__name__}: {exc}",
+                )
 
     def _tick_once(self) -> None:
         now = self._now_fn()

@@ -205,7 +205,8 @@ _CREDENTIAL_ROWS = (
 # Characters that render as nothing. Inside a key they defeat every exact
 # and shape match while the key still works once a page strips them.
 _INVISIBLE = re.compile("[­​‌‍⁠﻿]")
-_INVISIBLE_OR_SPACE = "[\\s­​‌‍⁠﻿]*"
+_INVISIBLE_OR_SPACE_CLASS = "[\\s­​‌‍⁠﻿]"
+_INVISIBLE_OR_SPACE = _INVISIBLE_OR_SPACE_CLASS + "*"
 
 # A secret assigned to a name: GEMINI_API_KEY=..., "db_password": "...",
 # clientSecret: .... Found by locating the assignment first (a bounded name, an
@@ -290,7 +291,11 @@ def _spaced_pattern(value: str) -> re.Pattern[str]:
     breaks or a zero-width character). Every element is a literal, so the
     match is linear in the text."""
     tokens = [t for t in re.split(r"\s+", value) if t]
-    gap = _INVISIBLE_OR_SPACE[:-1] + "]+"  # white space inside the secret is one run, not one per space
+    # White space inside the secret is one run of one or more white space or
+    # invisible characters. Finding P2-1: this was built as
+    # _INVISIBLE_OR_SPACE[:-1] + "]+", which kept the class's own "]" and
+    # added another, so the joiner meant "one space then literal ]".
+    gap = _INVISIBLE_OR_SPACE_CLASS + "+"
     return re.compile(gap.join(_INVISIBLE_OR_SPACE.join(re.escape(c) for c in t) for t in tokens))
 
 

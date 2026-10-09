@@ -270,7 +270,7 @@ class TestEnableDisableRemove:
         (d,) = ext["enableDialog"]
         assert d["buttons"] == ["Enable", "Cancel"] and "Page Tagger" in d["message"] and "cookies" in d["detail"].lower()
         assert not d["detail"].startswith("Folder:")
-        assert ext["enabled"]["ok"] is True and ext["afterEnable"] == {"loadsAdded": 1, "enabled": True}
+        assert ext["enabled"]["ok"] is True and ext["afterEnable"] == {"loadsAdded": 2, "enabled": True}  # the active profile's session and the second one started in step 7: enabling reaches every started profile (FB A-6; this used to pin the single-session bug)
         assert ext["enableUnknown"]["ok"] is False
 
     def test_a_load_error_is_shown_with_the_engines_own_words(self, ext):

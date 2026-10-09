@@ -23,6 +23,7 @@ the real bridge, not a guess.
 
 from __future__ import annotations
 
+import os
 import re
 import threading
 import urllib.error
@@ -46,6 +47,47 @@ _FETCH_USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
 )
+
+
+def _header_values(headers: Any, name: str) -> list[str]:
+    """Every value of a response header (a header may be sent more than once)."""
+    get_all = getattr(headers, "get_all", None)
+    if callable(get_all):
+        return [str(v) for v in (get_all(name) or [])]
+    one = headers.get(name)
+    return [str(one)] if one else []
+
+
+_OWN_HOSTS = frozenset({"localhost", "127.0.0.1", "[::1]"})
+
+
+def _frame_ancestors_allow_us(sources: list[str]) -> bool:
+    """Whether a frame-ancestors source list lets THIS app embed the page.
+
+    ``'self'`` is the site's own origin and ``'none'`` is nobody, so neither lets us in (finding
+    P5-11: 'self' used to count as allowed, which is exactly the blank-iframe case this check exists
+    for). What lets the console in: ``*``, the ``http:`` scheme, or a host source naming this machine
+    (localhost or 127.0.0.1, with this app's port or a port wildcard). An empty list is 'none'."""
+    own_port = os.environ.get("DOURMOUSE_UI_PORT", "").strip()
+    own_port = own_port if own_port.isdigit() else "8765"
+    for source in sources:
+        src = source.strip().lower()
+        if src in ("*", "http:"):
+            return True
+        if src.startswith("'") or src.endswith(":") or not src:
+            continue  # 'self', 'none', another scheme such as https:
+        rest = src.split("://", 1)[1] if "://" in src else src
+        if "://" in src and src.split("://", 1)[0] != "http":
+            continue
+        authority = rest.split("/", 1)[0]
+        if authority.startswith("["):
+            end = authority.find("]") + 1
+            host, port = authority[:end], authority[end:].lstrip(":")
+        else:
+            host, _, port = authority.partition(":")
+        if host in _OWN_HOSTS and port in ("", "*", own_port):
+            return True
+    return False
 
 
 def check_frameable(url: str) -> dict[str, Any]:
@@ -79,35 +121,29 @@ def check_frameable(url: str) -> dict[str, Any]:
     except Exception as exc:  # noqa: BLE001 - honest: couldn't check, don't block on a guess
         return {"frameable": True, "reason": f"could not check: {exc}", "checked": False}
 
-    xfo = (headers.get("X-Frame-Options") or "").strip().upper()
-    if xfo in ("DENY", "SAMEORIGIN"):
+    xfo_values = [v.strip().upper() for raw in _header_values(headers, "X-Frame-Options") for v in raw.split(",")]
+    xfo = next((v for v in xfo_values if v in ("DENY", "SAMEORIGIN")), "")
+    if xfo:
         return {
             "frameable": False,
             "reason": f"X-Frame-Options: {xfo}",
             "checked": True,
         }
 
-    csp = headers.get("Content-Security-Policy") or ""
-    for directive in csp.split(";"):
-        directive = directive.strip()
-        if directive.lower().startswith("frame-ancestors"):
-            sources = directive.split()[1:]
-            # 'none' or anything that isn't a wildcard/'self' means this
-            # origin (an arbitrary localhost dev port) is not allowed —
-            # the common real-world case is an explicit allowlist of the
-            # site's own domains, which never includes ours.
-            if sources and not any(s in ("*", "'self'") for s in sources):
-                return {
-                    "frameable": False,
-                    "reason": f"Content-Security-Policy: {directive}",
-                    "checked": True,
-                }
-            if sources == ["'none'"]:
-                return {
-                    "frameable": False,
-                    "reason": "Content-Security-Policy: frame-ancestors 'none'",
-                    "checked": True,
-                }
+    # Every Content-Security-Policy header is enforced, so one that keeps us out is enough. Inside
+    # one header only the first frame-ancestors directive counts.
+    for policy in _header_values(headers, "Content-Security-Policy"):
+        for directive in policy.split(";"):
+            directive = directive.strip()
+            if directive.lower().startswith("frame-ancestors"):
+                sources = directive.split()[1:]
+                if not _frame_ancestors_allow_us(sources):
+                    return {
+                        "frameable": False,
+                        "reason": f"Content-Security-Policy: {directive}",
+                        "checked": True,
+                    }
+                break
 
     return {"frameable": True, "reason": "no blocking header found", "checked": True}
 
@@ -184,33 +220,42 @@ _HTML_TAG_RE = re.compile(rb"<html\b[^>]*>", re.IGNORECASE)
 # script can still get around simple text substitution. Ordered
 # longest/most-specific first so an earlier substitution never partially
 # consumes text a later one needs to match.
+_BUST_LEAD = rb"(?<![\w$.])"  # not the end of a longer name or a property: desktop.location, laptop != selfie
 _FRAME_BUST_REPLACEMENTS: list[tuple[bytes, bytes]] = [
-    (rb"top\s*!==\s*self", b"false"),
-    (rb"self\s*!==\s*top", b"false"),
-    (rb"top\s*!=\s*self", b"false"),
-    (rb"self\s*!=\s*top", b"false"),
-    (rb"window\.top\s*!==\s*window\.self", b"false"),
-    (rb"window\.self\s*!==\s*window\.top", b"false"),
-    (rb"window\.top\s*!=\s*window\.self", b"false"),
-    (rb"window\.self\s*!=\s*window\.top", b"false"),
-    (rb"top\.location", b"self.location"),
-    (rb"parent\.location", b"self.location"),
-    (rb"window\.top\b", b"window.self"),
-    (rb"window\.parent\b", b"window.self"),
+    (_BUST_LEAD + rb"top\s*!==\s*self\b", b"false"),
+    (_BUST_LEAD + rb"self\s*!==\s*top\b", b"false"),
+    (_BUST_LEAD + rb"top\s*!=\s*self\b", b"false"),
+    (_BUST_LEAD + rb"self\s*!=\s*top\b", b"false"),
+    (_BUST_LEAD + rb"window\.top\s*!==\s*window\.self\b", b"false"),
+    (_BUST_LEAD + rb"window\.self\s*!==\s*window\.top\b", b"false"),
+    (_BUST_LEAD + rb"window\.top\s*!=\s*window\.self\b", b"false"),
+    (_BUST_LEAD + rb"window\.self\s*!=\s*window\.top\b", b"false"),
+    (_BUST_LEAD + rb"top\.location\b", b"self.location"),
+    (_BUST_LEAD + rb"parent\.location\b", b"self.location"),
+    (_BUST_LEAD + rb"window\.top\b", b"window.self"),
+    (_BUST_LEAD + rb"window\.parent\b", b"window.self"),
 ]
 _FRAME_BUST_RES = [
     (re.compile(pattern), replacement) for pattern, replacement in _FRAME_BUST_REPLACEMENTS
 ]
+_SCRIPT_BLOCK_RE = re.compile(rb"(<script\b[^>]*>)(.*?)(</script\s*>)", re.IGNORECASE | re.DOTALL)
 
 
 def _neutralize_frame_busting(html_bytes: bytes) -> bytes:
     """Best-effort textual neutralization of common inline frame-busting
     code — see the real, disclosed limitations right above
     _FRAME_BUST_REPLACEMENTS for exactly what this does and does not
-    catch."""
-    for compiled, replacement in _FRAME_BUST_RES:
-        html_bytes = compiled.sub(replacement, html_bytes)
-    return html_bytes
+    catch. Only the text INSIDE <script> elements is rewritten (finding
+    P5-12: the whole document used to be, so prose such as "laptop.location"
+    or a code sample in a <pre> came out garbled), and only whole names."""
+
+    def _fix(match: "re.Match[bytes]") -> bytes:
+        body = match.group(2)
+        for compiled, replacement in _FRAME_BUST_RES:
+            body = compiled.sub(replacement, body)
+        return match.group(1) + body + match.group(3)
+
+    return _SCRIPT_BLOCK_RE.sub(_fix, html_bytes)
 
 
 # 2026-09-14 (feature 4, fix #2) — real, live-reported problem: the

@@ -124,8 +124,11 @@ def test_main_wires_the_policy():
     assert "installPermissionPolicy(session.defaultSession)" in src
     assert "installPermissionPolicy(paneView.webContents.session)" in src
     # every console-privileged window is locked, including the task and re-created ones
-    for target in ("win", "mainWindow", "mapWindow", "atlasWindow"):
+    # (the console itself is built in one function, createMainWindow, used by start-up and by the Dock
+    # "activate"; FB finding A-1 replaced the two copies, so it is locked as `win` there)
+    for target in ("win", "mapWindow", "atlasWindow"):
         assert f"lockToAppOrigin({target})" in src
+    assert "lockToAppOrigin(win);\n  wireConsoleKeys(win);" in src.split("function createMainWindow()", 1)[1].split("function onActivate()", 1)[0]
     assert '"will-navigate"' in src and '"will-redirect"' in src
     assert 'remote-debugging-address", "127.0.0.1"' in src
 

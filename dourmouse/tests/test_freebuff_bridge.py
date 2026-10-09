@@ -162,6 +162,17 @@ class _FailHandler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):  # quieter
         pass
 
+    def do_GET(self):
+        # Changed by FS1 (finding P3-21): dispatch now checks project_path
+        # against GET /api/projects first (the real app serves it), so the
+        # POST-failure fakes answer that read like the real app does.
+        body = json.dumps(PROJECTS).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_POST(self):
         body = b'{"error": "boom"}'
         self.send_response(500)
@@ -185,6 +196,10 @@ class _PostFailHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def do_GET(self):
+        # FS1 (P3-21): the project list the dispatch path validates against.
+        self._send(PROJECTS)
 
     def do_POST(self):
         if self.path == "/api/threads":

@@ -192,6 +192,9 @@ def _seconds_until(target_hhmm: str, now: datetime) -> float:
     return (target - now).total_seconds()
 
 
+_LATE_FIRE_TOLERANCE_S = 3 * 3600  # fire a missed slot up to 3 hours late
+
+
 class DailyReporter:
     """Daemon thread posting the daily briefing to the bus + tracker.
 
@@ -242,22 +245,34 @@ class DailyReporter:
     # -- loop ---------------------------------------------------------- #
 
     def _loop(self) -> None:
-        target = _report_time()
+        # The next fire time is remembered instead of re-derived from every
+        # sample: with a fresh "seconds until" each time, a sample that landed
+        # more than 1 s before the target slept past it, and the next sample
+        # saw tomorrow's target (finding P5-40).
+        next_fire: datetime | None = None
+        planned_for = ""
         while not self._stop.wait(1):
-            # Re-read the schedule each minute (cheap) so a live .env change
-            # takes effect without a restart; compute time-to-fire fresh.
+            # Re-read the schedule each pass (cheap) so a live .env change
+            # takes effect without a restart. A bad value backs off and keeps
+            # trying, including on the first pass (finding P5-41).
             try:
                 target = _report_time()
             except ValueError:
-                self._stop.wait(60)  # bad config: back off, keep trying
+                self._stop.wait(60)
                 continue
-            wait = _seconds_until(target, self._clock())
-            if wait > 1:
-                self._stop.wait(min(wait, 30))
+            now = self._clock()
+            if next_fire is None or target != planned_for:
+                next_fire = now + timedelta(seconds=_seconds_until(target, now))
+                planned_for = target
+            remaining = (next_fire - now).total_seconds()
+            if remaining > 1:
+                self._stop.wait(min(remaining, 30))
                 continue
-            self._fire()
-            # jump to tomorrow so we don't re-fire within the same minute
-            self._stop.wait(60)
+            # Due. A wake from sleep shortly after the target still fires; a
+            # long-overdue slot (laptop closed overnight) is skipped.
+            if -remaining <= _LATE_FIRE_TOLERANCE_S:
+                self._fire()
+            next_fire = now + timedelta(seconds=_seconds_until(target, now + timedelta(seconds=2)) + 2)
 
     def fire_now(self) -> None:
         """Build and post the briefing immediately (v5.22.13).

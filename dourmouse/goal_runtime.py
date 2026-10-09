@@ -157,22 +157,26 @@ class GoalRuntime:
             self._stop.wait(self._tick_seconds)
 
     def _recover_orphaned_tasks(self) -> None:
-        """A task found RUNNING at startup means the process died mid
-        execution — it is NOT still running. Never silently treat it as
-        continuing; route it through the normal retry/fail path instead
-        (spec: "never blindly repeat an external side effect")."""
+        """A task found RUNNING (or VERIFYING, the slow LLM pass after the
+        work) at startup means the process died mid execution, so it is NOT
+        still running. Never silently treat it as continuing; route it
+        through the normal retry/fail path instead (spec: "never blindly
+        repeat an external side effect")."""
         for goal in self._store.active_goals():
             for task in self._store.list_tasks(goal["id"]):
-                if task["status"] != "RUNNING":
+                if task["status"] not in ("RUNNING", "VERIFYING"):
                     continue
                 self._store.log_event(
                     goal["id"], "recovery_attempted",
-                    {"task_id": task["id"], "reason": "found RUNNING at worker startup"},
+                    {"task_id": task["id"], "reason": f"found {task['status']} at worker startup"},
                     task_id=task["id"],
                 )
                 if task["attempt_count"] < task["max_attempts"]:
+                    # No attempt is added here: _run_task already counted this
+                    # interrupted run when it marked the task RUNNING, and the
+                    # retry counts itself when it starts (finding P3-25).
                     self._store.update_task_status(
-                        task["id"], "RETRYING", increment_attempt=True,
+                        task["id"], "RETRYING",
                         error="worker restarted mid-execution",
                     )
                 else:
@@ -200,7 +204,7 @@ class GoalRuntime:
         runnable = (ready + retrying)[:_MAX_TASKS_PER_TICK]
         if not runnable:
             pending = [t for t in tasks if t["status"] == "PENDING"]
-            in_flight = any(t["status"] in ("READY", "RUNNING", "RETRYING") for t in tasks)
+            in_flight = any(t["status"] in ("READY", "RUNNING", "VERIFYING", "RETRYING") for t in tasks)
             if pending and not in_flight:
                 self._store.update_goal_status(
                     goal_id, "BLOCKED",

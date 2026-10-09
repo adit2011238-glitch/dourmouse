@@ -73,6 +73,7 @@ import json
 import os
 import subprocess
 import sys
+from pathlib import Path
 from typing import Any
 
 from dourmouse.dispatch import DispatchRegistry, Permission, ToolSpec, _execute_tool
@@ -214,11 +215,29 @@ class McpBridgeServer:
             except json.JSONDecodeError as exc:
                 print(f"dourmouse mcp_bridge: bad JSON-RPC line: {exc}", file=self._stderr)
                 continue
-            response = self._handle_message(message)
+            # Finding P4-34: a valid JSON line that is not an object (a
+            # batch array, a bare number) reached message.get() and raised
+            # AttributeError out of this loop, killing the server for the
+            # rest of the CLI session. Batches are answered as batches,
+            # anything else gets an Invalid Request error.
+            if isinstance(message, list) and message:
+                replies = [r for r in (self._handle_any(m) for m in message) if r is not None]
+                if replies:
+                    self._write(replies)
+                continue
+            response = self._handle_any(message)
             if response is not None:
                 self._write(response)
 
-    def _write(self, message: dict[str, Any]) -> None:
+    def _handle_any(self, message: Any) -> dict[str, Any] | None:
+        if not isinstance(message, dict):
+            return {
+                "jsonrpc": "2.0", "id": None,
+                "error": {"code": -32600, "message": "invalid request: expected a JSON-RPC object"},
+            }
+        return self._handle_message(message)
+
+    def _write(self, message: dict[str, Any] | list[dict[str, Any]]) -> None:
         self._stdout.write(json.dumps(message) + "\n")
         self._stdout.flush()
 
@@ -362,6 +381,13 @@ class McpBridgeServer:
             pass
 
 
+def _repo_root() -> str:
+    """The directory that must be on PYTHONPATH for ``-m dourmouse.mcp_bridge``
+    to import (dourmouse is not an installed package). One definition for
+    both the Claude config file and the Codex registration."""
+    return str(Path(__file__).resolve().parent.parent)
+
+
 def build_mcp_config_file(path: Any) -> None:
     """Write the --mcp-config JSON a CLI needs to launch this bridge as a
     subprocess. ``path`` is a pathlib.Path (or str); uses THIS process's
@@ -389,9 +415,7 @@ def build_mcp_config_file(path: Any) -> None:
     initialize handshake succeeded. Fix: hand the subprocess an explicit
     PYTHONPATH pointing at this repo's root, so the import resolves no
     matter what cwd the calling CLI process used."""
-    from pathlib import Path
-
-    repo_root = str(Path(__file__).resolve().parent.parent)
+    repo_root = _repo_root()
     config = {
         "mcpServers": {
             "dourmouse": {
@@ -422,21 +446,43 @@ def ensure_codex_mcp_registered(cli: str) -> None:
     output, not the environment). Worst case, Codex proceeds without the
     dourmouse tools available and answers accordingly.
     """
+    # Finding P4-33: the registration had no PYTHONPATH (the bug already
+    # fixed for Claude in build_mcp_config_file: dourmouse is not an
+    # installed package, so the bridge only imported when Codex happened to
+    # run from the repo root), and "already registered" was only
+    # `"dourmouse" in <mcp list output>`, so a stale entry (moved venv, old
+    # registration without PYTHONPATH) was never repaired. The registration
+    # is now read back and compared with exactly what this process would
+    # register; `codex mcp add` overwrites an existing entry of that name
+    # (checked against the real CLI with an isolated CODEX_HOME).
+    repo_root = _repo_root()
+    module_args = ["-m", "dourmouse.mcp_bridge"]
     try:
-        listed = subprocess.run(
-            [cli, "mcp", "list"], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=15
+        got = subprocess.run(
+            [cli, "mcp", "get", "dourmouse", "--json"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=15, check=False,
         )
     except (OSError, subprocess.TimeoutExpired):
         return
-    if "dourmouse" in (listed.stdout or ""):
-        return  # already registered — codex mcp add would just re-add it
+    if got.returncode == 0:
+        try:
+            transport = (json.loads(got.stdout or "{}") or {}).get("transport") or {}
+        except (json.JSONDecodeError, AttributeError):
+            transport = {}
+        if (
+            transport.get("command") == sys.executable
+            and transport.get("args") == module_args
+            and (transport.get("env") or {}).get("PYTHONPATH") == repo_root
+        ):
+            return  # already registered exactly as this process would register it
     try:
         subprocess.run(
-            [cli, "mcp", "add", "dourmouse", "--", sys.executable, "-m", "dourmouse.mcp_bridge"],
+            [cli, "mcp", "add", "dourmouse", "--env", f"PYTHONPATH={repo_root}",
+             "--", sys.executable, *module_args],
             capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=15,
         )
     except (OSError, subprocess.TimeoutExpired):
-        pass
+        pass  # best-effort, see docstring: Codex then runs without the bridge
 
 
 def main() -> None:

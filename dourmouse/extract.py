@@ -37,6 +37,16 @@ def extract_pdf_text(path: str | Path) -> str:
         return f"ERROR: no such file: {target}"
     try:
         reader = _pypdf().PdfReader(str(target))
+        # Finding P5-16: an encrypted PDF constructs fine and only raises
+        # FileNotDecryptedError once its pages are touched, which was
+        # outside this try. Many "encrypted" PDFs only carry an owner
+        # password and open with an empty user password, so that is tried.
+        if reader.is_encrypted and not reader.decrypt(""):
+            return (
+                "PDF READ FAILED: the PDF is password-protected (encrypted), "
+                "so nothing was extracted. Remove the password and retry."
+            )
+        page_list = list(reader.pages)
     except RuntimeError:
         raise
     except Exception as exc:  # noqa: BLE001 - encrypted/corrupt PDFs, honest
@@ -50,7 +60,7 @@ def extract_pdf_text(path: str | Path) -> str:
     # with blank pages instead of honestly saying so. real_text tracks just
     # the extracted content, separately from the markers used for display.
     real_text: list[str] = []
-    for i, page in enumerate(reader.pages, 1):
+    for i, page in enumerate(page_list, 1):
         try:
             extracted = page.extract_text() or ""
         except Exception as exc:  # noqa: BLE001
@@ -73,6 +83,20 @@ _DATE_RE = re.compile(
 )
 
 
+#: Total-line labels, most specific first. Word-bounded, and "total" is not
+#: matched when it is part of "subtotal", "sub-total" or "sub total".
+_TOTAL_LABELS = (
+    r"\bgrand\s+total\b",
+    r"\b(?<!sub-)(?<!sub )total\b",
+    r"\bamount\s+due\b",
+    r"\bbalance\s+due\b",
+    r"\bamount:",
+)
+
+#: Lines that are totals, taxes or sub-totals, not line items.
+_NOT_A_LINE_ITEM = re.compile(r"^(total|amount|balance|sub[- ]?total|tax|vat|grand)", re.I)
+
+
 def extract_receipt(path: str | Path) -> str:
     """Parse a receipt/invoice PDF into structured fields (best-effort).
 
@@ -90,13 +114,19 @@ def extract_receipt(path: str | Path) -> str:
 
     date = _DATE_RE.search(text)
     total = None
-    for label in ("total", "amount due", "grand total", "balance due", "amount:"):
-        for m in re.finditer(label + r"[^\n]*" + _CURRENCY, text, re.I):
-            amt = re.search(_CURRENCY, m.group(0))
-            if amt:
-                total = amt.group(0)
-                break
-        if total:
+    # Finding P5-15: "total" used to match inside "Subtotal", and the first
+    # hit in text order won, so the subtotal (printed before the real total)
+    # was reported. Labels are now whole words, a sub-total in any spelling
+    # is skipped, the most specific label is tried first, and the LAST
+    # matching line wins (the final total comes after the running ones).
+    for label in _TOTAL_LABELS:
+        hits = [
+            amt.group(0)
+            for m in re.finditer(label + r"[^\n]*?(?:" + _CURRENCY + ")", text, re.I)
+            if (amt := re.search(_CURRENCY, m.group(0)))
+        ]
+        if hits:
+            total = hits[-1]
             break
     if total is None:
         # Last line carrying a currency amount often IS the total.
@@ -112,7 +142,7 @@ def extract_receipt(path: str | Path) -> str:
     items = []
     for ln in first_lines:
         m = re.search(_CURRENCY + r"\s*$", ln)
-        if m and not re.search(r"^(total|amount|balance|subtotal|tax|grand)", ln, re.I):
+        if m and not _NOT_A_LINE_ITEM.search(ln):
             items.append(ln[:120])
     lines.append(f"- line items ({len(items)}):")
     lines.extend("    " + it for it in items[:20])

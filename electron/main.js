@@ -189,6 +189,32 @@ async function staleOwnerGate() {
   }
 }
 
+// The pid file is only a hint written at spawn. A pid in it may belong to an unrelated process by
+// now (pids are reused), so it is only ever trusted after two checks (finding A-7): that process is
+// the one listening on this app's port, and its command line is the Dourmouse server.
+function runText(cmd, args) {
+  return new Promise((resolve) => {
+    execFile(cmd, args, { timeout: 4000, maxBuffer: 1 << 20 }, (err, stdout) => resolve(err ? "" : String(stdout || "")));
+  });
+}
+
+async function pidIsOurServer(pid) {
+  const listeners = await runText("/usr/sbin/lsof", ["-nP", `-iTCP:${PORT}`, "-sTCP:LISTEN", "-Fp"]);
+  const listening = listeners.split("\n").some((line) => line === `p${pid}`);
+  if (!listening) return false;
+  const command = await runText("/bin/ps", ["-o", "command=", "-p", String(pid)]);
+  return command.includes("dourmouse.webui");
+}
+
+function removeServerPidFile(onlyIfPid) {
+  try {
+    if (onlyIfPid !== undefined && parseInt(fs.readFileSync(serverPidFile(), "utf8"), 10) !== onlyIfPid) return;
+    fs.unlinkSync(serverPidFile());
+  } catch (_exc) {
+    /* no file, or already replaced by a newer server's pid */
+  }
+}
+
 async function stopStaleServer() {
   let pid = 0;
   try {
@@ -196,7 +222,7 @@ async function stopStaleServer() {
   } catch (_exc) {
     pid = 0;
   }
-  if (!pid || pid === process.pid) {
+  if (!pid || pid === process.pid || !(await pidIsOurServer(pid))) {
     throw new Error(
       `A leftover Dourmouse server on port ${PORT} needs its owner secret and this launch does not have it. ` +
       "Quit that process (Activity Monitor, a Python process running dourmouse.webui) and open the app again."
@@ -213,6 +239,7 @@ async function stopStaleServer() {
   if (await pingServer(`${BASE_URL}/workspace`)) {
     throw new Error(`The leftover server on port ${PORT} did not stop. Quit it and open the app again.`);
   }
+  removeServerPidFile(pid);
 }
 
 async function ensureServer() {
@@ -401,6 +428,7 @@ let serverFailedStarts = 0;
 function onServerExit(proc, code, signal, error) {
   if (proc._dmExited) return;
   proc._dmExited = true;
+  removeServerPidFile(proc.pid); // a dead server's pid must not be kept: it may be reused by anything
   if (proc._dmReady) serverFailedStarts = 0;
   else serverFailedStarts += 1;
   proc._dmExit = { code, signal, error: error ? String(error.message || error) : "" };
@@ -731,6 +759,8 @@ function buildTrayIcon(micEnabled, cameraEnabled) {
 
 let tray = null;
 
+const FETCH_JSON_TIMEOUT_MS = 5000;
+
 async function fetchJson(url, options) {
   // Finding #162: the tray's calls to the owner-only routes (vision kill switch) carry the
   // per-launch secret when this app spawned the server.
@@ -742,14 +772,24 @@ async function fetchJson(url, options) {
       let body = "";
       res.on("data", (chunk) => (body += chunk));
       res.on("end", () => {
+        let parsed;
         try {
-          resolve(JSON.parse(body));
+          parsed = JSON.parse(body);
         } catch (exc) {
-          reject(exc);
+          reject(res.statusCode >= 400 ? new Error(`the server answered HTTP ${res.statusCode}`) : exc);
+          return;
         }
+        // Finding A-8: an error answer is an error, not a result with a missing field.
+        if (res.statusCode >= 400) {
+          const why = parsed && typeof parsed.error === "string" ? `: ${parsed.error.slice(0, 200)}` : "";
+          reject(new Error(`the server answered HTTP ${res.statusCode}${why}`));
+          return;
+        }
+        resolve(parsed);
       });
     });
     req.on("error", reject);
+    req.setTimeout(FETCH_JSON_TIMEOUT_MS, () => req.destroy(new Error(`the server did not answer within ${FETCH_JSON_TIMEOUT_MS / 1000} s`)));
     if (options && options.body) req.write(options.body);
     req.end();
   });
@@ -770,6 +810,23 @@ async function postKillSwitch(action, enabled) {
   return result.kill_switch;
 }
 
+// A tray click that asks the server to change the privacy switch. When the server cannot do it
+// (stopped, restarting, refusing) the owner is told so, in words, instead of nothing happening
+// (finding A-8). Either way the tray is repainted from what the server really says.
+async function runKillSwitchAction(what, action) {
+  try {
+    const state = await action();
+    if (!state || typeof state !== "object") throw new Error("the server sent no switch state");
+  } catch (exc) {
+    log(`tray: "${what}" failed:`, (exc && exc.message) || exc);
+    dialog.showErrorBox(
+      "Dourmouse privacy switch",
+      `${what} did NOT go through: ${(exc && exc.message) || exc}.\n\nThe switch was not changed. Try again in a few seconds, or switch it off from the console's privacy controls.`
+    );
+  }
+  await refreshTray();
+}
+
 async function refreshTray() {
   if (!tray) return;
   let state;
@@ -786,29 +843,20 @@ async function refreshTray() {
   const menu = Menu.buildFromTemplate([
     {
       label: "Kill camera + mic NOW",
-      click: async () => {
-        await postKillSwitch("kill_all");
-        refreshTray();
-      },
+      click: () => runKillSwitchAction("Kill camera and microphone", () => postKillSwitch("kill_all")),
     },
     { type: "separator" },
     {
       label: "Mic enabled",
       type: "checkbox",
       checked: state.mic_enabled,
-      click: async () => {
-        await postKillSwitch("set_mic", !state.mic_enabled);
-        refreshTray();
-      },
+      click: () => runKillSwitchAction("Change the microphone switch", () => postKillSwitch("set_mic", !state.mic_enabled)),
     },
     {
       label: "Camera enabled",
       type: "checkbox",
       checked: state.camera_enabled,
-      click: async () => {
-        await postKillSwitch("set_camera", !state.camera_enabled);
-        refreshTray();
-      },
+      click: () => runKillSwitchAction("Change the camera switch", () => postKillSwitch("set_camera", !state.camera_enabled)),
     },
     { type: "separator" },
     { label: "Quit", click: () => app.quit() },
@@ -954,7 +1002,13 @@ function makeStore(file, fallback, { mode: fileMode = 0, lazy = false, dir = bro
     } catch (exc) {
       const aside = `${target()}.corrupt-${Date.now()}`;
       log(`browser store ${file} is corrupt (${exc.message}); keeping it as ${path.basename(aside)} and starting empty`);
-      fs.renameSync(target(), aside);
+      try {
+        fs.renameSync(target(), aside);
+      } catch (renameExc) {
+        // A volume that refuses the rename must not make every reader of this store throw: the
+        // store starts empty either way (finding A-12). The corrupt file stays where it is.
+        log(`browser store ${file}: the corrupt file could not be set aside (${renameExc.message || renameExc}); starting empty anyway`);
+      }
       data = fresh();
     }
     return data;
@@ -1048,7 +1102,12 @@ let nextTabId = 1;
 const closedTabs = []; // newest last: { url, title, index }
 
 const activeTab = () => tabs.get(activeTabId) || null;
-const liveContents = (tab) => (tab && tab.view && !tab.view.webContents.isDestroyed() ? tab.view.webContents : null);
+// A view whose window was closed under it can lose its webContents altogether (it reads undefined),
+// which is what "gone" means here too.
+const liveContents = (tab) => {
+  const wc = tab && tab.view && tab.view.webContents;
+  return wc && !wc.isDestroyed() ? wc : null;
+};
 const tabForContents = (wc) => {
   if (!wc) return null;
   for (const t of tabs.values()) if (t.view.webContents === wc) return t;
@@ -2840,6 +2899,16 @@ function startExtensions(ses) {
   extSessionInit.set(ses, run);
 }
 
+// Loads one approved extension into EVERY pane session that was started (one per profile used so
+// far), the way disable and remove unload it from every one (finding A-6). A session that starts
+// later loads the enabled ones itself in startExtensions.
+async function loadExtensionIntoAll(entry) {
+  const targets = [...extSessionList];
+  const active = paneSession();
+  if (active && !targets.includes(active)) targets.push(active);
+  for (const ses of targets) await loadExtensionInto(ses, entry);
+}
+
 function extensionList() {
   const ses = paneSession();
   return {
@@ -2918,7 +2987,7 @@ async function addExtensionFlow() {
     return { ok: false, error: added.error };
   }
   saveExtRegistry(added.registry);
-  await loadExtensionInto(paneSession(), entry);
+  await loadExtensionIntoAll(entry);
   schedulePush();
   return { ok: true, extension: extLib.publicView(entry, statusMap(paneSession()).get(entry.id)) };
 }
@@ -2934,7 +3003,7 @@ async function enableExtensionFlow(id) {
   }
   const next = extLib.setEnabled(extRegistry(), id, true);
   saveExtRegistry(next.registry);
-  await loadExtensionInto(paneSession(), { ...entry, enabled: true });
+  await loadExtensionIntoAll({ ...entry, enabled: true });
   schedulePush();
   return { ok: true, extension: extLib.publicView({ ...entry, enabled: true }, statusMap(paneSession()).get(id)) };
 }
@@ -3030,6 +3099,11 @@ async function removeProfileFlow(rawName) {
     detail: `Its saved passwords (${counts.passwords}), bookmarks (${counts.bookmarks}), history (${counts.history}), site permissions, cookies and logins are deleted from this Mac. This cannot be undone.`,
   });
   if (!ok) return { ok: false, cancelled: true, error: "cancelled" };
+  // The registry was read before the dialog; a profile switch while it was open (the switch is not
+  // behind the native dialog) would otherwise be undone by saving the old copy, and the profile
+  // that just became active could be deleted under the owner. Decide again with today's registry.
+  const stillOk = profLib.removeProfile(profileRegistry, name);
+  if (!stillOk.ok) return { ok: false, error: `${stillOk.error} (the profiles changed while the confirmation was open; nothing was removed)` };
   const partition = profLib.partitionFor(name);
   profileStores.delete(name);
   try {
@@ -3044,7 +3118,7 @@ async function removeProfileFlow(rawName) {
   } catch (exc) {
     log("profile storage could not be cleared:", exc.message || exc);
   }
-  saveProfileRegistry(next.registry);
+  saveProfileRegistry(stillOk.registry);
   registryStore.flush();
   schedulePush();
   return { ok: true };
@@ -3071,9 +3145,17 @@ ipcMain.handle("profile:remove", (evt, name) => {
 const sqliteReader = impLib.makeSqliteReader({ execFileSync: require("child_process").execFileSync, requireModule: (n) => require(n) });
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
+function profileChangedDuringImport(wasProfile) {
+  return {
+    ok: false,
+    error: `The active profile changed from "${wasProfile}" to "${activeProfileName}" while the confirmation was open, so nothing was imported. Start the import again in the profile you want.`,
+  };
+}
+
 async function importChromeFlow(want) {
   const w = { bookmarks: want && want.bookmarks !== false, history: want && want.history !== false };
   if (!w.bookmarks && !w.history) return { ok: false, error: "Choose bookmarks, history or both." };
+  const intoProfile = activeProfileName; // the lists below are this profile's: the write must go to the same one (finding A-9)
   const dir = await pickNatively({
     title: "Choose a Chrome profile folder", message: "Pick the Chrome profile folder (for example Default). Dourmouse reads its Bookmarks and History files and nothing else.",
     buttonLabel: "Choose", properties: ["openDirectory"], defaultPath: path.join(app.getPath("home") || "", "Library", "Application Support", "Google", "Chrome"),
@@ -3093,6 +3175,7 @@ async function importChromeFlow(want) {
     detail: `${lines.join("\n")}\n\nChrome's files are read, never changed. Passwords, cookies and anything else in that folder are not touched.`,
   });
   if (!ok) return { ok: false, cancelled: true, error: "cancelled" };
+  if (activeProfileName !== intoProfile) return profileChangedDuringImport(intoProfile);
   if (bm) bookmarkStore.set(bm.list);
   if (hi) historyStore.set(hi.list);
   schedulePush();
@@ -3101,6 +3184,7 @@ async function importChromeFlow(want) {
 
 async function importPasswordsFlow() {
   if (!cipher.available()) return { ok: false, error: "This Mac's secure storage is not available, so no password can be imported. Nothing is stored without encryption." };
+  const intoProfile = activeProfileName; // the passwords go into this profile's vault: it must still be the active one after the dialog
   const file = await pickNatively({
     title: "Choose a Chrome password export", message: "Pick the CSV file you exported from Chrome (Settings, Passwords, Export). Dourmouse reads it once and never copies it.",
     buttonLabel: "Choose", properties: ["openFile"], filters: [{ name: "Chrome password export (CSV)", extensions: ["csv"] }],
@@ -3126,6 +3210,7 @@ async function importPasswordsFlow() {
       "It holds your passwords in plain text, so delete it when this is done.",
   });
   if (!ok) return { ok: false, cancelled: true, error: "cancelled" };
+  if (activeProfileName !== intoProfile) return profileChangedDuringImport(intoProfile);
   const result = impLib.importPasswords(vault, parsed.rows);
   fillCache.clear();
   schedulePush();
@@ -3574,10 +3659,26 @@ function openTaskWindow(taskId, routePath, { title, width = 980, height = 760 } 
   return true;
 }
 
+// An agent name is a short word (mail, agent_smith). Anything else would change which same-origin
+// path a window that carries the privileged preload loads (finding A-10).
+const AGENT_NAME_RE = /^[A-Za-z0-9_-]{1,40}$/;
 ipcMain.handle("bridge:open_agent", (_evt, name) => {
   name = (name || "").toString().trim();
-  if (!name) return false;
-  return openTaskWindow(name, `/agent/${name}`, { title: `AGENT // ${name.toUpperCase()}` });
+  if (!AGENT_NAME_RE.test(name)) return false;
+  return openTaskWindow(name, `/agent/${encodeURIComponent(name)}`, { title: `AGENT // ${name.toUpperCase()}` });
+});
+
+// Finding A-2: the console's STUDY and PROJECT entries call these when the shell offers them; the
+// browser fallback (window.open) is refused by lockToAppOrigin, so without them they did nothing.
+// Same windows, same ids as dourmouse/desktop.py's open_study and open_project.
+ipcMain.handle("bridge:open_study", () => openTaskWindow("study", "/study", { title: "STUDY" }));
+const PROJECT_TAB_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+ipcMain.handle("bridge:open_project", (_evt, tabId, name) => {
+  if (typeof tabId !== "string") return false;
+  tabId = tabId.trim();
+  if (!PROJECT_TAB_ID_RE.test(tabId)) return false;
+  const label = (name || tabId).toString().replace(/\s+/g, " ").trim().slice(0, 28);
+  return openTaskWindow(`project:${tabId}`, `/?project=${encodeURIComponent(tabId)}`, { title: `PROJECT // ${label.toUpperCase()}` });
 });
 
 ipcMain.handle("bridge:open_all_hands", (_evt, runId, goal) => {
@@ -3632,6 +3733,66 @@ ipcMain.handle("bridge:open_map", () => {
 // App lifecycle
 // --------------------------------------------------------------------- //
 
+// The console window. Start-up and the Dock "activate" both come through here, so a console made
+// again after the owner closed it gets the same wiring: saved geometry, the resize handler that keeps
+// the pane following the window, and the active pane view attached to it (finding A-1).
+function createMainWindow() {
+  const geometry = readWindowState();
+  const win = new BrowserWindow({
+    width: Number(geometry.width) || 1440,
+    height: Number(geometry.height) || 900,
+    x: Number.isFinite(geometry.x) ? geometry.x : undefined,
+    y: Number.isFinite(geometry.y) ? geometry.y : undefined,
+    minWidth: 1024,
+    minHeight: 680,
+    title: "DOURMOUSE // CENTRAL AGENT DISPATCH",
+    webPreferences: { preload: PRELOAD, contextIsolation: true },
+  });
+  mainWindow = win;
+  lockToAppOrigin(win);
+  wireConsoleKeys(win);
+  wireConsoleRecovery(win);
+  win.loadURL(`${BASE_URL}${START_PATH}`);
+  if (geometry.maximized) win.maximize();
+  win.on("close", persistMainWindowGeometry);
+  // The red button hides the console instead of destroying it (a tray-resident app, like every Mac
+  // app of this kind). Destroying it destroyed the views attached to it, which are the pane's tabs
+  // and the pages the browser agent works in: the next Dock click then threw "Can't add a destroyed
+  // child view" while rebuilding the console and the whole main process stopped on that error box
+  // (seen live in an isolated copy of the app). A real quit still closes it.
+  win.on("close", (evt) => {
+    if (serverQuitting || win !== mainWindow) return;
+    evt.preventDefault();
+    win.hide();
+  });
+  win.on("resize", () => {
+    if (win === mainWindow && paneView && paneVisible) paneView.setBounds(paneBounds());
+  });
+  try {
+    attachActiveView(); // a pane that was open when the old console went away follows the new window
+  } catch (exc) {
+    // Views that died with the old window cannot be attached again: open a fresh pane instead of
+    // leaving the app stuck (a main-process exception stops it behind a native error box).
+    log("the pane's views could not be attached to the new console; opening a fresh pane:", (exc && exc.message) || exc);
+    closeAllTabs();
+    ensurePaneView();
+    attachActiveView();
+  }
+  return win;
+}
+
+// Dock click. The hidden map and ATLAS windows stay alive, so "no windows at all" is never true
+// while the app runs: what matters is whether the CONSOLE is there.
+function onActivate() {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createMainWindow();
+    return;
+  }
+  if (typeof mainWindow.isMinimized === "function" && mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+
 app.whenReady().then(async () => {
   // The Dock tile of a running shell shows the Dourmouse icon, the same one the
   // pinned Dourmouse.app carries (finding #159). Best effort: a missing icon
@@ -3653,27 +3814,8 @@ app.whenReady().then(async () => {
     return;
   }
 
-  const geometry = readWindowState();
-  mainWindow = new BrowserWindow({
-    width: Number(geometry.width) || 1440,
-    height: Number(geometry.height) || 900,
-    x: Number.isFinite(geometry.x) ? geometry.x : undefined,
-    y: Number.isFinite(geometry.y) ? geometry.y : undefined,
-    minWidth: 1024,
-    minHeight: 680,
-    title: "DOURMOUSE // CENTRAL AGENT DISPATCH",
-    webPreferences: { preload: PRELOAD, contextIsolation: true },
-  });
   installPermissionPolicy(session.defaultSession);
-  lockToAppOrigin(mainWindow);
-  wireConsoleKeys(mainWindow);
-  wireConsoleRecovery(mainWindow);
-  mainWindow.loadURL(`${BASE_URL}${START_PATH}`);
-  if (geometry.maximized) mainWindow.maximize();
-  mainWindow.on("close", persistMainWindowGeometry);
-  mainWindow.on("resize", () => {
-    if (paneView && paneVisible) paneView.setBounds(paneBounds());
-  });
+  createMainWindow();
 
   // Created hidden up front, same as dourmouse/desktop.py's map_window --
   // pywebview's own "create before start(), reveal on demand" rule doesn't
@@ -3715,22 +3857,7 @@ app.whenReady().then(async () => {
 
   log(`Dourmouse (Electron shell) online at ${BASE_URL}`);
 
-  app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      mainWindow = new BrowserWindow({
-        width: 1440,
-        height: 900,
-        minWidth: 1024,
-        minHeight: 680,
-        webPreferences: { preload: PRELOAD, contextIsolation: true },
-      });
-      lockToAppOrigin(mainWindow);
-      wireConsoleKeys(mainWindow);
-      wireConsoleRecovery(mainWindow);
-      mainWindow.loadURL(`${BASE_URL}${START_PATH}`);
-      mainWindow.on("close", persistMainWindowGeometry);
-    }
-  });
+  app.on("activate", onActivate);
 });
 
 // --------------------------------------------------------------------- //
@@ -3873,5 +4000,9 @@ app.on("before-quit", () => {
   // server the user is reusing (REUSE_EXISTING_SERVER / already-running).
   // Phase I2: quitting is also what stops the restart supervision, so this runs first.
   serverQuitting = true;
-  if (!REUSE_EXISTING_SERVER) stopServer();
+  if (!REUSE_EXISTING_SERVER) {
+    const spawnedPid = serverProcess ? serverProcess.pid : undefined;
+    stopServer();
+    if (spawnedPid !== undefined) removeServerPidFile(spawnedPid);
+  }
 });

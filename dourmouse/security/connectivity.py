@@ -74,27 +74,51 @@ def diagnose(target: str, *, timeout: float = 6.0, allow_loopback: bool = False)
         if not ip.is_global and not (allow_loopback and ip.is_loopback):
             return done(UNKNOWN, f"{host} resolves to the internal address {a}; not diagnosed (internal targets are refused)")
 
-    family, _, _, _, sockaddr = infos[0]
-    t0 = time.monotonic()
-    sock = socket.socket(family, socket.SOCK_STREAM)
-    sock.settimeout(timeout)
-    try:
-        sock.connect(sockaddr)
-    except TimeoutError:
-        sock.close()
-        _step(steps, "tcp", False, f"no answer within {timeout}s", t0)
-        return done(TIMEOUT, f"{sockaddr[0]}:{port} never answered: a silent firewall, a dead host, or a black hole")
-    except ConnectionRefusedError:
-        sock.close()
-        _step(steps, "tcp", False, "connection refused", t0)
-        return done(UNREACHABLE, f"{sockaddr[0]}:{port} refused the connection: nothing is listening, or a firewall rejects it")
-    except OSError as exc:
-        sock.close()
-        _step(steps, "tcp", False, str(exc), t0)
-        if exc.errno in _ROUTING_ERRNOS:
-            return done(ROUTING, f"no route to {sockaddr[0]}: the problem is this Mac's network or its router")
-        return done(UNKNOWN, f"TCP connection failed: {exc}")
-    _step(steps, "tcp", True, f"connected to {sockaddr[0]}:{port}", t0)
+    # Every address is tried, in the order the resolver gave them, as
+    # socket.create_connection does: a host whose first record is an IPv6
+    # address this network cannot reach is still fine over IPv4.
+    sock: socket.socket | None = None
+    sockaddr: tuple[Any, ...] = ()
+    t_connect = time.monotonic()
+    failures: list[tuple[str, str, str]] = []  # (category, address, text)
+    tried: set[str] = set()
+    for family, _, _, _, candidate in infos:
+        if str(candidate[0]) in tried:
+            continue
+        tried.add(str(candidate[0]))
+        t0 = time.monotonic()
+        attempt = socket.socket(family, socket.SOCK_STREAM)
+        attempt.settimeout(timeout)
+        try:
+            attempt.connect(candidate)
+        except TimeoutError:
+            attempt.close()
+            _step(steps, "tcp", False, f"{candidate[0]}: no answer within {timeout}s", t0)
+            failures.append((TIMEOUT, str(candidate[0]), "never answered: a silent firewall, a dead host, or a black hole"))
+            continue
+        except ConnectionRefusedError:
+            attempt.close()
+            _step(steps, "tcp", False, f"{candidate[0]}: connection refused", t0)
+            failures.append((UNREACHABLE, str(candidate[0]), "refused the connection: nothing is listening, or a firewall rejects it"))
+            continue
+        except OSError as exc:
+            attempt.close()
+            _step(steps, "tcp", False, f"{candidate[0]}: {exc}", t0)
+            if exc.errno in _ROUTING_ERRNOS:
+                failures.append((ROUTING, str(candidate[0]), "no route: the problem is this Mac's network or its router"))
+            else:
+                failures.append((UNKNOWN, str(candidate[0]), f"TCP connection failed: {exc}"))
+            continue
+        sock, sockaddr, t_connect = attempt, candidate, t0
+        break
+    if sock is None:
+        # The failure that says the most wins: a refusal proves the host is up, a
+        # timeout that it is not answering, "no route" only that one path is missing.
+        order = (UNREACHABLE, TIMEOUT, ROUTING, UNKNOWN)
+        category, _addr, _text = min(failures, key=lambda f: order.index(f[0]))
+        detail = "; ".join(f"{addr}:{port} {text}" for _c, addr, text in failures)
+        return done(category, detail)
+    _step(steps, "tcp", True, f"connected to {sockaddr[0]}:{port}", t_connect)
 
     conn_sock: socket.socket | ssl.SSLSocket = sock
     if tls:
@@ -107,7 +131,11 @@ def diagnose(target: str, *, timeout: float = 6.0, allow_loopback: bool = False)
             _step(steps, "tls", False, exc.verify_message or str(exc), t0)
             return done(TLS, f"the certificate for {host} is not trusted ({exc.verify_message}): expired, wrong "
                              "name, or someone intercepting the connection")
-        except (ssl.SSLError, TimeoutError, OSError) as exc:
+        except TimeoutError as exc:
+            sock.close()
+            _step(steps, "tls", False, str(exc), t0)
+            return done(TIMEOUT, f"the TLS handshake with {host} never completed: a silent firewall or a stalled server")
+        except (ssl.SSLError, OSError) as exc:
             sock.close()
             _step(steps, "tls", False, str(exc), t0)
             return done(TLS, f"the encrypted session with {host} failed: {exc}")
@@ -126,6 +154,9 @@ def diagnose(target: str, *, timeout: float = 6.0, allow_loopback: bool = False)
         resp = http.client.HTTPResponse(conn_sock)  # type: ignore[arg-type]
         resp.begin()
         status = resp.status
+    except TimeoutError as exc:
+        _step(steps, "http", False, str(exc), t0)
+        return done(TIMEOUT, f"connected, but {host} never answered the HTTP request within {timeout}s")
     except (OSError, http.client.HTTPException) as exc:
         _step(steps, "http", False, str(exc), t0)
         return done(UNKNOWN, f"connected, but the HTTP exchange failed: {exc}")

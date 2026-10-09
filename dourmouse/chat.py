@@ -25,6 +25,7 @@ import json
 import os
 import sys
 import time
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
@@ -49,6 +50,22 @@ def _default_sessions_dir() -> Path:
     sessions = root / "sessions"
     sessions.mkdir(parents=True, exist_ok=True)
     return sessions
+
+
+def _helper_sessions_dir() -> Path:
+    """Where throwaway helper sessions (tool-less summariser, stage, verifier
+    calls) keep their ledgers: a sub-folder, so ``most_recent_session_file``
+    (which only looks at the top level) can never restore one of them as the
+    user's conversation (finding P4-21)."""
+    helpers = _default_sessions_dir() / "helpers"
+    helpers.mkdir(parents=True, exist_ok=True)
+    return helpers
+
+
+def _new_session_name() -> str:
+    """A ledger name that is unique even for two sessions started in the same
+    second (the timestamp alone has one-second resolution)."""
+    return f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}.jsonl"
 
 
 def most_recent_session_file(sessions_dir: Path | None = None) -> Path | None:
@@ -97,6 +114,7 @@ class ChatSession:
         dlp: DlpFilter | None = None,
         rbac: RbacPolicy | None = None,
         memory: MemoryStore | None = None,
+        ephemeral: bool | None = None,
     ) -> None:
         self.registry = registry
         # v2.9 Store & Learn: ``memory`` is the long-term store the learning
@@ -121,11 +139,19 @@ class ChatSession:
         # role_changes event in the ledger.
         self.role_changes: list[dict[str, Any]] = []
         self._prev_hash: str | None = None
+        # The system/recall/skill blocks added for ONE turn, tracked by
+        # identity so the next turn can drop them (finding P4-14).
+        self._turn_blocks: list[dict[str, Any]] = []
+        #: Set when a corrupt state snapshot was replaced by a rebuild.
+        self.state_recovery: str | None = None
         if session_file is None:
-            session_file = (
-                _default_sessions_dir()
-                / f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jsonl"
-            )
+            # A ChatSession over a registry with no tools cannot be the
+            # user's conversation: it is a one-shot helper (wiki summary,
+            # research stage, goal check). ``ephemeral=True/False`` overrides.
+            if ephemeral is None:
+                ephemeral = not registry.tool_names
+            directory = _helper_sessions_dir() if ephemeral else _default_sessions_dir()
+            session_file = directory / _new_session_name()
         self.session_file = Path(session_file)
         self._state_file = self.session_file.with_suffix(".messages.json")
         self._turn_count = 0
@@ -240,6 +266,8 @@ class ChatSession:
         # UI's single long-lived ChatSession bricks permanently (observed
         # live: the app stopped answering anything after ~14 directives).
         self.cost_budget.reset_run()
+        # Last turn's recall and skill blocks were for THAT turn's prompt.
+        self._drop_turn_blocks()
         self.messages.append({"role": "user", "content": prompt})
         # v2.9 Store & Learn: before each turn, deterministically recall the
         # stored knowledge most relevant to THIS prompt and inject it into the
@@ -256,7 +284,9 @@ class ChatSession:
                 # injected as its OWN trailing system message, just before
                 # the new directive — the model reads it as context, and the
                 # bounded window in dispatch.py always keeps it.
-                self.messages.insert(-1, {"role": "system", "content": block})
+                recall_msg = {"role": "system", "content": block}
+                self.messages.insert(-1, recall_msg)
+                self._turn_blocks.append(recall_msg)
         # Domain H piece 3 (Skills-as-modular-capability-packages): same
         # trailing-system-message pattern as the memory recall block just
         # above, for the same reason (KV-cache stability: messages[0] never
@@ -268,7 +298,9 @@ class ChatSession:
 
         skill_block = skill_context_block(prompt)
         if skill_block:
-            self.messages.insert(-1, {"role": "system", "content": skill_block})
+            skill_msg = {"role": "system", "content": skill_block}
+            self.messages.insert(-1, skill_msg)
+            self._turn_blocks.append(skill_msg)
         started = time.monotonic()
         report: dict[str, Any] = {"final_text": "", "transcript": []}
         try:
@@ -348,6 +380,15 @@ class ChatSession:
         names = [s.name for s in self.registry.all_subagents()]
         log_experience(record, agent_names=names)
 
+    def _drop_turn_blocks(self) -> None:
+        """Remove the per-turn recall and skill system messages added by the
+        previous ask(), matched by object identity (finding P4-14)."""
+        if not self._turn_blocks:
+            return
+        dead = {id(m) for m in self._turn_blocks}
+        self.messages = [m for m in self.messages if id(m) not in dead]
+        self._turn_blocks = []
+
     def history(self) -> list[dict[str, Any]]:
         """Read-only view of the OpenAI-format conversation history."""
         return list(self.messages)
@@ -390,11 +431,10 @@ class ChatSession:
             return
         try:
             loaded = json.loads(self._state_file.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError) as exc:
-            # Corrupt state must never silently break a session.
-            raise RuntimeError(
-                f"cannot resume session state from {self._state_file}: {exc}"
-            )
+            if not isinstance(loaded, list):
+                raise ValueError("the snapshot is not a message list")
+        except (ValueError, OSError) as exc:
+            loaded = self._recover_state(exc)
         if loaded and loaded[0].get("role") == "system":
             loaded[0] = {"role": "system", "content": system_message(self.registry)}
             # Keep _base_system in sync so recall rebuilds from the CURRENT
@@ -410,11 +450,46 @@ class ChatSession:
             for m in loaded
             if not (
                 m.get("role") == "system"
-                and "REMEMBERED CONTEXT" in (m.get("content") or "")
+                and (
+                    "REMEMBERED CONTEXT" in (m.get("content") or "")
+                    or (m.get("content") or "").startswith("[SKILL:")
+                )
             )
         ]
         self.messages = loaded
         self._turn_count = sum(1 for m in self.messages if m["role"] == "user")
+
+    def _recover_state(self, exc: Exception) -> list[dict[str, Any]]:
+        """A truncated or unreadable snapshot (a kill mid-write) must not stop
+        chat from starting. Keep the bad file aside, rebuild the plain
+        user/assistant history from the hash-chained ledger (tool exchanges
+        are not in the ledger and are lost), and say so (finding P4-15)."""
+        from dourmouse import obs
+
+        rebuilt: list[dict[str, Any]] = [{"role": "system", "content": self._base_system}]
+        try:
+            for line in self.session_file.read_text(encoding="utf-8", errors="replace").splitlines():
+                if not line.strip():
+                    continue
+                rec = json.loads(line)
+                if rec.get("kind") == "slash":
+                    continue
+                if rec.get("user"):
+                    rebuilt.append({"role": "user", "content": rec["user"]})
+                    rebuilt.append({"role": "assistant", "content": rec.get("final_text") or ""})
+        except (OSError, ValueError):
+            pass  # no readable ledger: start from the system message alone
+        try:
+            self._state_file.replace(self._state_file.with_name(self._state_file.name + ".corrupt"))
+        except OSError:
+            pass  # leaving it in place is harmless: the next persist overwrites it
+        turns = sum(1 for m in rebuilt if m["role"] == "user")
+        self.state_recovery = f"session state was unreadable ({exc}); rebuilt {turns} turn(s) from the ledger"
+        obs.log_error(
+            source="chat", kind="state_recovered", what="session snapshot unreadable",
+            detail=f"{self._state_file}: {self.state_recovery}",
+        )
+        return rebuilt
 
     def _persist(
         self,
@@ -461,10 +536,17 @@ class ChatSession:
         }
         record["hash"] = _record_hash(record)
         with self.session_file.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(record) + "\n")
+            # default=str: the hash above was computed with it, so the bytes
+            # written must be the bytes hashed, and an odd transcript value
+            # must not raise from inside ask()'s finally block (P4-15).
+            fh.write(json.dumps(record, default=str) + "\n")
         self._prev_hash = record["hash"]
-        # Snapshot the full message state for resumability.
-        self._state_file.write_text(json.dumps(self.messages))
+        # Snapshot the full message state for resumability. Written to a
+        # temp file and renamed so a kill mid-write cannot leave truncated
+        # JSON behind.
+        tmp_state = self._state_file.with_name(self._state_file.name + ".tmp")
+        tmp_state.write_text(json.dumps(self.messages, default=str), encoding="utf-8")
+        os.replace(tmp_state, self._state_file)
         # Backlog item 3 slice — auto-save chat to RAG. Runs from the SAME
         # persist path used by both ask() and record_slash(), so every
         # completed exchange (typed or slash-command) is covered.

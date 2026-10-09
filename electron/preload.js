@@ -3,8 +3,9 @@
 // Keeps the EXACT `window.pywebview.api.*` global shape ui/*.html already
 // calls today (verified by grepping every ui/*.html for real call sites
 // before writing this -- open_agent [index.html], open_all_hands
-// [index.html, all_hands.html], open_external [setup.html, login.html] are
-// the only three with a real caller; open_map/navigate/window_state/
+// [index.html, all_hands.html], open_external [setup.html, login.html] were
+// the only three with a real caller then; open_study and open_project
+// [console.html] were added after; open_map/navigate/window_state/
 // set_window_state/screen_size/list_running_apps/split_with_app/
 // split_in_window have none and are deliberately NOT exposed here -- see
 // the plan's "don't port dead code by default" note). This means every
@@ -19,6 +20,10 @@ contextBridge.exposeInMainWorld("pywebview", {
     open_agent: (name) => ipcRenderer.invoke("bridge:open_agent", name),
     open_all_hands: (runId, goal) => ipcRenderer.invoke("bridge:open_all_hands", runId, goal),
     open_external: (url) => ipcRenderer.invoke("bridge:open_external", url),
+    // ui/console.html feature-detects these two (STUDY, PROJECTS): without them it falls back to
+    // window.open, which the shell refuses for every URL (finding A-2).
+    open_study: () => ipcRenderer.invoke("bridge:open_study"),
+    open_project: (tabId, name) => ipcRenderer.invoke("bridge:open_project", tabId, name),
   },
 });
 

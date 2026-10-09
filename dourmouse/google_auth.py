@@ -577,6 +577,17 @@ class AuthStore:
                 (email, name[:120], picture[:400], sub[:120], json.dumps(tokens), now, now),
             )
 
+    def update_tokens(self, email: str, tokens: dict[str, Any]) -> None:
+        """Replace only a user's OAuth tokens (finding A-3). The refresh path
+        used upsert_user, whose empty name/picture/sub defaults overwrote
+        the signed-in profile on every hourly refresh."""
+        email = (email or "").strip().lower()
+        with self._lock, self._connect() as connection:
+            connection.execute(
+                "UPDATE users SET tokens=?, updated=? WHERE email=?",
+                (json.dumps(tokens), _now(), email),
+            )
+
     def all_user_emails(self) -> list[str]:
         """Every linked Google identity, oldest first. Used by current_user()
         to resolve the single-user desktop case outside a request thread."""
@@ -649,7 +660,7 @@ class AuthStore:
         except RuntimeError:
             return None  # real failure surfaced by the caller's fallback path
         merged = {**tokens, **fresh}
-        self.upsert_user(email, merged)
+        self.update_tokens(email, merged)
         return str(merged.get("access_token") or "")
 
     # -- sessions -------------------------------------------------------- #

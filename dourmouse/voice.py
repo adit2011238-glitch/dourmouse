@@ -339,7 +339,10 @@ def _say_speak(text: str) -> bytes:
     try:
         try:
             proc = subprocess.run(
-                ["say", "-o", str(out), "--data-format=LEI16@22050", safe],
+                # The text goes on stdin: as an argument, text such as "-f/path"
+                # is parsed by say as an option and reads a local file (P3-67).
+                ["say", "-o", str(out), "--data-format=LEI16@22050", "-f", "-"],
+                input=safe.encode("utf-8"),
                 capture_output=True,
                 timeout=120,
                 check=False,

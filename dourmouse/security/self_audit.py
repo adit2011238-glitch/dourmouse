@@ -23,6 +23,7 @@ import hashlib
 import plistlib
 import stat
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -71,7 +72,7 @@ def check_env_tracked(repo: Path) -> list[dict[str, Any]]:
     if not (repo / ".git").exists():
         return []
     proc = subprocess.run(["git", "-C", str(repo), "ls-files", "--error-unmatch", ".env"],
-                          capture_output=True, text=True, encoding="utf-8", errors="replace", check=False)
+                          capture_output=True, text=True, encoding="utf-8", errors="replace", check=False, timeout=15)
     if proc.returncode == 0:
         return [_f("env_tracked", "high", ".env is tracked by git",
                    f"{repo / '.env'} is committed, so its keys go wherever the repository goes.",
@@ -119,6 +120,17 @@ def check_private_dir(path: Path, label: str) -> list[dict[str, Any]]:
     return []
 
 
+def _guarded(label: str, check: Callable[..., list[dict[str, Any]]], *args: Any) -> list[dict[str, Any]]:
+    """Run one check; a failure of the check itself (a missing git, an unreadable
+    root-owned file, a timeout) is a finding saying so, never an exception that
+    throws away every other result (finding P4-56)."""
+    try:
+        return check(*args)
+    except (OSError, subprocess.SubprocessError, ValueError) as exc:
+        return [_f("check_failed", "low", f"The check of {label} could not run",
+                   f"{type(exc).__name__}: {exc}", "Fix the cause above and run the self audit again.")]
+
+
 def run_self_audit() -> dict[str, Any]:
     from dourmouse.config import access_token, auto_approve_enabled, bind_host, user_env_path, workspace_dir
 
@@ -127,14 +139,16 @@ def run_self_audit() -> dict[str, Any]:
 
     repo = Path(__file__).resolve().parents[2]
     findings: list[dict[str, Any]] = []
-    findings += check_bind(bind_host(), access_token())
-    findings += check_auto_approve(auto_approve_enabled())
+    findings += _guarded("where the server listens", check_bind, bind_host(), access_token())
+    findings += _guarded("auto-approve", check_auto_approve, auto_approve_enabled())
     for p in (user_env_path(), repo / ".env", settings_path()):
-        findings += check_secret_file(p)
-    findings += check_env_tracked(repo)
-    findings += check_helper(Path(helper.INSTALLED), Path(helper.PLIST), Path(helper.__file__))
-    findings += check_private_dir(workspace_dir() / "security" / "quarantine", "The quarantine folder")
-    findings += check_private_dir(workspace_dir() / "security", "The security workspace")
+        findings += _guarded(f"the permissions of {p.name}", check_secret_file, p)
+    findings += _guarded(".env tracked by git", check_env_tracked, repo)
+    findings += _guarded("the lockdown helper", check_helper, Path(helper.INSTALLED), Path(helper.PLIST), Path(helper.__file__))
+    findings += _guarded("the quarantine folder permissions", check_private_dir,
+                         workspace_dir() / "security" / "quarantine", "The quarantine folder")
+    findings += _guarded("the security workspace permissions", check_private_dir,
+                         workspace_dir() / "security", "The security workspace")
     return {
         "findings": sorted(findings, key=lambda f: {"high": 0, "med": 1, "low": 2}[f["severity"]]),
         "privacy_mode": privacy_mode(),

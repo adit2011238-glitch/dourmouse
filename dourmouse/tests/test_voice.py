@@ -166,7 +166,7 @@ class TestTts:
         wav = (tmp_path / "s.wav")
         wav.write_bytes(b"RIFF-fake-wav")
 
-        def _fake_run(cmd, capture_output=False, timeout=0, check=False):
+        def _fake_run(cmd, capture_output=False, timeout=0, check=False, input=None):
             # write the wav where the last arg points
             out_path = Path(cmd[2])
             out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -208,8 +208,8 @@ class TestTts:
         monkeypatch.setattr(voice_module.shutil, "which", lambda _c: "/usr/bin/say")
         seen: list[str] = []
 
-        def _fake_run(cmd, capture_output=False, timeout=0, check=False):
-            seen.append(cmd[-1])
+        def _fake_run(cmd, capture_output=False, timeout=0, check=False, input=None):
+            seen.append(input.decode())
             out_path = Path(cmd[2])
             out_path.parent.mkdir(parents=True, exist_ok=True)
             out_path.write_bytes(b"RIFF-x")
@@ -418,8 +418,8 @@ class TestTtsStripsMarkdown:
         monkeypatch.setattr(voice_module.shutil, "which", lambda _c: "/usr/bin/say")
         seen: list[str] = []
 
-        def _fake_run(cmd, capture_output=False, timeout=0, check=False):
-            seen.append(cmd[-1])
+        def _fake_run(cmd, capture_output=False, timeout=0, check=False, input=None):
+            seen.append(input.decode())
             out_path = Path(cmd[2])
             out_path.parent.mkdir(parents=True, exist_ok=True)
             out_path.write_bytes(b"RIFF-x")
@@ -438,8 +438,8 @@ class TestTtsStripsMarkdown:
         monkeypatch.setattr(voice_module.shutil, "which", lambda _c: "/usr/bin/say")
         seen: list[str] = []
 
-        def _fake_run(cmd, capture_output=False, timeout=0, check=False):
-            seen.append(cmd[-1])
+        def _fake_run(cmd, capture_output=False, timeout=0, check=False, input=None):
+            seen.append(input.decode())
             out_path = Path(cmd[2])
             out_path.parent.mkdir(parents=True, exist_ok=True)
             out_path.write_bytes(b"RIFF-x")

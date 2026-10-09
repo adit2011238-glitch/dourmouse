@@ -150,9 +150,12 @@ def _sha256(path: Path) -> str | None:
 
 
 def _check_quarantinable(path: Path) -> None:
+    from dourmouse.path_identity import fold, is_under_folded
+
+    # finding #173 (H-FS2-1): the macOS volume ignores case, so /SYSTEM/Library is /System/Library
     text = str(path) + ("/" if path.is_dir() else "")
-    system = any(text.startswith(p) for p in PROTECTED_PREFIXES) and not text.startswith("/usr/local/")
-    if system or text.startswith("/Applications/Utilities/"):
+    system = any(is_under_folded(path, p.rstrip("/")) for p in PROTECTED_PREFIXES) and not is_under_folded(path, "/usr/local")
+    if system or is_under_folded(path, "/Applications/Utilities") or fold(text).startswith(fold("/Applications/Utilities/")):
         raise ResponseRefused(f"{path} is part of macOS and is never quarantined")
     if path.is_symlink():
         raise ResponseRefused(f"{path} is a link; quarantine the file it points to instead")

@@ -207,8 +207,17 @@ def _applescript_escape(value: str) -> str:
     quotes. Backslashes and double quotes are the two injection vectors
     (reviewer-caught: app display names can carry invisible Unicode marks
     like ``\u200eWhatsApp`` or quotes, so the native-split path prefers
-    bundle ids — this is the fallback for names without a known id)."""
-    return value.replace("\\", "\\\\").replace('"', '\\"')
+    bundle ids — this is the fallback for names without a known id).
+    Newlines and carriage returns are escaped too (finding P4-17), so the
+    value always stays on the one line of its string literal."""
+    return (
+        value.replace("\\", "\\\\").replace('"', '\\"')
+        .replace("\n", "\\n").replace("\r", "\\r")
+    )
+
+
+#: A real bundle identifier: reverse-DNS letters, digits, dots and hyphens.
+_BUNDLE_ID_RE = re.compile(r"[A-Za-z0-9.-]{1,255}")
 
 
 def _is_split_app(name: str) -> bool:
@@ -316,9 +325,12 @@ class DesktopBridge:
                 "com.google.Chrome")
             if chrome is None:
                 return False
-            ok = workspace.openURLs_withApplicationAtURL_options_configuration_error_(
+            # Finding P4-18: the selector's last argument is an NSError**
+            # output, so PyObjC returns (running_app_or_None, error). bool()
+            # of that 2-tuple was always True, even for a refused launch.
+            running_app, _error = workspace.openURLs_withApplicationAtURL_options_configuration_error_(
                 [NSURL.URLWithString_(url)], chrome, 0, {}, None)
-            return bool(ok)
+            return running_app is not None
         except Exception:  # noqa: BLE001 -- fall back to the default browser
             return False
 
@@ -408,10 +420,12 @@ class DesktopBridge:
             result["ok"] = False
             result["error"] = "no app name given"
             return result
-        # Target the app by bundle id when known — bundle ids are
-        # [a-z0-9.-], always interpolation-safe. The display name is the
-        # escaped fallback.
-        if bundle_id:
+        # Target the app by bundle id when known. Finding P4-17: bundle_id is
+        # a bridge argument the PAGE supplies, not one taken from
+        # list_running_apps, so it is only interpolated when it really has
+        # the [A-Za-z0-9.-] shape of a bundle id; anything else (a quote, a
+        # newline, AppleScript) falls back to the escaped display name.
+        if bundle_id and _BUNDLE_ID_RE.fullmatch(bundle_id):
             app_ref = f'id "{bundle_id}"'
             proc_ref = f'(first process whose bundle identifier is "{bundle_id}")'
         else:
@@ -695,9 +709,11 @@ class DesktopNotifier:
     def _default_notify(title: str, body: str) -> None:
         """macOS native notification via osascript; honest stderr fallback."""
         if shutil.which("osascript"):
-            script = "display notification {} with title {}".format(
-                json.dumps((body or "")[:120]),
-                json.dumps((title or "DOURMOUSE alert")[:80]),
+            # Finding P4-19: json.dumps wrote non-ASCII as \\uXXXX, which
+            # AppleScript shows literally; use the AppleScript escaper.
+            script = 'display notification "{}" with title "{}"'.format(
+                _applescript_escape((body or "")[:120]),
+                _applescript_escape((title or "DOURMOUSE alert")[:80]),
             )
             try:
                 subprocess.run(["osascript", "-e", script], check=False,

@@ -59,8 +59,10 @@ class TestEveryTabIsBuiltTheSameSafeWay:
 
     def test_the_console_windows_keep_their_isolation_and_origin_lock(self):
         assert MAIN_CODE.count("contextIsolation: true") >= 4
-        for target in ("win", "mainWindow", "mapWindow", "atlasWindow"):
+        # the console is built once, in createMainWindow (FB finding A-1), where it is locked as `win`
+        for target in ("win", "mapWindow", "atlasWindow"):
             assert f"lockToAppOrigin({target})" in MAIN_CODE
+        assert "lockToAppOrigin(win);\n  wireConsoleKeys(win);" in MAIN_CODE.split("function createMainWindow()", 1)[1].split("function onActivate()", 1)[0]
 
     def test_the_chrome_user_agent_is_set_on_the_profile_and_on_each_tab(self):
         assert "session.setUserAgent(chromeUserAgent())" in MAIN_CODE

@@ -167,13 +167,36 @@ def _validate_thread_id(thread_id: str) -> str:
 
 
 def _validate_project_path(project_path: str) -> str:
+    """Return the known Freebuff project path that ``project_path`` names.
+
+    Finding P3-21: this only checked for a leading "/", although the tool
+    and its docs say the path must be one Freebuff already knows; "/" or a
+    path with ".." segments went straight to an autonomous agent. The path
+    is now normalised and matched against freebuff_projects(), and the
+    app's own spelling of that project is what gets sent."""
     p = (project_path or "").strip()
     if not p.startswith("/"):
         raise FreebuffDispatchError(
             f"Freebuff 'project_path' must be an absolute path from "
             f"freebuff_projects (got {project_path!r})."
         )
-    return p
+    wanted = os.path.normpath(p)
+    try:
+        known = [str(proj.get("path") or "") for proj in freebuff_projects()]
+    except FreebuffNotAvailable as exc:
+        raise FreebuffDispatchError(
+            f"could not check 'project_path' against the Freebuff project list: {exc}"
+        ) from exc
+    for candidate in known:
+        if candidate and (
+            os.path.normpath(candidate) == wanted
+            or (os.path.exists(candidate) and os.path.exists(wanted) and os.path.samefile(candidate, wanted))
+        ):
+            return candidate
+    raise FreebuffDispatchError(
+        f"{project_path!r} is not a Freebuff project; use a path listed by "
+        f"freebuff_projects ({', '.join(k for k in known if k) or 'none listed'})."
+    )
 
 
 def freebuff_create_thread(
@@ -263,6 +286,7 @@ def freebuff_dispatch(
             "Shorten the task before dispatching — honest, nothing was sent."
         )
     title = (title or "").strip().replace("\n", " ")
+    project_path = _validate_project_path(project_path)
     thread = freebuff_create_thread(project_path, title or prompt[:_MAX_TITLE_CHARS])
     tid = str(thread.get("id", "")).strip()
     if not tid or not _THREAD_ID_RE.match(tid):
@@ -276,6 +300,19 @@ def freebuff_dispatch(
             f"thread {tid} was created but the prompt failed to post: {exc}"
         ) from exc
     return {"thread": thread, "posted": posted}
+
+
+def _freebuff_dispatch_confirm_prompt(arguments: dict[str, Any]) -> str:
+    """Finding P3-20: the approval used to show only the first 160 of up to
+    8000 characters, so anything after that ran unseen. The whole prompt
+    the agent will receive (capped by the same _MAX_DISPATCH_CHARS limit
+    the dispatch enforces) is shown."""
+    prompt = (arguments.get("prompt") or "").strip()
+    return (
+        f"Dispatch to Freebuff project {arguments.get('project_path', '?')!r} "
+        f"({len(prompt)} characters)? A real Freebuff agent will start acting "
+        f"on this full prompt:\n\n{prompt}"
+    )
 
 
 def _freebuff_dispatch_tool(arguments: dict[str, Any]) -> str:
@@ -435,12 +472,16 @@ def freebuff_project_changes(project_path: str) -> list[dict[str, Any]]:
     """Git changes for a project path (?path=). The path must be an absolute
     path the app itself exposes (from freebuff_projects / recents) — we only
     relay it as a query parameter, and a relative/garbage path is refused."""
-    project_path = project_path.strip()
-    if not project_path.startswith("/"):
-        raise ValueError(
-            f"Freebuff project 'path' must be an absolute path from "
-            f"freebuff_projects (got {project_path!r})."
-        )
+    # H-FS1-3: the same known-project check as dispatch (finding P3-21);
+    # only "starts with /" was checked, so the app listed git changes in
+    # any directory the model named. A dead app still surfaces as
+    # FreebuffNotAvailable, a path it does not know as ValueError.
+    try:
+        project_path = _validate_project_path(project_path)
+    except FreebuffDispatchError as exc:
+        if isinstance(exc.__cause__, FreebuffNotAvailable):
+            raise exc.__cause__ from None
+        raise ValueError(str(exc)) from None
     payload = _get("/api/project/changes", {"path": project_path})
     out = []
     for f in (payload.get("files") or [])[:_MAX_CHANGES]:
@@ -647,12 +688,7 @@ def build_freebuff_tool_specs() -> list[Any]:
             },
             ["prompt", "project_path"],
             permission=Permission.REQUIRES_CONFIRMATION,
-            confirm_prompt=lambda a: (
-                f"Dispatch to Freebuff project {a.get('project_path', '?')!r}: "
-                f"{(a.get('prompt') or '')[:160]!r}"
-                f"{'...' if len(a.get('prompt') or '') > 160 else ''}? "
-                "A real Freebuff agent will start acting on this."
-            ),
+            confirm_prompt=_freebuff_dispatch_confirm_prompt,
         ),
         _spec(
             "freebuff_status",

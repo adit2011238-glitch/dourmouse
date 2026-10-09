@@ -12,6 +12,7 @@ own section.
 from __future__ import annotations
 
 import json
+import shutil
 import time
 from pathlib import Path
 from typing import Any
@@ -31,6 +32,7 @@ DIMENSIONS: dict[str, dict[str, Any]] = {
     "exposure": {
         "label": "Exposure to the network",
         "kinds": {"exposed_port", "remote_login_on", "screen_sharing_on", "new_listening_port",
+                  "listening_port_exposure_changed",
                   "correlated_new_device_and_exposed_port"},
         "needs": ("listening_ports", "host_protections"),
     },
@@ -43,13 +45,14 @@ DIMENSIONS: dict[str, dict[str, Any]] = {
     "software_integrity": {
         "label": "Software integrity",
         "kinds": {"network_process_suspicious_location", "new_unsigned_network_process", "new_persistence",
-                  "persistence_modified"},
+                  "persistence_modified", "persistence_removed"},
         "needs": ("persistence",),
     },
     "downloads": {
         "label": "Downloads",
         "kinds": {"risky_download"},
-        "needs": (),
+        # Not "good" until at least one download was actually assessed.
+        "needs": ("downloads_assessed",),
     },
 }
 
@@ -90,6 +93,13 @@ def posture(findings: list[dict[str, Any]], telemetry_available: dict[str, bool]
     return out
 
 
+def _malware_scanner_line() -> str:
+    if shutil.which("clamdscan") or shutil.which("clamscan"):
+        return ("Malware inside files is only detected by ClamAV, a signature scanner with well below commercial "
+                "detection rates.")
+    return "Malware inside files is only detected when a scanner (ClamAV) is installed; none is."
+
+
 def build_report(*, scan: Any = None, monitoring: dict[str, Any] | None = None,
                  downloads: list[dict[str, Any]] | None = None, lockdown: dict[str, Any] | None = None,
                  now: float | None = None) -> dict[str, Any]:
@@ -115,7 +125,15 @@ def build_report(*, scan: Any = None, monitoring: dict[str, Any] | None = None,
         downloads = SentryStore(default_db()).recent_downloads(20)
     if lockdown is None:
         lockdown = ld.status(check_sites=False)
-    dims = posture(findings, scan.telemetry_available, monitoring)
+    # Downloads are assessed as they arrive (not by the scan): their evidence is the
+    # assessed list itself, and the area is only checked when that list is not empty.
+    download_evidence = [
+        {"kind": "risky_download", "severity": d["risk"], "title": f"{d.get('kind', 'file')} {d.get('name', '')}".strip(),
+         "detail": "; ".join(d.get("reasons") or []), "recommended_action": "Do not open it until you know what it is."}
+        for d in downloads if d.get("risk") in ("high", "med")
+    ]
+    available = {**scan.telemetry_available, "downloads_assessed": bool(downloads)}
+    dims = posture(findings + download_evidence, available, monitoring)
     worst = [d for d in dims if d["rating"] == AT_RISK]
     attention = [d for d in dims if d["rating"] == ATTENTION]
     headline = (
@@ -124,8 +142,9 @@ def build_report(*, scan: Any = None, monitoring: dict[str, Any] | None = None,
         "No problems found in what could be checked."
     )
     unknowns = sorted({*monitoring.get("unknowns", []),
-                       *(f"{d['label']}: {n} could not be read" for d in dims for n in d["not_checked"]),
-                       "Malware inside files is only detected when a scanner (ClamAV) is installed; none is.",
+                       *(("Downloads: no download has been assessed yet" if n == "downloads_assessed"
+                          else f"{d['label']}: {n} could not be read") for d in dims for n in d["not_checked"]),
+                       _malware_scanner_line(),
                        "Anything outside this Mac: the router's own security, other devices' intentions."})
     return {
         "generated_at": now or time.time(), "headline": headline, "posture": dims,

@@ -46,7 +46,10 @@ def domain_of(url: str) -> str:
 
 
 def _copy_and_open(db: Path, tmp: Path) -> sqlite3.Connection:
-    dest = tmp / (db.parent.name.replace(" ", "_") + "-" + db.name)
+    # A folder per copy: every Chromium browser calls its profile folder
+    # "Default", so a shared name let one browser's leftover -wal be replayed
+    # into the next browser's database (finding P4-53).
+    dest = Path(tempfile.mkdtemp(dir=tmp)) / db.name
     shutil.copy2(db, dest)
     for suffix in ("-wal", "-shm"):
         side = db.with_name(db.name + suffix)

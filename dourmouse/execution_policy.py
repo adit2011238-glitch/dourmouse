@@ -73,10 +73,18 @@ class RunPolicy:
     # branch of a fan-out, which run on several threads at once.
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
 
-    def decide(self, name: str, arguments: dict[str, Any], *, consequential: bool) -> str | None:
-        """None to allow, or the refusal reason."""
+    def decide(
+        self, name: str, arguments: dict[str, Any], *, consequential: bool, scope: str = "",
+    ) -> str | None:
+        """None to allow, or the refusal reason.
+
+        ``scope`` names a fan-out branch. Read-only calls with the same
+        arguments (``news_headlines {}``, a job poll) are counted per branch,
+        so five branches that each make the same harmless call are not
+        refused as a loop; an approval-gated call is always counted for the
+        whole request (finding P2-31)."""
         _, digest = _args_fingerprint(arguments)
-        key = f"{name}:{digest}"
+        key = f"{scope}:{name}:{digest}" if scope and not consequential else f"{name}:{digest}"
         with self._lock:
             if self.calls[key] >= self.max_identical:
                 return (f"'{name}' was already called {self.calls[key]} times with exactly these arguments in this "

@@ -110,7 +110,8 @@ CREATE TABLE IF NOT EXISTS seen_findings (
     first_seen  REAL NOT NULL,
     last_seen   REAL NOT NULL,
     times_seen  INTEGER NOT NULL,
-    dismissed_false_positive INTEGER NOT NULL DEFAULT 0
+    dismissed_false_positive INTEGER NOT NULL DEFAULT 0,
+    active      INTEGER NOT NULL DEFAULT 1
 );
 CREATE TABLE IF NOT EXISTS known_devices (
     device_key TEXT PRIMARY KEY,
@@ -120,13 +121,15 @@ CREATE TABLE IF NOT EXISTS known_devices (
     first_seen REAL NOT NULL,
     last_seen  REAL NOT NULL
 );
-CREATE TABLE IF NOT EXISTS incidents (
-    fingerprint TEXT PRIMARY KEY,
+CREATE TABLE IF NOT EXISTS incident_log (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    fingerprint TEXT NOT NULL,
     status      TEXT NOT NULL,
     notes       TEXT NOT NULL DEFAULT '[]',
     opened_at   REAL NOT NULL,
     updated_at  REAL NOT NULL
 );
+CREATE INDEX IF NOT EXISTS incident_log_fingerprint ON incident_log (fingerprint, id);
 CREATE TABLE IF NOT EXISTS baseline (
     scope      TEXT NOT NULL,
     category   TEXT NOT NULL,
@@ -345,37 +348,77 @@ class SentryStore:
         with self._lock, self._conn() as conn:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.executescript(_SCHEMA)
+            self._migrate(conn)
+
+    @staticmethod
+    def _migrate(conn: sqlite3.Connection) -> None:
+        # seen_findings.active (P4-57): databases from before the column existed.
+        if "active" not in [r[1] for r in conn.execute("PRAGMA table_info(seen_findings)")]:
+            conn.execute("ALTER TABLE seen_findings ADD COLUMN active INTEGER NOT NULL DEFAULT 1")
+        # incidents used to be keyed by fingerprint alone (P4-58); carry those rows into
+        # incident_log once. The old table is left in place, unread afterwards.
+        if conn.execute("PRAGMA user_version").fetchone()[0] < 1:
+            if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='incidents'").fetchone():
+                conn.execute(
+                    "INSERT INTO incident_log (fingerprint, status, notes, opened_at, updated_at) "
+                    "SELECT fingerprint, status, notes, opened_at, updated_at FROM incidents ORDER BY opened_at"
+                )
+            conn.execute("PRAGMA user_version = 1")
+        conn.commit()
 
     def _conn(self) -> sqlite3.Connection:
         return sqlite3.connect(str(self._path), timeout=30.0)
 
     def record_and_classify(
-        self, finding: SentryFinding, now: float
+        self, finding: SentryFinding, now: float, fresh_event: bool = False
     ) -> str:
         """Real read-then-write against the store; returns "new", "known",
         or "dismissed". Never called concurrently for the SAME fingerprint
         within one scan (run_scan calls this sequentially per finding), so
         a single connection per call is enough -- no cross-process race to
-        guard against beyond what WAL already gives every writer."""
+        guard against beyond what WAL already gives every writer.
+
+        "new" is a first-ever sighting, and also a RECURRENCE: a finding that
+        an earlier scan no longer detected (``mark_absent``) and that is
+        detected again (P4-57: the firewall switched off a second time must
+        alert like the first). ``fresh_event`` says the caller saw a new
+        arrival right now (a file that was downloaded again), which counts the
+        same way even though no scan saw the condition clear."""
         with self._lock, self._conn() as conn:
             row = conn.execute(
-                "SELECT dismissed_false_positive, times_seen FROM seen_findings WHERE fingerprint=?",
+                "SELECT dismissed_false_positive, times_seen, active FROM seen_findings WHERE fingerprint=?",
                 (finding.fingerprint,),
             ).fetchone()
             if row is None:
                 conn.execute(
                     "INSERT INTO seen_findings "
                     "(fingerprint, kind, severity, title, first_seen, last_seen, times_seen, "
-                    "dismissed_false_positive) VALUES (?, ?, ?, ?, ?, ?, 1, 0)",
+                    "dismissed_false_positive, active) VALUES (?, ?, ?, ?, ?, ?, 1, 0, 1)",
                     (finding.fingerprint, finding.kind, finding.severity, finding.title, now, now),
                 )
                 return "new"
-            dismissed, times_seen = row
+            dismissed, times_seen, active = row
             conn.execute(
-                "UPDATE seen_findings SET last_seen=?, times_seen=? WHERE fingerprint=?",
+                "UPDATE seen_findings SET last_seen=?, times_seen=?, active=1 WHERE fingerprint=?",
                 (now, times_seen + 1, finding.fingerprint),
             )
-            return "dismissed" if dismissed else "known"
+            if dismissed:
+                return "dismissed"
+            return "new" if (not active or fresh_event) else "known"
+
+    def mark_absent(self, present: set[str]) -> None:
+        """After a complete scan: every scan-detected finding that was not
+        detected this time is cleared, so its next detection is a recurrence.
+        Download findings come from arrival events, not from scans, and are
+        left alone."""
+        with self._lock, self._conn() as conn:
+            rows = conn.execute(
+                "SELECT fingerprint FROM seen_findings WHERE active=1 AND kind != 'risky_download'"
+            ).fetchall()
+            for (fp,) in rows:
+                if fp not in present:
+                    conn.execute("UPDATE seen_findings SET active=0 WHERE fingerprint=?", (fp,))
+            conn.commit()
 
     def mark_false_positive(self, fingerprint: str) -> bool:
         """MEMORY_UPDATE's own real mechanism: a user-declined finding stays
@@ -432,23 +475,26 @@ class SentryStore:
 
     def open_incident(self, fingerprint: str, note: str, now: float) -> str:
         """Real, idempotent case open. Returns "opened", "already_open"
-        (never silently re-creates a real case), or "unknown_fingerprint"
-        (a real, honest refusal -- an incident must reference a real,
-        already-detected finding, never an arbitrary string)."""
+        (an unfinished case for this finding exists; it is never silently
+        re-created) or "unknown_fingerprint" (a real, honest refusal -- an
+        incident must reference a real, already-detected finding, never an
+        arbitrary string). When the latest case for the finding is closed
+        (RESOLVED/ACCEPTED_RISK) a NEW case is opened: a recurrence is
+        tracked separately and the closed record is kept (P4-58)."""
         with self._lock, self._conn() as conn:
             known = conn.execute(
                 "SELECT 1 FROM seen_findings WHERE fingerprint=?", (fingerprint,)
             ).fetchone()
             if known is None:
                 return "unknown_fingerprint"
-            existing = conn.execute(
-                "SELECT 1 FROM incidents WHERE fingerprint=?", (fingerprint,)
+            latest = conn.execute(
+                "SELECT status FROM incident_log WHERE fingerprint=? ORDER BY id DESC LIMIT 1", (fingerprint,)
             ).fetchone()
-            if existing is not None:
+            if latest is not None and latest[0] not in INCIDENT_TERMINAL_STATES:
                 return "already_open"
             notes = [{"at": now, "text": note}] if note else []
             conn.execute(
-                "INSERT INTO incidents (fingerprint, status, notes, opened_at, updated_at) "
+                "INSERT INTO incident_log (fingerprint, status, notes, opened_at, updated_at) "
                 "VALUES (?, 'OPEN', ?, ?, ?)",
                 (fingerprint, json.dumps(notes), now, now),
             )
@@ -458,60 +504,63 @@ class SentryStore:
     def update_incident(
         self, fingerprint: str, status: str | None, note: str | None, now: float
     ) -> str:
-        """Real case transition/note. Returns "updated", "not_found", or
-        "terminal" (a genuine, honest refusal -- RESOLVED/ACCEPTED_RISK
-        never silently reopen; a real analyst must open a NEW incident for
-        a recurrence, same "never quietly resurrect a closed record"
-        discipline as `goals.py`'s own terminal states)."""
+        """Real case transition/note on the latest case for the finding.
+        Returns "updated", "not_found", or "terminal" (a genuine, honest
+        refusal -- RESOLVED/ACCEPTED_RISK never silently reopen; open a NEW
+        incident for a recurrence with ``open_incident``, same "never
+        quietly resurrect a closed record" discipline as `goals.py`'s own
+        terminal states)."""
         if status is not None and status not in INCIDENT_STATES:
             raise ValueError(f"unknown incident status: {status!r}")
         with self._lock, self._conn() as conn:
             row = conn.execute(
-                "SELECT status, notes FROM incidents WHERE fingerprint=?", (fingerprint,)
+                "SELECT id, status, notes FROM incident_log WHERE fingerprint=? ORDER BY id DESC LIMIT 1",
+                (fingerprint,),
             ).fetchone()
             if row is None:
                 return "not_found"
-            current_status, notes_json = row
+            incident_id, current_status, notes_json = row
             if current_status in INCIDENT_TERMINAL_STATES and status is not None and status != current_status:
                 return "terminal"
             notes = json.loads(notes_json)
             if note:
                 notes.append({"at": now, "text": note})
             conn.execute(
-                "UPDATE incidents SET status=?, notes=?, updated_at=? WHERE fingerprint=?",
-                (status or current_status, json.dumps(notes), now, fingerprint),
+                "UPDATE incident_log SET status=?, notes=?, updated_at=? WHERE id=?",
+                (status or current_status, json.dumps(notes), now, incident_id),
             )
             conn.commit()
             return "updated"
 
     def get_incident(self, fingerprint: str) -> dict[str, Any] | None:
+        """The latest case for the finding."""
         with self._lock, self._conn() as conn:
             row = conn.execute(
-                "SELECT fingerprint, status, notes, opened_at, updated_at FROM incidents "
-                "WHERE fingerprint=?", (fingerprint,),
+                "SELECT fingerprint, status, notes, opened_at, updated_at, id FROM incident_log "
+                "WHERE fingerprint=? ORDER BY id DESC LIMIT 1", (fingerprint,),
             ).fetchone()
         if row is None:
             return None
         return {
             "fingerprint": row[0], "status": row[1], "notes": json.loads(row[2]),
-            "opened_at": row[3], "updated_at": row[4],
+            "opened_at": row[3], "updated_at": row[4], "id": row[5],
         }
 
     def list_incidents(self, status: str | None = None) -> list[dict[str, Any]]:
         with self._lock, self._conn() as conn:
             if status is None:
                 rows = conn.execute(
-                    "SELECT fingerprint, status, notes, opened_at, updated_at FROM incidents "
-                    "ORDER BY updated_at DESC"
+                    "SELECT fingerprint, status, notes, opened_at, updated_at, id FROM incident_log "
+                    "ORDER BY updated_at DESC, id DESC"
                 ).fetchall()
             else:
                 rows = conn.execute(
-                    "SELECT fingerprint, status, notes, opened_at, updated_at FROM incidents "
-                    "WHERE status=? ORDER BY updated_at DESC", (status,),
+                    "SELECT fingerprint, status, notes, opened_at, updated_at, id FROM incident_log "
+                    "WHERE status=? ORDER BY updated_at DESC, id DESC", (status,),
                 ).fetchall()
         return [
             {"fingerprint": r[0], "status": r[1], "notes": json.loads(r[2]),
-             "opened_at": r[3], "updated_at": r[4]}
+             "opened_at": r[3], "updated_at": r[4], "id": r[5]}
             for r in rows
         ]
 
@@ -552,6 +601,16 @@ class SentryStore:
                     "ON CONFLICT(scope) DO UPDATE SET last_seen=excluded.last_seen, scans=scans+1",
                     (scope, now, now),
                 )
+            conn.commit()
+
+    def forget_baseline(self, keys: list[tuple[str, str, str]]) -> None:
+        """Drop baseline rows for things that are gone, once their removal was
+        reported, so the same removal is not reported on every later scan."""
+        if not keys:
+            return
+        with self._conn() as conn:
+            for scope, category, key in keys:
+                conn.execute("DELETE FROM baseline WHERE scope=? AND category=? AND key=?", (scope, category, key))
             conn.commit()
 
     # -- downloads (MS-4, finding #101) ----------------------------------- #
@@ -623,6 +682,12 @@ def collect_state() -> dict[str, Any]:
     state["persistence"] = mt.get_persistence_items()
     est = state.get("established_connections") or {}
     procs = [mt.process_details(int(pid)) for pid in sorted({c.get("pid") for c in est.get("connections", []) if c.get("pid")})]
+    # The baseline watches the lsof COMMAND of each connection, a shortened form of
+    # the process name: keep it on the process so the two can be matched (P5-51).
+    commands = {int(c["pid"]): c.get("command") for c in est.get("connections", []) if c.get("pid")}
+    for d in procs:
+        if commands.get(d.get("pid")):
+            d["command"] = commands[d["pid"]]
     # Signature checks run concurrently: spctl takes about 2 s per program
     # cold (it can consult Apple's notarization service), 15 s for 8 programs
     # measured serially on this Mac; results are cached by path, mtime, size.
@@ -675,6 +740,7 @@ def run_scan(
     risk_score = 0.0
     alerts_written = 0
 
+    present: set[str] = {f.fingerprint for f in raw_findings}
     for finding in raw_findings:
         status = store.record_and_classify(finding, ts)
         if status == "dismissed":
@@ -715,8 +781,17 @@ def run_scan(
     scopes = {bl.HOST, net}
     known = store.load_baseline(scopes)
     learning = {sc for sc in scopes if bl.is_learning(store.baseline_meta(sc), ts)}
-    anomalies = [a for a in bl.compare(observations, known) if a.observation.scope not in learning]
+    # A removed persistence item is reported only when the persistence folders
+    # were really read this scan, and never for a plist that exists but could
+    # not be parsed (it is in `items` with an "error", not in the observations).
+    pers = state.get("persistence") or {}
+    observed = frozenset({"persistence"}) if pers.get("available") else frozenset()
+    unreadable = {i["path"] for i in pers.get("items", []) if "error" in i and "path" in i}
+    raw = [a for a in bl.compare(observations, known, observed_categories=observed)
+           if not (a.kind == "gone" and a.observation.key in unreadable)]
+    anomalies = [a for a in raw if a.observation.scope not in learning]
     for finding in detect_mac_findings(state, anomalies):
+        present.add(finding.fingerprint)
         status = store.record_and_classify(finding, ts)
         if status == "dismissed":
             suppressed.append(finding)
@@ -728,6 +803,7 @@ def run_scan(
             if write_alerts and finding.severity == "high" and _write_alert(finding):
                 alerts_written += 1
     store.update_baseline(observations, scopes, ts)
+    store.forget_baseline([(a.observation.scope, a.observation.category, a.observation.key) for a in raw if a.kind == "gone"])
 
     arp = state.get("arp_neighbors") or {}
     if arp.get("available"):
@@ -739,6 +815,11 @@ def run_scan(
         for key in base_keys + ("wifi", "host_protections", "persistence")
         if key in state or key in base_keys
     }
+    # Findings this scan no longer detects are cleared, so their return counts as new
+    # (P4-57). Only after a scan that could read everything: a scan that could not
+    # read the firewall does not show the firewall finding is gone.
+    if telemetry_available and all(telemetry_available.values()):
+        store.mark_absent(present)
     return SentryScanResult(
         all_findings=all_findings,
         new_findings=new_findings,

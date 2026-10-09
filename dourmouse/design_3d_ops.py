@@ -57,7 +57,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from dourmouse import config
+from dourmouse import config, path_identity
 
 _MANIFEST_PATH_ENV = "DOURMOUSE_UI_MANIFEST_PATH"
 _DEFAULT_MANIFEST_RELPATH = Path("design_3d") / "ui_manifest.json"
@@ -80,6 +80,37 @@ def _manifest_path(arguments: dict[str, Any]) -> Path:
         return Path(env).expanduser()
     root = config.workspace_dir()
     return (root / _DEFAULT_MANIFEST_RELPATH).expanduser()
+
+
+_MANIFEST_FILENAME = "ui_manifest.json"
+
+
+def _read_path_refusal(arguments: dict[str, Any], path: Path) -> str | None:
+    """Finding P4-16: list_manifest and read_manifest_entry are not
+    confirmation-gated, and an explicit manifest_path used to be accepted
+    verbatim, so any JSON object file (the browser credential vault, token
+    stores, settings) could be dumped through them. An explicit path is
+    now read only when it is inside the design folder (or the folder of the
+    configured DOURMOUSE_UI_MANIFEST_PATH), or is itself a file named
+    ui_manifest.json. Judged on the resolved real path, so a symlink named
+    like a manifest counts as whatever it points at. Returns the refusal
+    text, or None when the read may go ahead."""
+    if not str(arguments.get("manifest_path") or "").strip():
+        return None  # the env override or the default: configured, not model-supplied
+    roots = [config.workspace_dir() / _DEFAULT_MANIFEST_RELPATH.parent]
+    env = os.environ.get(_MANIFEST_PATH_ENV, "").strip()
+    if env:
+        roots.append(Path(env).expanduser().parent)
+    if any(path_identity.is_within(path, root) for root in roots):
+        return None
+    if path_identity.fold(path_identity.real_path(path).name) == _MANIFEST_FILENAME:
+        return None
+    return (
+        f"REFUSED: {path} is not a design manifest. manifest_path must be a "
+        f"file named {_MANIFEST_FILENAME}, or a file inside {roots[0]}; this "
+        "read is not confirmation-gated, so other JSON files are not readable "
+        "through it."
+    )
 
 
 def _load_manifest(path: Path) -> dict[str, Any]:
@@ -262,6 +293,9 @@ def _build_model_entry(arguments: dict[str, Any]) -> tuple[str, dict[str, Any]]:
 
 def _list_manifest_tool(arguments: dict[str, Any]) -> str:
     path = _manifest_path(arguments)
+    refusal = _read_path_refusal(arguments, path)
+    if refusal:
+        return refusal
     if not path.exists():
         return (
             f"MANIFEST: no file at {path} yet (honest — nothing has been "
@@ -300,6 +334,9 @@ def _read_manifest_entry_tool(arguments: dict[str, Any]) -> str:
     if not name:
         return "ERROR: read_manifest_entry requires a non-empty 'name'."
     path = _manifest_path(arguments)
+    refusal = _read_path_refusal(arguments, path)
+    if refusal:
+        return refusal
     if not path.exists():
         return f"ERROR: no manifest file at {path}."
     try:

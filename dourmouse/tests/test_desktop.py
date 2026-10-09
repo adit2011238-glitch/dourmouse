@@ -724,7 +724,11 @@ class TestOpenInChrome:
                     urls, app, opts, cfg, err):
                 calls["opened"] = list(urls)
                 calls["app"] = app
-                return open_ok
+                # Changed by FS1 (finding P4-18): PyObjC returns
+                # (running_app_or_None, error) for this selector, whose last
+                # argument is an NSError** output. The old fake returned a
+                # bare bool, which is how bool(<2-tuple>) == True hid.
+                return ("<NSRunningApplication>", None) if open_ok else (None, "<NSError>")
 
         appkit = types.ModuleType("AppKit")
         appkit.NSWorkspace = FakeWorkspace

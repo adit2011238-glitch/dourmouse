@@ -496,14 +496,17 @@ class TestClaudeCodeMcpWiring:
         code_backends._mcp_config_path_cache = None
 
     def test_a_broken_mcp_setup_never_blocks_claude_code(self, monkeypatch):
-        """_claude_code_mcp_args itself swallows errors (see its own
-        docstring) — this pins that it degrades to an empty list rather
-        than raising, so a broken MCP setup never stops claude_code's own
-        core job."""
+        """A broken MCP setup never stops claude_code's own core job: it
+        degrades to no Dourmouse bridge rather than raising. FR H-FS1-2: it
+        used to degrade to an EMPTY list (which also dropped
+        --strict-mcp-config, so the owner's claude.ai connectors loaded);
+        strict mode now stays on."""
         def _boom():
             raise RuntimeError("boom")
 
         monkeypatch.setattr("dourmouse.code_backends._ensure_mcp_config_path", _boom)
         from dourmouse.general_roster import _claude_code_mcp_args
 
-        assert _claude_code_mcp_args() == []
+        args = _claude_code_mcp_args()
+        assert "--strict-mcp-config" in args
+        assert "--mcp-config" not in args and "--disallowedTools" not in args

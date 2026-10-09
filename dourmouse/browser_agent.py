@@ -62,7 +62,9 @@ _BROWSER: Any = None  # the CDP connection to the Electron shell (pane mode only
 _PAGE_MODE: str | None = None  # "pane" (the owner's tab) or "headless" (a separate Chrome)
 _PREPARED_CONTEXTS: set[int] = set()  # contexts that already carry the request filter and the page listener
 _TARGET_IDS: dict[Any, str] = {}  # Playwright Page -> CDP target id (matched against the pane bridge)
-_NEW_PAGES: list[Any] = []  # pages that appeared in the context, newest last (headless popup following)
+_NEW_PAGES: list[Any] = []  # the newest pages that appeared in the context, newest last (headless popup following)
+_NEW_PAGES_TOTAL = 0  # how many pages have ever appeared: the list above keeps only the last 50 of them
+_HEADLESS_BROWSER: Any = None  # the Chrome this process launched itself (headless mode), closed before a relaunch
 _PANE_SEEN: dict[str, Any] = {"active": None, "ids": frozenset()}  # what the last sync saw of the pane's tabs
 _NOTES: list[str] = []  # one-line notices appended to the next tool result (tab followed, popup opened)
 _NOTES_LOCK = threading.Lock()
@@ -477,7 +479,9 @@ async def _prepare_context(context: Any, filter_requests: bool = True) -> None:
     _PREPARED_CONTEXTS.add(id(context))
 
     def _on_page(new_page: Any) -> None:
+        global _NEW_PAGES_TOTAL
         _NEW_PAGES.append(new_page)
+        _NEW_PAGES_TOTAL += 1
         del _NEW_PAGES[:-50]
 
     context.on("page", _on_page)
@@ -644,9 +648,13 @@ def _call(factory: Any, timeout: float = 60.0) -> Any:
     try:
         result = fut.result(timeout=timeout)
     except concurrent.futures.TimeoutError:
+        # Stop the work too: a call the model was told had timed out must not click or submit later
+        # (and then be repeated by the retry it was invited to make: finding P4-12).
+        fut.cancel()
         raise RuntimeError(
-            f"BROWSER TIMEOUT after {timeout:.0f}s — the page may be stuck. "
-            "Use browser_wait or retry."
+            f"BROWSER TIMEOUT after {timeout:.0f}s — the page may be stuck. The action was stopped, but a "
+            "step already sent to the page may have happened: take a browser_snapshot to see the page "
+            "before retrying."
         ) from None
     # A notice raised while the call ran (the tab changed, a popup opened) rides on the
     # result so the model is told. After an error it stays queued for the next call.
@@ -672,7 +680,7 @@ async def _ensure_browser(quiet: bool = False) -> Any:
     """The page the tools act on: the owner's active pane tab when the Electron shell is there,
     otherwise a Chrome launched here (once per process). ``quiet`` skips the "following the
     owner" notice for a caller that tells the model something more specific itself."""
-    global _CONTEXT, _PAGE, _LAUNCH_ERROR, _PAGE_MODE, _PW
+    global _CONTEXT, _PAGE, _LAUNCH_ERROR, _PAGE_MODE, _PW, _HEADLESS_BROWSER
     electron_pane = _electron_pane_configured()
     if electron_pane is None and _PAGE is not None and not _PAGE.is_closed():
         return _PAGE
@@ -725,11 +733,15 @@ async def _ensure_browser(quiet: bool = False) -> Any:
             _note(f"the previous tab was closed; now on the most recent open tab ({_PAGE.url or 'blank'}).")
             return _PAGE
 
+    # About to launch another Chrome: the one launched earlier (if any) has no tab left, so it is
+    # closed first instead of staying behind as a stranded process (finding P4-13).
+    await _close_headless_browser()
     headless = os.environ.get("DOURMOUSE_BROWSER_HEADLESS", "1").strip() != "0"
     try:
         if _PW is None:
             _PW = await async_playwright().start()
         browser = await _PW.chromium.launch(channel="chrome", headless=headless)
+        _HEADLESS_BROWSER = browser
     except Exception as exc:  # noqa: BLE001 - launch failures, readable
         _LAUNCH_ERROR = (
             f"BROWSER LAUNCH FAILED: {type(exc).__name__}: {exc} — the agent "
@@ -759,12 +771,70 @@ async def _ensure_browser(quiet: bool = False) -> Any:
     return page
 
 
+async def _close_headless_browser() -> None:
+    """Close the Chrome this process launched (headless mode), with the context it held."""
+    global _HEADLESS_BROWSER
+    old, _HEADLESS_BROWSER = _HEADLESS_BROWSER, None
+    if _CONTEXT is not None:
+        _PREPARED_CONTEXTS.discard(id(_CONTEXT))  # an id may be reused by the next context
+    if old is None:
+        return
+    try:
+        await old.close()
+    except Exception as exc:  # noqa: BLE001 - an already-dead Chrome is the usual reason
+        _log("engine", f"closing the previous headless Chrome failed: {type(exc).__name__}: {exc}")
+
+
 def _is_http_url(url: str) -> bool:
     try:
         parts = urllib.parse.urlparse(url)
     except ValueError:
         return False
     return parts.scheme in ("http", "https") and bool(parts.netloc)
+
+
+_KEY_PRESS_SECONDS = 8.0
+
+
+async def _press_key(page: Any, key: str) -> None:
+    """One key press with a time limit. Playwright's ``Keyboard.press(key, *, delay=None)`` takes no
+    ``timeout`` (passing one raised TypeError on every call: finding P4-8), so the limit is put on
+    the awaiting instead."""
+    try:
+        await asyncio.wait_for(page.keyboard.press(key), _KEY_PRESS_SECONDS)
+    except asyncio.TimeoutError:
+        raise RuntimeError(f"BROWSER KEY PRESS TIMED OUT after {_KEY_PRESS_SECONDS:.0f}s (key={key!r}); the page may be stuck.") from None
+
+
+def _is_loopback_host(host: str) -> bool:
+    host = (host or "").strip("[]").lower()
+    if host == "localhost" or host.endswith(".localhost") or host == "::1":
+        return True
+    parts = host.split(".")
+    return len(parts) == 4 and parts[0] == "127" and all(p.isdigit() and int(p) < 256 for p in parts)
+
+
+def _signin_landing_problem(page_url: str, vault_host: str) -> str | None:
+    """None when ``page_url`` is on the host the stored credentials belong to (same host name, same
+    port, https; plain http only for a loopback address, which never leaves this machine), else a
+    short reason. The stored password is typed only after this passes (finding P4-9)."""
+    try:
+        want = urllib.parse.urlsplit("//" + vault_host)
+        got = urllib.parse.urlsplit(page_url)
+        want_host, got_host = (want.hostname or "").lower(), (got.hostname or "").lower()
+        scheme = got.scheme.lower()
+        want_port = want.port or (80 if scheme == "http" else 443)
+        got_port = got.port or (80 if scheme == "http" else 443)
+    except ValueError:
+        return f"the page address {page_url[:80]!r} could not be read"
+    if scheme not in ("http", "https") or not got_host:
+        return f"the page is at {page_url[:80]!r}, not a web page of {vault_host}"
+    if got_host != want_host or got_port != want_port:
+        shown = got_host + (f":{got.port}" if got.port else "")
+        return f"the page is on {shown}, not {vault_host}"
+    if scheme != "https" and not _is_loopback_host(got_host):
+        return f"the page is on plain http ({got_host}), and a password is never typed over http"
+    return None
 
 
 # --------------------------------------------------------------------------- #
@@ -1231,8 +1301,15 @@ async def _page_summary(page: Any, max_elems: int = 60) -> str:
 
 
 def _action_mark() -> dict[str, Any]:
-    """What the world looked like just before an action that may open or close a tab."""
-    return {"new": len(_NEW_PAGES), "seen": dict(_PANE_SEEN)}
+    """What the world looked like just before an action that may open or close a tab. ``new`` is how
+    many pages had ever appeared (not the length of the trimmed list, which stops growing at 50: P4-11)."""
+    return {"new": _NEW_PAGES_TOTAL, "seen": dict(_PANE_SEEN)}
+
+
+def _new_pages_since(total: int) -> list[Any]:
+    """The pages that appeared after ``total`` pages had been seen (those still in the list)."""
+    trimmed = _NEW_PAGES_TOTAL - len(_NEW_PAGES)
+    return _NEW_PAGES[max(0, total - trimmed) :]
 
 
 async def _settle_after_action(page: Any, mark: dict[str, Any]) -> Any:
@@ -1271,7 +1348,7 @@ async def _settle_after_action(page: Any, mark: dict[str, Any]) -> Any:
     for delay in _POPUP_POLL_SECONDS:
         if delay:
             await asyncio.sleep(delay)
-        fresh = [p for p in _NEW_PAGES[mark["new"] :] if not p.is_closed()]
+        fresh = [p for p in _new_pages_since(mark["new"]) if not p.is_closed()]
         if fresh:
             newest = fresh[-1]
             try:
@@ -1284,6 +1361,268 @@ async def _settle_after_action(page: Any, mark: dict[str, Any]) -> Any:
     if page.is_closed():
         return await _ensure_browser()
     return page
+
+
+# --------------------------------------------------------------------------- #
+# Clicks on submit-like controls ask the owner first (owner decision 2026-10-09, finding H-1).
+#
+# browser_submit and an Enter key press already ask; a click on "Send", "Buy", "Place order" or a
+# form's submit button did the same thing without asking. The control under the click point is read
+# in the isolated world (page scripts cannot change what it reports) and judged by _click_reasons.
+# A judged-submit-like click is not performed here: dispatch asks the owner through click_gate()
+# (the hook for dispatch._argument_gate), which leaves a one-shot approval for exactly this control
+# on exactly this page; the handler consumes it. With no approval the handler refuses, so a caller
+# that does not ask (a path that skips dispatch) can never click such a control by accident.
+# The owner's own clicks in the pane never come through browser_click and are never gated.
+# --------------------------------------------------------------------------- #
+
+_CLICK_FACTS_JS = r"""function (p) {
+  const deep = (x, y) => {
+    let el = document.elementFromPoint(x, y);
+    while (el && el.shadowRoot) {
+      const inner = el.shadowRoot.elementFromPoint(x, y);
+      if (!inner || inner === el) break;
+      el = inner;
+    }
+    return el;
+  };
+  const hit = deep(p.x, p.y);
+  if (!hit) return { found: false };
+  const t = hit.closest("button, a[href], input, select, summary, [role='button'], [role='link'], [role='menuitem'], [onclick]") || hit;
+  const tag = t.tagName.toLowerCase();
+  const attr = (n) => (t.getAttribute(n) || "");
+  const txt = (n) => ((n && (n.innerText || n.textContent)) || "").trim();
+  let name = attr("aria-label").trim();
+  if (!name && attr("aria-labelledby")) {
+    const root = t.getRootNode();
+    name = attr("aria-labelledby").split(/\s+/).map((i) => txt(root.getElementById ? root.getElementById(i) : null)).filter(Boolean).join(" ");
+  }
+  if (!name && tag === "input") name = String(t.value || attr("alt") || "");
+  if (!name) name = txt(t);
+  if (!name) name = attr("title");
+  if (!name) { const img = t.querySelector && t.querySelector("img[alt]"); if (img) name = img.getAttribute("alt") || ""; }
+  const type = (tag === "button" || tag === "input") ? String(t.type || "").toLowerCase() : "";
+  const form = (tag === "button" || tag === "input") ? t.form : null;
+  const submits = Boolean(form) && !t.disabled && (tag === "button" ? (type === "submit" || type === "") : (type === "submit" || type === "image"));
+  const cls = typeof t.className === "string" ? t.className : (t.getAttribute("class") || "");
+  const words = [t.id, attr("name"), cls, attr("data-testid"), attr("data-action"), attr("data-test")].join(" ");
+  let action = "";
+  if (submits) { try { action = String(t.formAction || form.action || ""); } catch (_) { action = ""; } }
+  return {
+    found: true, tag, type, role: attr("role").toLowerCase(), submits,
+    name: name.replace(/\s+/g, " ").slice(0, 80), words: words.slice(0, 200),
+    href: tag === "a" ? String(t.href || "") : "", action: action.slice(0, 200),
+  };
+}"""
+
+# A control whose label starts with one of these does the thing the word says.
+_ACT_WORDS = frozenset({
+    "send", "submit", "buy", "pay", "purchase", "checkout", "confirm", "transfer", "withdraw", "deposit",
+    "delete", "erase", "subscribe", "unsubscribe", "donate", "publish", "post", "tweet", "reply", "reserve",
+    "approve", "authorize", "authorise", "accept", "agree", "allow", "register", "signup", "signin", "login",
+    "book", "order",
+})
+# Words that count anywhere in the first few words of a BUTTON's label ("Confirm and pay"), not only first.
+_BUTTON_WORDS = _ACT_WORDS - {"order"}
+# A link (plain navigation) is judged more narrowly: "Order history" and "Post office" are pages to read.
+_LINK_WORDS = frozenset({
+    "send", "submit", "buy", "pay", "purchase", "checkout", "confirm", "transfer", "withdraw", "delete",
+    "erase", "subscribe", "unsubscribe", "donate", "publish",
+})
+_ACT_PHRASES = (
+    "place order", "place your order", "order now", "complete order", "complete purchase", "submit order",
+    "confirm order", "check out", "sign in", "log in", "sign up", "create account", "pay now", "buy now",
+    "add payment", "send message", "transfer money",
+)
+_LINK_PATH_WORDS = frozenset({"delete", "erase", "transfer", "withdraw", "confirm", "purchase", "unsubscribe"})
+_ATTR_WORDS = frozenset({
+    "submit", "buy", "pay", "purchase", "checkout", "send", "confirm", "transfer", "withdraw", "delete",
+    "donate", "subscribe", "publish", "signin", "login", "signup",
+})
+_ATTR_PHRASES = ("place order", "order now", "complete order", "submit order", "confirm order", "sign in", "log in", "sign up")
+
+
+def _words_of(raw: str) -> list[str]:
+    """Lower-case words of a label, a class list or an id: camelCase and punctuation split them."""
+    spaced = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", raw or "")
+    return re.findall(r"[a-z0-9]+", spaced.lower())
+
+
+def _click_reasons(facts: dict[str, Any]) -> list[str]:
+    """Why a click on this control should ask the owner first; an empty list means a plain control.
+
+    ``facts`` is what _CLICK_FACTS_JS reports. Judged: a form's submit button or image button; the
+    label (first word, or a known phrase; buttons also anywhere in the first words); the element's
+    id, name, class and test-id words; and, for a link, a destructive word in its address path."""
+    if not facts or not facts.get("found"):
+        return []
+    reasons: list[str] = []
+    name = str(facts.get("name") or "")
+    words = _words_of(name)
+    is_link = facts.get("tag") == "a" or facts.get("role") == "link"
+    if facts.get("submits"):
+        action = str(facts.get("action") or "")
+        reasons.append("it submits a form" + (f" to {action.split('?')[0]}" if action else ""))
+    joined = " ".join(words)
+    phrase = next((p for p in _ACT_PHRASES if joined.startswith(p) or f" {p}" in f" {joined}"[:80]), "")
+    if phrase and not (is_link and phrase in ("sign in", "log in", "sign up", "create account")):
+        reasons.append(f'its label says "{_one_line(name, 60)}"')
+    elif words:
+        pool = _LINK_WORDS if is_link else _BUTTON_WORDS
+        first = words[0] in (_LINK_WORDS if is_link else _ACT_WORDS)
+        anywhere = (not is_link) and any(w in pool for w in words[:5])
+        if first or anywhere:
+            reasons.append(f'its label says "{_one_line(name, 60)}"')
+    if not is_link:
+        attr_words = _words_of(str(facts.get("words") or ""))
+        hit = next((w for w in attr_words if w in _ATTR_WORDS), "")
+        joined_attr = " ".join(attr_words)
+        if not hit:
+            hit = next((p for p in _ATTR_PHRASES if p in joined_attr), "")
+        if hit:
+            reasons.append(f'its id, name or class names "{hit}"')
+    else:
+        path = urllib.parse.urlsplit(str(facts.get("href") or "")).path
+        hit = next((w for w in _words_of(path) if w in _LINK_PATH_WORDS), "")
+        if hit:
+            reasons.append(f'its link goes to an address with "{hit}" in its path')
+    return reasons
+
+
+class _ClickNeedsApproval(RuntimeError):
+    """A click on a submit-like control that the owner has not approved; the message is the question."""
+
+
+async def _safe_title(page: Any) -> str:
+    try:
+        return await page.title()
+    except Exception:  # noqa: BLE001 - the title is only wording
+        return ""
+
+
+def _one_line(text: str, limit: int) -> str:
+    one = " ".join(str(text or "").split())
+    return one if len(one) <= limit else one[: limit - 3] + "..."
+
+
+def _click_prompt(facts: dict[str, Any], reasons: list[str], page_url: str, page_title: str) -> str:
+    """What the owner is asked: which control, on which page, and why it looks like a submit."""
+    kind = {"a": "link", "input": "input", "button": "button"}.get(str(facts.get("tag")), "control")
+    where = urllib.parse.urlsplit(page_url)
+    shown_url = _one_line(f"{where.scheme}://{where.netloc}{where.path}" if where.netloc else page_url, 120)
+    title = f' "{_one_line(page_title, 60)}"' if page_title else ""
+    label = _one_line(str(facts.get("name") or ""), 60) or "(no label)"
+    return (
+        f'Click the {kind} "{label}" on the page{title} at {shown_url}? '
+        f"This looks like it sends, submits or confirms something: {'; '.join(reasons)}."
+    )
+
+
+_CLICK_APPROVALS: dict[tuple[str, str, str, str], float] = {}
+_CLICK_APPROVALS_LOCK = threading.Lock()
+_CLICK_APPROVAL_SECONDS = 600.0
+
+
+def _approval_key(target: str, page_url: str, facts: dict[str, Any]) -> tuple[str, str, str, str]:
+    return (target, page_url.split("#")[0], str(facts.get("tag") or ""), str(facts.get("name") or ""))
+
+
+def _grant_click_approval(key: tuple[str, str, str, str]) -> None:
+    now = time.monotonic()
+    with _CLICK_APPROVALS_LOCK:
+        for old in [k for k, at in _CLICK_APPROVALS.items() if now - at > _CLICK_APPROVAL_SECONDS]:
+            del _CLICK_APPROVALS[old]
+        _CLICK_APPROVALS[key] = now
+
+
+def _take_click_approval(key: tuple[str, str, str, str]) -> bool:
+    with _CLICK_APPROVALS_LOCK:
+        at = _CLICK_APPROVALS.pop(key, None)
+    return at is not None and time.monotonic() - at <= _CLICK_APPROVAL_SECONDS
+
+
+async def _facts_at(page: Any, x: float, y: float) -> dict[str, Any]:
+    """What is under the point (x, y), read in the isolated world."""
+    world = _WORLDS.get(page)
+    if world is None or world.get("ctx") is None:
+        world = await _make_world(page, world["session"] if world else None)
+    for second_try in (False, True):
+        try:
+            res = await world["session"].send(
+                "Runtime.callFunctionOn",
+                {
+                    "functionDeclaration": _CLICK_FACTS_JS,
+                    "executionContextId": world["ctx"],
+                    "arguments": [{"value": {"x": float(x), "y": float(y)}}],
+                    "returnByValue": True,
+                },
+            )
+        except Exception as exc:  # noqa: BLE001 - the context is gone after a navigation
+            if not _is_gone_context(exc) or second_try:
+                raise
+            world["ctx"] = None
+            world = await _make_world(page, world["session"])
+            continue
+        if res.get("exceptionDetails"):
+            detail = (res["exceptionDetails"].get("exception") or {}).get("description") or res["exceptionDetails"].get("text")
+            raise RuntimeError(f"CLICK CHECK script error: {detail}")
+        return (res.get("result") or {}).get("value") or {"found": False}
+    raise RuntimeError("CLICK CHECK UNAVAILABLE: the page kept replacing its document.")  # pragma: no cover
+
+
+async def _click_facts(page: Any, target: str) -> dict[str, Any] | None:
+    """The facts about the control ``target`` names, or None when no control can be read (the click
+    itself then reports the same problem). Only reads and scrolls the control into view, as a click would."""
+    num = _element_id(target)
+    if num is not None:
+        try:
+            res = await _id_prepare(page, num, "click")
+        except _IdRefused:
+            return None
+        return await _facts_at(page, res["x"], res["y"])
+    try:
+        loc, _how = await _find(page, target)
+    except RuntimeError:
+        return None
+    try:
+        await loc.scroll_into_view_if_needed(timeout=5_000)
+        box = await loc.bounding_box()
+    except Exception as exc:  # noqa: BLE001 - detached, hidden: the click reports it
+        _log("engine", f"click check could not place {target!r}: {type(exc).__name__}")
+        return None
+    if not box:
+        return None
+    return await _facts_at(page, box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+
+
+def click_gate(arguments: dict[str, Any]) -> tuple[str, str] | None:
+    """The hook for dispatch._argument_gate: ``("confirm", prompt)`` when browser_click would click a
+    submit-like control, else None. When it answers "confirm" it also leaves a one-shot approval for
+    that exact control on that exact page, which browser_click uses if the owner says yes (and which
+    expires after ten minutes if the owner does not). It reads the page and never clicks. It does not
+    open a browser: with no page there is nothing to click."""
+    target = str((arguments or {}).get("target") or "").strip()
+    if not target:
+        return None
+    if _electron_pane_configured() is None and (_PAGE is None or _PAGE.is_closed()):
+        return None
+
+    async def _probe() -> tuple[dict[str, Any] | None, str, str]:
+        page = await _ensure_browser(quiet=True)
+        return await _click_facts(page, target), page.url, await _safe_title(page)
+
+    try:
+        facts, url, title = _call(_probe, timeout=20.0)
+    except RuntimeError as exc:
+        # No page, a stuck page or a refused id: the click handler re-reads the control itself and
+        # refuses a submit-like one that was not approved, so nothing is let through here.
+        _log("click", f"click check skipped: {_one_line(str(exc), 120)}")
+        return None
+    reasons = _click_reasons(facts or {})
+    if not reasons:
+        return None
+    _grant_click_approval(_approval_key(target, url, facts or {}))
+    return ("confirm", _click_prompt(facts or {}, reasons, url, title))
 
 
 # --------------------------------------------------------------------------- #
@@ -1429,25 +1768,38 @@ def browser_click(arguments: dict[str, Any]) -> str:
     async def _click():
         page = await _ensure_browser()
         mark = _action_mark()
-        async with _acting(page, "click") as claim:
-            num = _element_id(target)
-            if num is not None:
-                res = await _click_by_id(page, num, claim)
-                what, how = f"e{num} ({res.get('name', '')!r})", "element id"
-            else:
-                loc, how = await _find(page, target)
-                what = repr(target)
-                await claim.check()
-                try:
-                    async with claim.pointing():
-                        await loc.click(timeout=8_000)
-                except _OwnerControl:
-                    raise
-                except Exception as exc:  # noqa: BLE001
-                    raise RuntimeError(
-                        f"BROWSER CLICK FAILED: {type(exc).__name__}: {exc} (target={target!r})"
-                    ) from exc
-            page = await _settle_after_action(page, mark)
+        try:
+            async with _acting(page, "click") as claim:
+                # Finding H-1: a click that sends, submits or confirms asks the owner first.
+                facts = await _click_facts(page, target)
+                reasons = _click_reasons(facts or {})
+                if reasons and not _take_click_approval(_approval_key(target, page.url, facts or {})):
+                    raise _ClickNeedsApproval(_click_prompt(facts or {}, reasons, page.url, await _safe_title(page)))
+                num = _element_id(target)
+                if num is not None:
+                    res = await _click_by_id(page, num, claim)
+                    what, how = f"e{num} ({res.get('name', '')!r})", "element id"
+                else:
+                    loc, how = await _find(page, target)
+                    what = repr(target)
+                    await claim.check()
+                    try:
+                        async with claim.pointing():
+                            await loc.click(timeout=8_000)
+                    except _OwnerControl:
+                        raise
+                    except Exception as exc:  # noqa: BLE001
+                        raise RuntimeError(
+                            f"BROWSER CLICK FAILED: {type(exc).__name__}: {exc} (target={target!r})"
+                        ) from exc
+                page = await _settle_after_action(page, mark)
+        except _ClickNeedsApproval as need:
+            return (
+                f"CONFIRMATION REQUIRED: {need} NOT clicked. Clicks like this need the owner's approval and "
+                "this call did not get it, so nothing was done. Tell the owner exactly what you wanted to click "
+                "and on which page; the owner can click it in the browser pane, or ask for it again so the "
+                "approval prompt can be shown. (browser agent)"
+            )
         try:
             await page.wait_for_load_state("domcontentloaded", timeout=15_000)
         except Exception:  # noqa: BLE001 - a click need not navigate
@@ -1538,7 +1890,7 @@ def browser_press(arguments: dict[str, Any]) -> str:
         mark = _action_mark()
         async with _acting(page, "press"):
             try:
-                await page.keyboard.press(key, timeout=8_000)
+                await _press_key(page, key)
             except Exception as exc:  # noqa: BLE001
                 raise RuntimeError(
                     f"BROWSER PRESS FAILED: {type(exc).__name__}: {exc} (key={key!r})"
@@ -1570,7 +1922,7 @@ def browser_submit(arguments: dict[str, Any]) -> str:
                 focused = None
             await claim.check()
             if focused in ("INPUT", "TEXTAREA", "SELECT"):
-                await page.keyboard.press("Enter", timeout=8_000)
+                await _press_key(page, "Enter")
             else:
                 sub = page.locator(
                     "button[type='submit'], input[type='submit'], "
@@ -1864,6 +2216,9 @@ def browser_screenshot(arguments: dict[str, Any]) -> str:
 # --------------------------------------------------------------------------- #
 
 
+_VAULT_LOCK = threading.Lock()  # one read-modify-write of the vault at a time (finding P4-10)
+
+
 def _vault_sites() -> list[str]:
     if not _VAULT_PATH.exists():
         return []
@@ -1871,7 +2226,51 @@ def _vault_sites() -> list[str]:
         data = json.loads(_VAULT_PATH.read_text(encoding="utf-8"))
     except Exception:  # noqa: BLE001 - corrupt vault is an honest empty
         return []
-    return sorted(data.keys())
+    return sorted(data.keys()) if isinstance(data, dict) else []
+
+
+def _vault_write(data: dict[str, Any]) -> None:
+    """Write the vault whole: a temp file created private (0600) in the same folder, then renamed over
+    the vault. The passwords are never in a file anyone else can read, and a crash or a failed write
+    leaves the previous vault exactly as it was. Caller holds ``_VAULT_LOCK``."""
+    _DATA_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = _VAULT_PATH.with_name(f"{_VAULT_PATH.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps(data, indent=2))
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.chmod(tmp, 0o600)  # an older temp file of the same name keeps its mode through O_TRUNC
+        os.replace(tmp, _VAULT_PATH)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise
+
+
+def _vault_load_for_update() -> tuple[dict[str, Any], str]:
+    """The vault as a dict to change, and a note for the owner. A vault that cannot be read is moved
+    aside to ``<name>.corrupt-<time>`` (kept, 0600) instead of being treated as empty and overwritten,
+    which used to destroy every other stored credential. Caller holds ``_VAULT_LOCK``."""
+    if not _VAULT_PATH.exists():
+        return {}, ""
+    try:
+        data = json.loads(_VAULT_PATH.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            return data, ""
+    except (OSError, ValueError):
+        pass
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    aside = _VAULT_PATH.with_name(f"{_VAULT_PATH.name}.corrupt-{stamp}")
+    os.replace(_VAULT_PATH, aside)
+    with contextlib.suppress(OSError):
+        os.chmod(aside, 0o600)
+    _log("creds", f"the vault could not be read; kept as {aside.name}")
+    return {}, (
+        f" NOTE: the existing vault file was corrupt and could not be read. It was kept as {aside.name} "
+        "(not deleted); the credentials in it need restoring by hand."
+    )
 
 
 def browser_creds_store(arguments: dict[str, Any]) -> str:
@@ -1891,28 +2290,22 @@ def browser_creds_store(arguments: dict[str, Any]) -> str:
             "REFUSED: the site must be a real domain (e.g. example.com or "
             "https://example.com) — got a malformed host."
         )
-    _DATA_DIR.mkdir(parents=True, exist_ok=True)
-    data = {}
-    if _VAULT_PATH.exists():
+    with _VAULT_LOCK:
+        data, note = _vault_load_for_update()
+        data[netloc] = {
+            "username": username,
+            "password": str(password),
+            "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        }
         try:
-            data = json.loads(_VAULT_PATH.read_text(encoding="utf-8"))
-        except Exception:  # noqa: BLE001
-            data = {}
-    data[urllib.parse.urlparse(site).netloc] = {
-        "username": username,
-        "password": str(password),
-        "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-    }
-    _VAULT_PATH.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    try:
-        os.chmod(_VAULT_PATH, 0o600)
-    except OSError:  # pragma: no cover - best-effort on exotic filesystems
-        pass
-    _log("creds", f"stored credentials for {urllib.parse.urlparse(site).netloc}")
+            _vault_write(data)
+        except OSError as exc:
+            return f"ERROR: the vault could not be written ({type(exc).__name__}: {exc}). Nothing was stored.{note}"
+    _log("creds", f"stored credentials for {netloc}")
     return (
-        f"CREDENTIALS STORED for {urllib.parse.urlparse(site).netloc} "
+        f"CREDENTIALS STORED for {netloc} "
         f"(user {username!r}). Password is kept in the 0600 vault and is "
-        "never shown again."
+        f"never shown again.{note}"
     )
 
 
@@ -1938,15 +2331,21 @@ def browser_creds_forget(arguments: dict[str, Any]) -> str:
         return "ERROR: browser_creds_forget requires a site."
     if not _VAULT_PATH.exists():
         return "VAULT: empty — nothing to forget."
-    try:
-        data = json.loads(_VAULT_PATH.read_text(encoding="utf-8"))
-    except Exception:  # noqa: BLE001
-        return "VAULT: unreadable — nothing removed (file may be corrupt)."
     netloc = urllib.parse.urlparse(site if _is_http_url(site) else "https://" + site).netloc
-    if netloc not in data:
-        return f"VAULT: no credentials stored for {netloc!r}."
-    del data[netloc]
-    _VAULT_PATH.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    with _VAULT_LOCK:
+        try:
+            data = json.loads(_VAULT_PATH.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            return "VAULT: unreadable — nothing removed (file may be corrupt)."
+        if not isinstance(data, dict):
+            return "VAULT: unreadable — nothing removed (file may be corrupt)."
+        if netloc not in data:
+            return f"VAULT: no credentials stored for {netloc!r}."
+        del data[netloc]
+        try:
+            _vault_write(data)
+        except OSError as exc:
+            return f"ERROR: the vault could not be written ({type(exc).__name__}: {exc}). Nothing was removed."
     _log("creds", f"removed credentials for {netloc}")
     return f"CREDENTIALS REMOVED for {netloc}."
 
@@ -1958,21 +2357,29 @@ def browser_signin(arguments: dict[str, Any]) -> str:
     from the vault, submit, and report where the page landed. Only ever runs
     after a human approves the site.
     """
-    site = (arguments.get("site") or "").strip().lower()
+    site = (arguments.get("site") or "").strip()
     if not site:
         return "ERROR: browser_signin requires a site."
     if not _is_http_url(site):
         site = "https://" + site.lstrip("/")
     if not _is_http_url(site):
         return "REFUSED: the site must be a real domain."
+    # Host names are not case sensitive; a path and query are, so only the front part is lowered.
+    split = urllib.parse.urlsplit(site)
+    site = split._replace(scheme=split.scheme.lower(), netloc=split.netloc.lower()).geturl()
     netloc = urllib.parse.urlparse(site).netloc
+    if urllib.parse.urlparse(site).scheme != "https" and not _is_loopback_host(urllib.parse.urlparse(site).hostname or ""):
+        return (
+            f"REFUSED: sign-in is only done over https, and {site.split('?')[0]!r} is plain http, "
+            "so the password would be sent in the clear. Nothing was opened."
+        )
     if not _VAULT_PATH.exists():
         return f"NO CREDENTIALS for {netloc}: store them with browser_creds_store first."
     try:
         data = json.loads(_VAULT_PATH.read_text(encoding="utf-8"))
     except Exception:  # noqa: BLE001
         return "VAULT: unreadable — cannot sign in (file may be corrupt)."
-    creds = data.get(netloc)
+    creds = data.get(netloc) if isinstance(data, dict) else None
     if not creds:
         return f"NO CREDENTIALS for {netloc}: store them with browser_creds_store first."
 
@@ -1983,6 +2390,22 @@ def browser_signin(arguments: dict[str, Any]) -> str:
 
     async def _signin_steps(page: Any, claim: _NoClaim) -> str:
         await page.goto(site, timeout=30_000, wait_until="domcontentloaded")
+
+        def _off_site(stage: str) -> str | None:
+            """A refusal text when the page is no longer on the stored credentials' host (finding P4-9)."""
+            problem = _signin_landing_problem(page.url, netloc)
+            if problem is None:
+                return None
+            _log("signin", f"refused: {problem}")
+            return (
+                f"REFUSED: the stored password for {netloc} was NOT typed ({stage}): {problem}. A redirect "
+                "or a link took the page somewhere else. Nothing was typed into it. Open the sign-in page "
+                "yourself with browser_open, check the address, and ask the owner before going on."
+            )
+
+        refusal = _off_site("after loading the page")
+        if refusal:
+            return refusal
         # Username field: email/username/text inputs, labeled or placeholder.
         user_sel = (
             "input[type='email'], input[type='text'][name*='user' i], "
@@ -2000,8 +2423,14 @@ def browser_signin(arguments: dict[str, Any]) -> str:
                 "browser_fill / browser_click / browser_submit."
             )
         await claim.check()
+        refusal = _off_site("before filling the user name")
+        if refusal:
+            return refusal
         await user_loc.first.fill(creds["username"], timeout=8_000)
         await claim.check()
+        refusal = _off_site("before filling the password")
+        if refusal:
+            return refusal
         await pw_loc.first.fill(creds["password"], timeout=8_000)
         url_before = page.url
         mark = _action_mark()
@@ -2014,7 +2443,7 @@ def browser_signin(arguments: dict[str, Any]) -> str:
             async with claim.pointing():
                 await sub.first.click(timeout=8_000)
         else:
-            await page.keyboard.press("Enter", timeout=8_000)
+            await _press_key(page, "Enter")
         page = await _settle_after_action(page, mark)
         try:
             await page.wait_for_load_state("networkidle", timeout=20_000)
@@ -2049,23 +2478,40 @@ def latest_screenshot(name: str = "latest") -> Path | None:
 
 
 def close_browser() -> None:
-    """Best-effort shutdown (called from server teardown paths)."""
-    global _CONTEXT, _PAGE
+    """Best-effort shutdown (called from server teardown paths): the page context, the Chrome this
+    process launched, the CDP connection to the Electron shell, and the Playwright driver."""
     if _LOOP is None or _LOOP.is_closed():
         return
 
     async def _close():
-        global _CONTEXT, _PAGE
-        try:
-            if _CONTEXT is not None:
+        global _CONTEXT, _PAGE, _PW, _BROWSER, _PAGE_MODE
+        if _CONTEXT is not None:
+            try:
                 await _CONTEXT.close()
-        except Exception:  # noqa: BLE001 - teardown must never raise
-            pass
+            except Exception as exc:  # noqa: BLE001 - teardown must never raise
+                _log("engine", f"closing the browser context failed: {type(exc).__name__}: {exc}")
         _CONTEXT = None
         _PAGE = None
+        _PAGE_MODE = None
+        await _close_headless_browser()
+        if _BROWSER is not None:
+            try:
+                await _BROWSER.close()  # only disconnects from the Electron shell's DevTools port
+            except Exception as exc:  # noqa: BLE001 - teardown must never raise
+                _log("engine", f"disconnecting from the pane failed: {type(exc).__name__}: {exc}")
+        _BROWSER = None
+        if _PW is not None:
+            try:
+                await _PW.stop()
+            except Exception as exc:  # noqa: BLE001 - teardown must never raise
+                _log("engine", f"stopping the Playwright driver failed: {type(exc).__name__}: {exc}")
+        _PW = None
+        _WORLDS.clear()
+        _TARGET_IDS.clear()
+        _PREPARED_CONTEXTS.clear()
 
     try:
         fut = asyncio.run_coroutine_threadsafe(_close(), _LOOP)
         fut.result(timeout=10)
-    except Exception:  # noqa: BLE001 - teardown must never raise
-        pass
+    except Exception as exc:  # noqa: BLE001 - teardown must never raise
+        _log("engine", f"browser shutdown did not finish: {type(exc).__name__}: {exc}")

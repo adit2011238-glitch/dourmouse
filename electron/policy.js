@@ -173,6 +173,11 @@ const EXECUTABLE_EXT = new Set([
   ".php", ".js", ".mjs", ".jse", ".vbs", ".wsf", ".ps1", ".bat", ".cmd", ".exe", ".msi", ".com", ".scr", ".lnk",
   ".webloc", ".inetloc", ".url", ".osax", ".prefpane", ".saver", ".plugin", ".kext", ".xpc", ".dylib", ".so", ".pyc",
   ".mobileconfig", ".configprofile", ".ics",
+  // Finding A-11: documents that carry script. Opened, they go to the default browser or app, where the
+  // script runs from a file:// origin (web pages and vector images) or with macros (Office macro formats).
+  ".html", ".htm", ".xhtml", ".xht", ".shtml", ".svg", ".svgz", ".xml", ".xsl", ".xslt", ".webarchive", ".mht", ".mhtml", ".hta", ".chm",
+  ".jnlp", ".gadget", ".reg", ".iqy", ".slk", ".vbe", ".ws", ".wsc", ".wsh", ".cpl", ".msc", ".pif", ".application", ".appref-ms",
+  ".docm", ".dotm", ".xlsm", ".xltm", ".xlam", ".pptm", ".potm", ".ppam", ".ppsm", ".sldm",
 ]);
 function isOpenableDownload(name) {
   const n = String(name || "");

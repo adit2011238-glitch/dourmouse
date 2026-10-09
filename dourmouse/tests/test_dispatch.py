@@ -3275,13 +3275,18 @@ class TestNvidiaAccountPoolWiring:
         failed."""
         from dourmouse.config import NvidiaConfig
 
+        # FR P2-6: three accounts now. The old two-account version pinned the
+        # bug (the first rotation handed back key1, the account that had just
+        # failed); key1 is now the in-use account, so two rotations spend two
+        # accounts and the third is the one left.
         monkeypatch.setenv("NVIDIA_API_KEY", "key1")
         monkeypatch.setenv("NVIDIA_API_KEY_2", "key2")
+        monkeypatch.setenv("NVIDIA_API_KEY_3", "key3")
         config = NvidiaConfig(api_key="key1", base_url="https://x", model="m")
         factory = dispatch_module._nvidia_rotation_factory(object(), config, "m")
         first_client, first_model = factory()
         second_client, second_model = factory()
-        assert first_client.api_key != second_client.api_key
+        assert first_client.api_key == "key2" and second_client.api_key == "key3"
         assert first_model == second_model == "m"
 
     def test_pool_exhaustion_falls_back_to_ollama_when_reachable(self, monkeypatch):

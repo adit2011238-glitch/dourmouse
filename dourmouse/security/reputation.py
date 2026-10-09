@@ -17,6 +17,7 @@ party for no reason).
 
 from __future__ import annotations
 
+import http.client
 import ipaddress
 import json
 import os
@@ -83,10 +84,15 @@ def check_ip_reputation(ip: str, timeout: float = _DEFAULT_TIMEOUT_S) -> dict[st
         return {"available": False, "reason": f"AbuseIPDB unreachable: {exc.reason}"}
     except TimeoutError:
         return {"available": False, "reason": f"AbuseIPDB timed out after {timeout}s"}
+    except (OSError, http.client.HTTPException) as exc:  # a reset or TLS failure while reading the body
+        return {"available": False, "reason": f"AbuseIPDB connection failed: {type(exc).__name__}: {exc}"}
     try:
-        payload = json.loads(raw).get("data") or {}
-    except json.JSONDecodeError:
+        body = json.loads(raw)
+    except ValueError:  # JSONDecodeError and UnicodeDecodeError
         return {"available": False, "reason": "AbuseIPDB returned a real response this parser could not read"}
+    payload = body.get("data") if isinstance(body, dict) else None
+    if not isinstance(payload, dict):
+        return {"available": False, "reason": "AbuseIPDB returned a response in an unexpected shape"}
     if "abuseConfidenceScore" not in payload:
         return {"available": False, "reason": "AbuseIPDB response did not contain a real confidence score"}
     return {

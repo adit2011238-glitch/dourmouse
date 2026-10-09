@@ -143,7 +143,16 @@ def dispatch(
                         f"ERROR: model returned invalid JSON tool arguments: {exc}"
                     )
                 else:
-                    result_text = handler(arguments)
+                    if not isinstance(arguments, dict):
+                        result_text = (
+                            "ERROR: tool arguments must be a JSON object, "
+                            f"got {type(arguments).__name__}"
+                        )
+                    else:
+                        try:
+                            result_text = handler(arguments)
+                        except Exception as exc:  # noqa: BLE001 - a tool failure is a result, not a crash
+                            result_text = f"ERROR: tool '{name}' failed: {type(exc).__name__}: {exc}"
 
             transcript.append({"type": "tool_result", "name": name, "text": result_text})
             messages.append(

@@ -41,9 +41,11 @@ agent/orchestrator decides how to apply.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import subprocess
+import tempfile
 import threading
 import uuid
 from pathlib import Path
@@ -205,6 +207,7 @@ _SETTINGS_OVERRIDE_ARGS = (
 )
 _mcp_config_path_cache: str | None = None
 _mcp_config_lock = threading.Lock()
+_log = logging.getLogger(__name__)
 
 #: Must match mcp_bridge.py's own _TOOLCALL_LOG_ENV_VAR literally -- kept as
 #: a separate local constant (not imported) for the same reason
@@ -233,6 +236,63 @@ def _ensure_mcp_config_path() -> str:
         build_mcp_config_file(path)
         _mcp_config_path_cache = str(path)
         return _mcp_config_path_cache
+
+
+def _claude_tool_args() -> tuple[list[str], bool]:
+    """The tool-scoping args for every `claude` run, and whether the
+    Dourmouse MCP bridge is wired in.
+
+    Finding P3-8: these were all built inside one try block together with
+    _ensure_mcp_config_path(), so any failure there dropped the native-tool
+    deny list too while --permission-mode bypassPermissions stayed on, and
+    the CLI then ran its own Bash/Write/Edit ungated. The deny list,
+    --strict-mcp-config (no claude.ai connectors) and the plugin override do
+    not depend on the config file, so they are always passed; only the
+    bridge itself is dropped when its config cannot be prepared, and that is
+    logged rather than silent."""
+    fixed = [
+        "--strict-mcp-config",
+        "--disallowedTools", _DISALLOWED_NATIVE_TOOLS,
+        *_SETTINGS_OVERRIDE_ARGS,
+    ]
+    try:
+        config_path = _ensure_mcp_config_path()
+    except Exception as exc:  # noqa: BLE001 - any failure leaves Claude without the bridge, never ungated
+        _log.warning(
+            "claude: Dourmouse MCP config could not be prepared (%s: %s); this run has no "
+            "Dourmouse tools, and the native Bash/Write/Edit deny list still applies.",
+            type(exc).__name__, exc,
+        )
+        return fixed, False
+    return ["--mcp-config", config_path, "--allowedTools", _MCP_ALLOWED_TOOLS, *fixed], True
+
+
+def _first_turn_task(task: str, session_args: list[str]) -> str:
+    """Prepend the once-per-session briefing (orchestrator preamble and the
+    shared-desk hint) when, and only when, this run starts a new session.
+
+    Finding P3-12: the gate used to be "is a session id recorded for this
+    key", but the id is recorded before the first run, so a first run that
+    failed left a recorded id, and the fresh session started after the
+    later "No conversation found" retry never got the briefing. Keying it on
+    the --session-id the run actually uses follows the real session.
+    Finding P3-10: the streaming CODE chat now gets the desk hint too."""
+    if "--session-id" not in session_args:
+        return task
+    try:
+        from dourmouse.model_context import claude_orchestrator_preamble
+
+        task = f"{claude_orchestrator_preamble()}\n\n---\n\n{task}"
+    except Exception:  # noqa: BLE001 - a briefing must never break a turn
+        pass
+    return f"{_SHARED_DESK_HINT}\n\n---\n\n{task}"
+
+
+def _toolcall_log_size(path: str) -> int:
+    try:
+        return os.path.getsize(path)
+    except OSError:
+        return 0
 
 
 def _claude_session_key(cwd: str | None, tab: str | None = None) -> str:
@@ -509,22 +569,12 @@ def _run_claude_once(
     cli: str, task: str, session_args: list[str], *, cwd: str | None, timeout: int,
     toolcall_log_path: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    mcp_args: list[str] = []
-    try:
-        mcp_args = [
-            "--mcp-config", _ensure_mcp_config_path(),
-            "--strict-mcp-config",
-            "--allowedTools", _MCP_ALLOWED_TOOLS,
-            "--disallowedTools", _DISALLOWED_NATIVE_TOOLS,
-            *_SETTINGS_OVERRIDE_ARGS,
-        ]
-    except Exception:  # noqa: BLE001 - best-effort: a broken MCP config must
-        # never stop coding from working at all; Claude just runs without
-        # Dourmouse tool access for this one call (its own bash/file tools
-        # are untouched either way).
-        mcp_args = []
+    # A broken MCP config never stops coding from working: Claude runs
+    # without Dourmouse tool access for this one call, and its own native
+    # Bash/Write/Edit stay disabled either way (finding P3-8).
+    mcp_args, bridge_wired = _claude_tool_args()
     env = _cli_env(cli)
-    if toolcall_log_path and mcp_args:
+    if toolcall_log_path and bridge_wired:
         # Real tool calls this invocation makes through the dourmouse MCP
         # bridge land in mcp_bridge.py's own subprocess -- a SEPARATE OS
         # process this `claude` binary spawns via --mcp-config, invisible
@@ -658,69 +708,80 @@ def _run_claude(
     # real and working.
     session_key = _claude_session_key(cwd, tab)
 
-    # Tell the model what it is and what it has, once per session — same
-    # fix, same rationale, as the streaming code_claude path (see its own
-    # comment on this exact block for the full "the models don't know what
-    # tools they can use" history).
-    with _CLAUDE_SESSIONS_LOCK:
-        _first_turn = session_key not in _CLAUDE_SESSIONS
-    if _first_turn:
-        try:
-            from dourmouse.model_context import claude_orchestrator_preamble
-
-            task = f"{claude_orchestrator_preamble()}\n\n---\n\n{task}"
-        except Exception:  # noqa: BLE001 - a briefing must never break a turn
-            pass
-        task = f"{_SHARED_DESK_HINT}\n\n---\n\n{task}"
-    with _claude_session_run_lock(session_key):
-        session_args = _claude_session_args(session_key)
-        proc = _run_claude_once(
-            cli, task, session_args, cwd=cwd, timeout=timeout,
-            toolcall_log_path=toolcall_log_path,
+    # Tell the model what it is and what it has, once per session (see
+    # _first_turn_task, and the streaming code_claude path's own comment
+    # for the full "the models don't know what tools they can use" history).
+    #
+    # The MCP retry below needs to know whether the bridge served any tool
+    # call in the first attempt, so a tool-call log is always kept for this
+    # run: the caller's, or a private temp file removed afterwards.
+    own_log: str | None = None
+    if toolcall_log_path is None:
+        own_log = os.path.join(
+            tempfile.gettempdir(), f"dourmouse-claude-toolcalls-{uuid.uuid4().hex}.ndjson"
         )
-        err = (proc.stderr or "").strip()
-        if proc.returncode != 0 and "--resume" in session_args and (
-            _CLAUDE_NO_SESSION_ERR in err or _CLAUDE_SESSION_IN_USE_ERR in err
-        ):
-            # Our tracked session id no longer resolves to a real conversation
-            # (e.g. the user pruned Claude Code's local session history out from
-            # under us), or the CLI reports it already in use — never keep
-            # retrying a dead/stuck id forever. Forget it and start one honest
-            # fresh conversation instead of hard-failing the whole task over
-            # bookkeeping the caller can't see or fix.
-            _forget_claude_session(session_key)
+        log_path = own_log
+    else:
+        log_path = toolcall_log_path
+    try:
+        with _claude_session_run_lock(session_key):
             session_args = _claude_session_args(session_key)
+            log_size_before = _toolcall_log_size(log_path)
             proc = _run_claude_once(
-                cli, task, session_args, cwd=cwd, timeout=timeout,
-                toolcall_log_path=toolcall_log_path,
+                cli, _first_turn_task(task, session_args), session_args, cwd=cwd,
+                timeout=timeout, toolcall_log_path=log_path,
             )
             err = (proc.stderr or "").strip()
-    out = (proc.stdout or "").strip()
-    # Real, live-reproduced issue (production-testing sweep, 2026-09-12):
-    # `claude -p` can exit 0 with real stdout, but that text is CLAUDE
-    # ITSELF reporting its own MCP client failed to connect to the
-    # dourmouse bridge this turn ("Dourmouse MCP server failed to connect
-    # (CONNECTION_CLOSED). Can't access the `activate_app` tool...") —
-    # gracefully degrading instead of crashing, but with zero Dourmouse
-    # tool access for the whole answer. Directly isolated the bridge
-    # itself as healthy (manually driven with real MCP JSON-RPC — 160
-    # real tools listed, a real tools/call answered cleanly, every time)
-    # so this reads as the real Claude CLI's OWN MCP subprocess connection
-    # occasionally flaking on startup, not a dead session and not a
-    # dourmouse-side bug — a different failure SHAPE than the dead-session
-    # case above (process exit vs. successful exit with degraded content),
-    # so it needs its own check, but the same "one honest retry before
-    # giving up" answer: the bridge reliably works, so trying the exact
-    # same call again gives the CLI's MCP client a fresh chance to
-    # connect. Capped at one retry — this must never become a silent
-    # infinite loop over a genuinely persistent problem.
-    if proc.returncode == 0 and _CLAUDE_MCP_CONNECTION_FAILED_RE.search(out):
-        proc = _run_claude_once(
-            cli, task, session_args, cwd=cwd, timeout=timeout,
-            toolcall_log_path=toolcall_log_path,
-        )
-        err = (proc.stderr or "").strip()
-        out = (proc.stdout or "").strip()
+            if proc.returncode != 0 and "--resume" in session_args and (
+                _CLAUDE_NO_SESSION_ERR in err or _CLAUDE_SESSION_IN_USE_ERR in err
+            ):
+                # Our tracked session id no longer resolves to a real conversation
+                # (e.g. the user pruned Claude Code's local session history out from
+                # under us), or the CLI reports it already in use — never keep
+                # retrying a dead/stuck id forever. Forget it and start one honest
+                # fresh conversation instead of hard-failing the whole task over
+                # bookkeeping the caller can't see or fix.
+                _forget_claude_session(session_key)
+                session_args = _claude_session_args(session_key)
+                log_size_before = _toolcall_log_size(log_path)
+                proc = _run_claude_once(
+                    cli, _first_turn_task(task, session_args), session_args, cwd=cwd,
+                    timeout=timeout, toolcall_log_path=log_path,
+                )
+                err = (proc.stderr or "").strip()
+            out = (proc.stdout or "").strip()
+            # Real, live-reproduced issue (production-testing sweep, 2026-09-12):
+            # `claude -p` can exit 0 with real stdout that is CLAUDE ITSELF
+            # reporting its own MCP client failed to connect to the dourmouse
+            # bridge this turn ("Dourmouse MCP server failed to connect
+            # (CONNECTION_CLOSED). Can't access the `activate_app` tool...").
+            # The bridge itself was isolated as healthy, so this reads as the
+            # CLI's own MCP subprocess occasionally flaking on startup; one
+            # honest retry gives it a fresh chance to connect. Capped at one.
+            #
+            # Finding P3-11: the retry used to repeat the exact same args, so
+            # a first turn re-sent --session-id for a session the first
+            # attempt had just created (the CLI refuses that as "already in
+            # use"), and any answer that merely quoted those words re-ran a
+            # turn whose tool calls had already happened. The retry now
+            # resumes that session, and is skipped when the bridge logged a
+            # tool call in the first attempt (it evidently connected).
+            if (
+                proc.returncode == 0
+                and _CLAUDE_MCP_CONNECTION_FAILED_RE.search(out)
+                and _toolcall_log_size(log_path) == log_size_before
+            ):
+                resume_args = ["--resume", session_args[1]]
+                proc = _run_claude_once(
+                    cli, task, resume_args, cwd=cwd, timeout=timeout,
+                    toolcall_log_path=log_path,
+                )
+                err = (proc.stderr or "").strip()
+                out = (proc.stdout or "").strip()
+    finally:
+        if own_log is not None:
+            # missing_ok: the bridge never wrote one (no tool calls)
+            Path(own_log).unlink(missing_ok=True)
     if proc.returncode != 0:
         # v8.7: `claude -p` exits 1 with an EMPTY stderr when the CLI is
         # installed but not signed in — the single most likely failure here,
@@ -872,29 +933,12 @@ def stream_claude(
     # after, so it holds the conversation itself; re-sending a ~2,300-token
     # briefing every turn would be paid for every turn and would tell the
     # model nothing it had not already been told.
-    with _CLAUDE_SESSIONS_LOCK:
-        _first_turn = session_key not in _CLAUDE_SESSIONS
-    if _first_turn:
-        try:
-            from dourmouse.model_context import claude_orchestrator_preamble
+    # The briefing is added per run by _first_turn_task, which keys it on the
+    # --session-id the run actually uses (findings P3-10, P3-12).
+    mcp_args, _bridge_wired = _claude_tool_args()
 
-            task = f"{claude_orchestrator_preamble()}\n\n---\n\n{task}"
-        except Exception:  # noqa: BLE001 - a briefing must never break a turn
-            pass
-
-    mcp_args: list[str] = []
-    try:
-        mcp_args = [
-            "--mcp-config", _ensure_mcp_config_path(),
-            "--strict-mcp-config",
-            "--allowedTools", _MCP_ALLOWED_TOOLS,
-            "--disallowedTools", _DISALLOWED_NATIVE_TOOLS,
-            *_SETTINGS_OVERRIDE_ARGS,
-        ]
-    except Exception:  # noqa: BLE001 - best-effort, see _run_claude_once's own comment
-        mcp_args = []
-
-    def _run_once(session_args: list[str]) -> tuple[int, str, str]:
+    def _run_once(session_args: list[str]) -> tuple[int | None, str, str, bool]:
+        run_task = _first_turn_task(task, session_args)
         proc = subprocess.Popen(
             # The task goes on stdin, never argv (finding #088): on Windows the
             # npm-installed CLI is a .cmd shim run through cmd.exe, whose 8191-char
@@ -918,21 +962,39 @@ def stream_claude(
         # it all up front cannot deadlock against a full stdout pipe.
         try:
             assert proc.stdin is not None
-            proc.stdin.write(task)
+            proc.stdin.write(run_task)
             proc.stdin.close()
         except (BrokenPipeError, OSError):
             pass  # the CLI died at startup; its exit code and stderr say why
         stopped = threading.Event()
+        timed_out = threading.Event()
 
         def _watchdog() -> None:
             if not stopped.wait(timeout):
+                # Finding P3-9: remember WHY the process died, so a timeout
+                # is not reported as "exited with no error output".
+                timed_out.set()
                 try:
                     proc.kill()
                 except Exception:  # noqa: BLE001 - best-effort kill
                     pass
 
+        # Finding P3-13: drain stderr while stdout streams. Reading it only
+        # after stdout hit EOF let a CLI that wrote more than a pipe buffer
+        # to stderr block forever, until the watchdog killed it.
+        stderr_parts: list[str] = []
+
+        def _drain_stderr() -> None:
+            try:
+                if proc.stderr:
+                    stderr_parts.append(proc.stderr.read() or "")
+            except (OSError, ValueError):
+                pass  # the pipe closed under us after a kill; the exit code says why
+
         watchdog = threading.Thread(target=_watchdog, daemon=True)
         watchdog.start()
+        stderr_reader = threading.Thread(target=_drain_stderr, daemon=True)
+        stderr_reader.start()
         final_result = ""
         # Per content_block index: the tool's name (known at block start)
         # and its input_json_delta fragments, joined once the block closes.
@@ -1022,24 +1084,24 @@ def stream_claude(
                     proc.kill()
                 except Exception:  # noqa: BLE001
                     pass
-        stderr_text = ""
-        try:
-            if proc.stderr:
-                stderr_text = proc.stderr.read() or ""
-        except Exception:  # noqa: BLE001
-            pass
-        return proc.returncode, final_result, stderr_text
+        stderr_reader.join(timeout=5)
+        return proc.returncode, final_result, "".join(stderr_parts), timed_out.is_set()
 
     with _claude_session_run_lock(session_key):
         session_args = _claude_session_args(session_key)
-        returncode, final_result, err = _run_once(session_args)
-        if returncode != 0 and "--resume" in session_args and (
+        returncode, final_result, err, timed_out = _run_once(session_args)
+        if not timed_out and returncode != 0 and "--resume" in session_args and (
             _CLAUDE_NO_SESSION_ERR in err or _CLAUDE_SESSION_IN_USE_ERR in err
         ):
             _forget_claude_session(session_key)
             session_args = _claude_session_args(session_key)
-            returncode, final_result, err = _run_once(session_args)
+            returncode, final_result, err, timed_out = _run_once(session_args)
     err = err.strip()
+    if timed_out:
+        raise RuntimeError(
+            f"claude timed out after {timeout}s and was stopped; any text already "
+            "shown for this turn is partial."
+        )
     if returncode != 0:
         if not err:
             raise RuntimeError(

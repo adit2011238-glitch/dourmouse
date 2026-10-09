@@ -45,6 +45,7 @@ once.
 from __future__ import annotations
 
 import sys
+import time
 from typing import Any
 
 _ax_import_error: Exception | None = None
@@ -136,15 +137,62 @@ def _ax_error_message(code: int) -> str:
     return _AX_ERROR_MESSAGES.get(code, f"AXError {code}")
 
 
-def _pid_for_app(app_name: str) -> int:
+#: Bundle ids of the apps on app_control's blocklist. The name check alone
+#: misses a localised name ("Systemeinstellungen" is System Settings on a
+#: German Mac), so the running app's real bundle id is checked as well.
+_BLOCKED_BUNDLE_IDS = frozenset(
+    {
+        "com.apple.terminal",
+        "com.googlecode.iterm2",
+        "com.apple.finder",
+        "com.apple.systempreferences",
+        "com.apple.keychainaccess",
+        "com.apple.passwords",
+        "com.apple.scripteditor2",
+        "com.apple.systemevents",
+    }
+)
+
+
+def _check_not_blocked(app_name: str) -> None:
+    """Finding P5-1: the same blocklist app_control.py enforces on the
+    AppleScript path, applied here too, so the fast path is not a way
+    around it. Raised as AXControlError without "NOT CONFIGURED" so the
+    general_roster handlers report it instead of falling back."""
+    from dourmouse.app_control import AppControlError
+    from dourmouse.app_control import _check_not_blocked as _blocklist_check
+
+    try:
+        _blocklist_check(app_name)
+    except AppControlError as exc:
+        raise AXControlError(str(exc)) from None
+
+
+def _check_bundle_not_blocked(app_name: str, running_app: Any) -> None:
+    bundle = str(running_app.bundleIdentifier() or "").casefold()
+    if bundle in _BLOCKED_BUNDLE_IDS:
+        raise AXControlError(
+            f"REFUSED: {app_name!r} ({bundle}) is on the app-control blocklist "
+            "(security-surface apps aren't UI-scriptable through this tool, "
+            "regardless of confirmation)."
+        )
+
+
+def _pid_for_app(app_name: str, *, check_blocklist: bool = True) -> int:
     """The PID of a running app by its localized name (case-insensitive,
     exact match — the same identifier app_control.py's AppleScript path
     already uses). A real, honest 'not running' error when no match
-    exists, never a guess at which similarly-named process was meant."""
+    exists, never a guess at which similarly-named process was meant.
+    Every action in this module resolves its target here, so this is also
+    where the blocklist is enforced, by name and by bundle id. Only the
+    read-only window listing passes check_blocklist=False, matching
+    app_control.list_windows, which does not refuse those apps either."""
     _require_macos_ax()
     target = app_name.strip().lower()
     if not target:
         raise AXControlError("app_name is required")
+    if check_blocklist:
+        _check_not_blocked(app_name)
     running = NSWorkspace.sharedWorkspace().runningApplications()
     matches = [a for a in running if (a.localizedName() or "").strip().lower() == target]
     if not matches:
@@ -154,6 +202,8 @@ def _pid_for_app(app_name: str) -> int:
             f"running: {', '.join(running_names[:20])}"
             + (f" (+{len(running_names) - 20} more)" if len(running_names) > 20 else "")
         )
+    if check_blocklist:
+        _check_bundle_not_blocked(app_name, matches[0])
     return int(matches[0].processIdentifier())
 
 
@@ -200,6 +250,7 @@ def activate_app_fast(app_name: str, dry_run: bool = False) -> str:
     app_name = app_name.strip()
     if not app_name:
         raise AXControlError("app_name is required")
+    _check_not_blocked(app_name)
     pid = _pid_for_app(app_name)
     if dry_run:
         return f"DRY RUN — activate {app_name} (pid {pid}) (not executed)"
@@ -225,6 +276,7 @@ def quit_app_fast(app_name: str, dry_run: bool = False) -> str:
     app_name = app_name.strip()
     if not app_name:
         raise AXControlError("app_name is required")
+    _check_not_blocked(app_name)
     pid = _pid_for_app(app_name)
     if dry_run:
         return f"DRY RUN — quit {app_name} (pid {pid}) (not executed)"
@@ -236,8 +288,8 @@ def quit_app_fast(app_name: str, dry_run: bool = False) -> str:
     return f"QUIT: {app_name}"
 
 
-def _ax_app_element(app_name: str) -> Any:
-    pid = _pid_for_app(app_name)
+def _ax_app_element(app_name: str, *, check_blocklist: bool = True) -> Any:
+    pid = _pid_for_app(app_name, check_blocklist=check_blocklist)
     return _AS.AXUIElementCreateApplication(pid)
 
 
@@ -246,7 +298,7 @@ def list_windows_ax(app_name: str) -> list[str]:
     one round trip to the target process, no subprocess/AppleScript
     compile step."""
     _require_macos_ax()
-    element = _ax_app_element(app_name)
+    element = _ax_app_element(app_name, check_blocklist=False)
     windows = _copy_attr(element, _AS.kAXWindowsAttribute) or []
     titles = []
     for w in windows:
@@ -307,7 +359,7 @@ def find_menu_item_ax(app_name: str, menu_path: list[str]) -> Any:
         # one level down, inside its own "menu" child (AXChildren of a
         # menu-bar-item or menu is that single pull-down menu).
         submenu_children = _menu_children(found)
-        level_elements = submenu_children[0] and _menu_children(submenu_children[0]) or []
+        level_elements = _menu_children(submenu_children[0]) if submenu_children else []
     raise AXControlError(f"MENU ITEM NOT FOUND: {' > '.join(menu_path)} in {app_name}")
 
 
@@ -319,6 +371,7 @@ def click_menu_item_ax(app_name: str, menu_path: list[str], dry_run: bool = Fals
     app_name = app_name.strip()
     if not app_name:
         raise AXControlError("app_name is required")
+    _check_not_blocked(app_name)
     element = find_menu_item_ax(app_name, menu_path)
     if dry_run:
         return f"DRY RUN — click {' > '.join(menu_path)} in {app_name} (not executed, real menu item confirmed to exist)"
@@ -364,6 +417,58 @@ def _require_ax_trust_for_synthetic_events() -> None:
         raise AXControlError(_AX_ERROR_MESSAGES[-25211])
 
 
+#: How long to wait for an activated app to become frontmost before a
+#: synthetic event is posted (activateWithOptions_ is asynchronous, and
+#: CGEventPost goes to whatever app is frontmost at that moment).
+_FRONTMOST_WAIT_S = 1.5
+_FRONTMOST_POLL_S = 0.05
+
+#: CGEventKeyboardSetUnicodeString carries at most 20 UTF-16 units per
+#: event (Apple's documented limit); longer strings are cut silently.
+_MAX_UNICODE_UNITS_PER_EVENT = 20
+
+
+def _frontmost_pid() -> int | None:
+    front = NSWorkspace.sharedWorkspace().frontmostApplication()
+    return None if front is None else int(front.processIdentifier())
+
+
+def _activate_and_wait_frontmost(app_name: str) -> int:
+    """Activate the app and return its pid only once it really is frontmost.
+    Finding P5-3: without this the keystrokes landed in whichever app still
+    had focus (a terminal, the chat box) while the tool reported success."""
+    pid = _pid_for_app(app_name)
+    activate_app_fast(app_name)
+    deadline = time.monotonic() + _FRONTMOST_WAIT_S
+    while _frontmost_pid() != pid:
+        if time.monotonic() >= deadline:
+            raise AXControlError(
+                f"NOT FRONTMOST: {app_name!r} did not come to the front within "
+                f"{_FRONTMOST_WAIT_S}s, so nothing was typed (the keystrokes "
+                "would have gone to whichever app has focus)."
+            )
+        time.sleep(_FRONTMOST_POLL_S)
+    return pid
+
+
+def _utf16_chunks(text: str, max_units: int) -> list[str]:
+    """Split text into pieces of at most max_units UTF-16 code units, never
+    splitting a surrogate pair (a non-BMP character counts as two units)."""
+    chunks: list[str] = []
+    current: list[str] = []
+    units = 0
+    for ch in text:
+        width = 2 if ord(ch) > 0xFFFF else 1
+        if current and units + width > max_units:
+            chunks.append("".join(current))
+            current, units = [], 0
+        current.append(ch)
+        units += width
+    if current:
+        chunks.append("".join(current))
+    return chunks
+
+
 def press_key_ax(
     app_name: str, key: str, modifiers: list[str] | None = None, dry_run: bool = False
 ) -> str:
@@ -384,6 +489,7 @@ def press_key_ax(
     key = key.strip().lower()
     if not app_name:
         raise AXControlError("app_name is required")
+    _check_not_blocked(app_name)
     if key not in _KEY_CODES:
         raise AXControlError(f"unknown key {key!r}; supported: {', '.join(sorted(_KEY_CODES))}")
     _require_ax_trust_for_synthetic_events()
@@ -396,7 +502,7 @@ def press_key_ax(
     label = "+".join((modifiers or []) + [key])
     if dry_run:
         return f"DRY RUN — press {label} in {app_name} (not executed)"
-    activate_app_fast(app_name)
+    _activate_and_wait_frontmost(app_name)
     code = _KEY_CODES[key]
     down = _Quartz.CGEventCreateKeyboardEvent(None, code, True)
     up = _Quartz.CGEventCreateKeyboardEvent(None, code, False)
@@ -421,16 +527,28 @@ def send_keystrokes_ax(app_name: str, text: str, dry_run: bool = False) -> str:
     app_name = app_name.strip()
     if not app_name:
         raise AXControlError("app_name is required")
+    _check_not_blocked(app_name)
     if not text:
         raise AXControlError("text is required")
     _require_ax_trust_for_synthetic_events()
     if dry_run:
         return f"DRY RUN — type {len(text)} character(s) into {app_name} (not executed)"
-    activate_app_fast(app_name)
-    down = _Quartz.CGEventCreateKeyboardEvent(None, 0, True)
-    up = _Quartz.CGEventCreateKeyboardEvent(None, 0, False)
-    _Quartz.CGEventKeyboardSetUnicodeString(down, len(text), text)
-    _Quartz.CGEventKeyboardSetUnicodeString(up, len(text), text)
-    _Quartz.CGEventPost(_Quartz.kCGHIDEventTap, down)
-    _Quartz.CGEventPost(_Quartz.kCGHIDEventTap, up)
+    pid = _activate_and_wait_frontmost(app_name)
+    typed = 0
+    for chunk in _utf16_chunks(text, _MAX_UNICODE_UNITS_PER_EVENT):
+        # Focus can move between chunks (the user clicks elsewhere); stop
+        # rather than type the rest into another app, and say how far it got.
+        if _frontmost_pid() != pid:
+            raise AXControlError(
+                f"NOT FRONTMOST: {app_name!r} lost focus while typing; "
+                f"{typed} of {len(text)} character(s) were typed, the rest was not."
+            )
+        units = len(chunk.encode("utf-16-le")) // 2
+        down = _Quartz.CGEventCreateKeyboardEvent(None, 0, True)
+        up = _Quartz.CGEventCreateKeyboardEvent(None, 0, False)
+        _Quartz.CGEventKeyboardSetUnicodeString(down, units, chunk)
+        _Quartz.CGEventKeyboardSetUnicodeString(up, units, chunk)
+        _Quartz.CGEventPost(_Quartz.kCGHIDEventTap, down)
+        _Quartz.CGEventPost(_Quartz.kCGHIDEventTap, up)
+        typed += len(chunk)
     return f"TYPED into {app_name}: {len(text)} character(s)"

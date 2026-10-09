@@ -85,9 +85,11 @@ class TestPreambleIsSentOncePerSession:
         from dourmouse import code_backends
 
         source = inspect.getsource(code_backends.stream_claude)
-        assert "claude_orchestrator_preamble" in source
-        assert "_first_turn" in source
-        assert "session_key not in _CLAUDE_SESSIONS" in source
+        assert "_first_turn_task" in source
+        # finding P3-12: the briefing is keyed on the --session-id the run actually uses
+        helper = inspect.getsource(code_backends._first_turn_task)
+        assert "claude_orchestrator_preamble" in helper
+        assert '"--session-id" not in session_args' in helper
 
 
 class TestPreambleDisambiguatesSendMessageFromRealTools:

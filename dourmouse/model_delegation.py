@@ -233,6 +233,10 @@ _DEFAULT_MAX_WORKERS = int(os.environ.get("DOURMOUSE_DELEGATE_WORKERS", "4"))
 
 _pool_lock = threading.Lock()
 
+#: Extra seconds the fan-out waits beyond ``timeout`` before reporting the
+#: unfinished tasks as timed out.
+_DELEGATE_GRACE_S = 30.0
+
 # Finding #134 (AGENT-3): the dispatch run that called delegate_to_models,
 # handed to the worker threads through the context (they copy it), so the
 # delegated turns inherit its backend instead of rebuilding one.
@@ -295,12 +299,25 @@ def _run_local(task: DelegationTask, timeout: float) -> DelegationResult:
             }
             if task.agent and caller.config is not None and hasattr(caller.config, "model_for_agent"):
                 inherit["model"] = caller.config.model_for_agent(task.agent)
+        # A real deadline: the dispatch loop checks should_stop between model
+        # turns and before each tool call, so a delegated turn stops soon
+        # after ``timeout`` instead of running on unseen (finding P5-30).
+        # The calling run's own STOP still applies.
+        deadline = started + max(1.0, float(timeout))
+        caller_stop = getattr(caller, "should_stop", None) if caller is not None else None
+
+        def _should_stop() -> bool:
+            return time.monotonic() > deadline or bool(caller_stop is not None and caller_stop())
+
         report = run_dispatch_messages(
             messages,
             registry,
             forced_agent=task.agent or None,
+            should_stop=_should_stop,
             **inherit,
         )
+        if time.monotonic() > deadline and not str(report.get("final_text") or "").strip():
+            raise TimeoutError(f"the delegated turn did not finish within {timeout:.0f}s and was stopped")
         text = str(report.get("final_text") or "")
         if is_backend_failure_text(text):
             # A backend that could not answer says so as the reply; that is a
@@ -421,9 +438,17 @@ def delegate(
             except Exception:  # noqa: BLE001 - an observer must never break the run
                 pass
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+    # Not a ``with`` block: leaving one calls shutdown(wait=True), which waits
+    # for every worker, so the timeout below could never take effect and one
+    # stuck turn hung the whole fan-out (finding P5-30). Finished answers are
+    # returned; a still-running worker is left behind and its task reports a
+    # timeout.
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=workers)
+    try:
         futures = [pool.submit(contextvars.copy_context().run, _one, i, t) for i, t in enumerate(tasks)]
-        concurrent.futures.wait(futures, timeout=timeout + 30)
+        concurrent.futures.wait(futures, timeout=timeout + _DELEGATE_GRACE_S)
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
 
     out: list[DelegationResult] = []
     for i, r in enumerate(results):

@@ -15,6 +15,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import shutil
 import stat
 import tempfile
 from pathlib import Path
@@ -27,22 +28,39 @@ def settings_path() -> Path:
     return user_config_dir() / "security.json"
 
 
-def _read() -> dict[str, Any]:
+def _load() -> tuple[dict[str, Any], str]:
+    """(settings, state); state is "ok", "missing" (never written: the default,
+    off) or "unusable" (present but unreadable or not a JSON object)."""
     try:
-        data = json.loads(settings_path().read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else {}
-    except (OSError, ValueError):
-        return {}
+        text = settings_path().read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return {}, "missing"
+    except OSError:
+        return {}, "unusable"
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return {}, "unusable"
+    return (data, "ok") if isinstance(data, dict) else ({}, "unusable")
 
 
 def privacy_mode() -> bool:
-    return bool(_read().get("privacy_mode"))
+    """On when switched on, and also when the file that says so cannot be
+    read: the guarantee is that evidence stays on this Mac, so a damaged
+    setting must not turn it off (finding P5-52)."""
+    data, state = _load()
+    return state == "unusable" or bool(data.get("privacy_mode"))
 
 
 def set_privacy_mode(on: bool) -> dict[str, Any]:
-    data = _read()
+    data, state = _load()
+    path = settings_path()
+    if state == "unusable" and path.exists():
+        # Keep what could not be parsed instead of silently dropping it.
+        with contextlib.suppress(OSError):
+            shutil.copy2(path, path.with_name(path.name + ".corrupt"))
     data["privacy_mode"] = bool(on)
-    atomic_write_text(settings_path(), json.dumps(data, indent=2))
+    atomic_write_text(path, json.dumps(data, indent=2))
     return {"privacy_mode": bool(on)}
 
 

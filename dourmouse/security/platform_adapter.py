@@ -20,6 +20,7 @@ docs/GODSPEED_ROADMAP.md Phase 4).
 
 from __future__ import annotations
 
+import ipaddress
 import re
 import subprocess
 from typing import Any
@@ -216,15 +217,35 @@ def _classify_exposure(bind_addr: str) -> str:
     from anywhere those interfaces reach, including the LAN and any
     Tailscale peer — a materially different risk, worth surfacing
     honestly rather than lumping every listening port together."""
-    if bind_addr in ("127.0.0.1", "::1", "localhost"):
-        return "LOOPBACK_ONLY"
-    if bind_addr in ("*", "0.0.0.0", "::"):  # noqa: S104 - classifying an observed bind address, not binding anything
+    addr = bind_addr.strip()
+    if addr == "*":
         return "ALL_INTERFACES"
-    if bind_addr.startswith("100.") or bind_addr.startswith("fd7a:"):
+    if addr.lower() == "localhost":
+        return "LOOPBACK_ONLY"
+    # lsof prints IPv6 binds in brackets, and may add a zone id (fe80::1%en0).
+    addr = addr.strip("[]").split("%", 1)[0]
+    try:
+        ip = ipaddress.ip_address(addr)
+    except ValueError:
+        return "UNKNOWN"
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped
+    if ip.is_loopback:
+        return "LOOPBACK_ONLY"
+    if ip.is_unspecified:
+        return "ALL_INTERFACES"
+    if any(ip in net for net in _TAILSCALE_NETS):
         return "TAILSCALE"
-    if bind_addr.startswith(("192.168.", "10.", "172.")):
+    if any(ip in net for net in _LOCAL_NETS):
         return "LOCAL_NETWORK"
     return "UNKNOWN"
+
+
+#: Tailscale's CGNAT range (100.64.0.0/10) and its IPv6 prefix; the rest of 100.x is public.
+_TAILSCALE_NETS = tuple(ipaddress.ip_network(n) for n in ("100.64.0.0/10", "fd7a:115c:a1e0::/48"))
+#: Private and link-local ranges (172.16.0.0/12 only, not all of 172.x).
+_LOCAL_NETS = tuple(ipaddress.ip_network(n) for n in (
+    "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "fc00::/7", "fe80::/10"))
 
 
 _LSOF_LISTEN_RE = re.compile(
@@ -297,12 +318,26 @@ def get_established_connections() -> dict[str, Any]:
 # Firewall
 # --------------------------------------------------------------------------- #
 
+def parse_firewall_state(text: str) -> bool | None:
+    """From socketfilterfw --getglobalstate. "State = 0" is off; every other
+    state is on, including 2, "block all incoming connections", which is
+    stricter than 1. None when the output says neither."""
+    m = re.search(r"State\s*=\s*(\d+)", text)
+    if m:
+        return m.group(1) != "0"
+    low = text.lower()
+    if "disabled" in low:
+        return False
+    if "enabled" in low or "block all" in low:
+        return True
+    return None
+
+
 def get_firewall_status() -> dict[str, Any]:
     ok, out = _run(["/usr/libexec/ApplicationFirewall/socketfilterfw", "--getglobalstate"])
     if not ok:
         return _unavailable(out)
-    enabled = "State = 1" in out or "Firewall is enabled" in out
-    return {"available": True, "enabled": enabled, "raw": out.strip()}
+    return {"available": True, "enabled": bool(parse_firewall_state(out)), "raw": out.strip()}
 
 
 # --------------------------------------------------------------------------- #

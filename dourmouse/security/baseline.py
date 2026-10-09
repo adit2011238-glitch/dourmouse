@@ -105,11 +105,15 @@ def compare(
     known: dict[tuple[str, str, str], str],
     *,
     categories_that_report_gone: frozenset[str] = frozenset({"persistence"}),
+    observed_categories: frozenset[str] | None = None,
 ) -> list[Anomaly]:
     """``known`` maps (scope, category, key) to the last value seen. New keys
     and changed values are anomalies; a key that disappeared is reported only
     for categories where disappearing matters (a removed persistence item is
-    worth knowing; a closed connection is not)."""
+    worth knowing; a closed connection is not). ``observed_categories``, when
+    given, lists the categories this scan could actually read: a category that
+    could not be read this time reports nothing gone (not knowing is not
+    absence)."""
     out: list[Anomaly] = []
     seen: set[tuple[str, str, str]] = set()
     for o in current:
@@ -121,6 +125,8 @@ def compare(
             out.append(Anomaly("changed", o, previous_value=known[k]))
     scopes = {o.scope for o in current}
     for (scope, category, key), value in known.items():
+        if observed_categories is not None and category not in observed_categories:
+            continue
         if scope in scopes and category in categories_that_report_gone and (scope, category, key) not in seen:
             out.append(Anomaly("gone", Observation(scope, category, key, value), previous_value=value))
     return out

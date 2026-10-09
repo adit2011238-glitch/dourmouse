@@ -20,6 +20,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
+from typing import Any
 
 _VOID = {
     "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta",
@@ -52,12 +53,19 @@ _IMPLICIT_CLOSE = {
 }
 
 
+#: Real pages nest well under 100 levels. Past this the tree builder stops
+#: descending, so a hostile or broken page of thousands of unclosed <div>s costs
+#: linear time and a bounded tree instead of an exception (finding P3-51).
+_MAX_DEPTH = 400
+
+
 @dataclass
 class _Node:
     tag: str
     attrs: dict[str, str]
     parent: _Node | None = None
     children: list[_Node | str] = field(default_factory=list)
+    depth: int = 0
 
     def text(self) -> str:
         out: list[str] = []
@@ -110,10 +118,19 @@ class _TreeBuilder(HTMLParser):
         closers = {t for t, stops in _IMPLICIT_CLOSE.items() if tag in stops}
         while self.cur.tag in closers and self.cur.parent is not None:
             self.cur = self.cur.parent
-        node = _Node(tag, {k.lower(): (v or "") for k, v in attrs}, parent=self.cur)
+        node = _Node(tag, {k.lower(): (v or "") for k, v in attrs}, parent=self.cur, depth=self.cur.depth + 1)
         self.cur.children.append(node)
-        if tag not in _VOID:
+        if tag not in _VOID and self._may_descend(tag, node.depth):
             self.cur = node
+
+    @staticmethod
+    def _may_descend(tag: str, depth: int) -> bool:
+        """Past _MAX_DEPTH only text-bearing elements (headings, paragraphs, list
+        items...) still open, so their text keeps its structure; wrapper elements
+        stop nesting, and nothing nests beyond a small hard limit."""
+        if depth < _MAX_DEPTH:
+            return True
+        return depth < _MAX_DEPTH + 50 and (tag in _BLOCKS or tag in _HEADINGS)
 
     def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         tag = tag.lower()
@@ -167,13 +184,15 @@ def _is_boilerplate(node: _Node, inside_content: bool = False, page_chars: int =
 def _prune(node: _Node, inside_content: bool = False, page_chars: int | None = None) -> None:
     if page_chars is None:
         page_chars = len(node.text())
-    inside = inside_content or node.tag in ("article", "main") or node.attrs.get("role") == "main"
-    node.children = [
-        c for c in node.children if isinstance(c, str) or not _is_boilerplate(c, inside, page_chars)
-    ]
-    for c in node.children:
-        if isinstance(c, _Node):
-            _prune(c, inside, page_chars)
+    # Iterative: one Python frame per nesting level overflowed the stack on deep pages.
+    stack: list[tuple[_Node, bool]] = [(node, inside_content)]
+    while stack:
+        cur, outer = stack.pop()
+        inside = outer or cur.tag in ("article", "main") or cur.attrs.get("role") == "main"
+        cur.children = [
+            c for c in cur.children if isinstance(c, str) or not _is_boilerplate(c, inside, page_chars)
+        ]
+        stack.extend((c, inside) for c in cur.children if isinstance(c, _Node))
 
 
 def _pick_main(body: _Node) -> _Node:
@@ -257,38 +276,49 @@ def _serialise(root: _Node) -> list[Block]:
     def heading_path() -> tuple[str, ...]:
         return tuple(t for _, t in path)
 
-    def walk(node: _Node) -> None:
-        for child in node.children:
-            if isinstance(child, str):
-                t = " ".join(child.split())
-                if t and node.tag not in _BLOCKS and node.tag not in _HEADINGS:
-                    blocks.append(Block(heading_path(), "loose", t))
+    def handle(node: _Node, child: _Node | str, stack: list[tuple[_Node, Any]]) -> None:
+        if isinstance(child, str):
+            t = " ".join(child.split())
+            if t and node.tag not in _BLOCKS and node.tag not in _HEADINGS:
+                blocks.append(Block(heading_path(), "loose", t))
+            return
+        tag = child.tag
+        if tag in _HEADINGS:
+            t = child.text()
+            if t:
+                level = int(tag[1])
+                while path and path[-1][0] >= level:
+                    path.pop()
+                path.append((level, t))
+                blocks.append(Block(heading_path(), "heading", t))
+        elif tag == "pre":
+            raw = _raw_text(child).strip("\n")
+            if raw.strip():
+                blocks.append(Block(heading_path(), "pre", raw))
+        elif tag in _BLOCKS:
+            if any(isinstance(c, _Node) and (c.tag in _BLOCKS or c.tag in _HEADINGS) for c in child.iter_nodes() if c is not child):
+                stack.append((child, iter(child.children)))  # e.g. an <li> holding <p>s: emit the inner blocks
+                return
+            t = child.text()
+            if t:
+                kind = {"li": "list-item", "blockquote": "quote", "td": "cell", "th": "cell"}.get(tag, "paragraph")
+                blocks.append(Block(heading_path(), kind, t))
+        elif tag == "br":
+            return
+        else:
+            stack.append((child, iter(child.children)))
+
+    def walk(root_node: _Node) -> None:
+        # Explicit stack, same order as the recursive form: a child's subtree is
+        # finished before its next sibling is visited.
+        stack: list[tuple[_Node, Any]] = [(root_node, iter(root_node.children))]
+        while stack:
+            node, it = stack[-1]
+            child = next(it, None)
+            if child is None:
+                stack.pop()
                 continue
-            tag = child.tag
-            if tag in _HEADINGS:
-                t = child.text()
-                if t:
-                    level = int(tag[1])
-                    while path and path[-1][0] >= level:
-                        path.pop()
-                    path.append((level, t))
-                    blocks.append(Block(heading_path(), "heading", t))
-            elif tag == "pre":
-                raw = _raw_text(child).strip("\n")
-                if raw.strip():
-                    blocks.append(Block(heading_path(), "pre", raw))
-            elif tag in _BLOCKS:
-                if any(isinstance(c, _Node) and (c.tag in _BLOCKS or c.tag in _HEADINGS) for c in child.iter_nodes() if c is not child):
-                    walk(child)  # e.g. an <li> holding <p>s: emit the inner blocks
-                    continue
-                t = child.text()
-                if t:
-                    kind = {"li": "list-item", "blockquote": "quote", "td": "cell", "th": "cell"}.get(tag, "paragraph")
-                    blocks.append(Block(heading_path(), kind, t))
-            elif tag == "br":
-                continue
-            else:
-                walk(child)
+            handle(node, child, stack)
 
     walk(root)
     # Loose text (not inside any block element) split by inline tags such as

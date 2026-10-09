@@ -205,6 +205,14 @@ def _security_sentry_dismiss(arguments: dict[str, Any]) -> str:
     return f"Marked {fingerprint} as a false positive -- it will not be reported as a new finding again."
 
 
+def _sentry_dismiss_prompt(arguments: dict[str, Any]) -> str:
+    fingerprint = str(arguments.get("fingerprint") or "").strip()
+    title = next((r["title"] for r in SentryStore(_sentry_db()).snapshot() if r["fingerprint"] == fingerprint), None)
+    what = f"{_shown(title)} ({fingerprint})" if title else f"the finding {_shown(fingerprint)} (not a known finding)"
+    return (f"Dismiss {what} as a false positive? It stops showing as new, drops out of the risk score, "
+            "and is not raised again until you reverse it.")
+
+
 def _security_downloads(arguments: dict[str, Any]) -> str:
     from pathlib import Path
 
@@ -255,6 +263,8 @@ def _format_lockdown(st: dict[str, Any]) -> str:
         mark = ""
         if "blocked_now" in s:
             mark = " (blocked now)" if s["blocked_now"] else " (NOT blocked right now)"
+        elif s.get("blocked_now_unknown"):
+            mark = " (could not be checked right now)"
         note = f" [the path {s['path_ignored']} is ignored: only the names are blocked]" if s.get("path_ignored") else ""
         names = " and ".join(s.get("blocks") or [s["domain"]])
         sites.append(f"{s['domain']}{mark} (blocks exactly {names})" + note)
@@ -574,6 +584,9 @@ EVIDENCE_TOOLS = frozenset({
     "security_status", "list_exposed_services", "security_sentry_scan", "security_external_peers",
     "security_known_devices", "security_downloads", "security_monitoring_check", "security_diagnose_connection",
     "security_report", "security_quarantine_list",
+    # The self-audit lists file paths and key-permission details of this Mac; the
+    # lockdown status lists the owner's blocked apps and sites.
+    "security_self_audit", "lockdown_status",
 })
 
 
@@ -682,6 +695,8 @@ def _build_security_subagent() -> Subagent:
                     "required": ["fingerprint"],
                 },
                 handler=_security_sentry_dismiss,
+                permission=Permission.REQUIRES_CONFIRMATION,
+                confirm_prompt=_sentry_dismiss_prompt,
             ),
             ToolSpec(
                 name="security_incident_open",

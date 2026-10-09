@@ -425,7 +425,9 @@ class TestExternalToolsAndBackends:
 
     def test_the_claude_cli_chat_backend_turns_its_own_shell_and_file_tools_off(self):
         src = (ROOT / "dourmouse" / "code_backends.py").read_text(encoding="utf-8")
-        assert src.count('"--disallowedTools", _DISALLOWED_NATIVE_TOOLS') == 2
+        # finding P3-8: both spawn sites share one builder, which always passes the deny list
+        assert src.count('"--disallowedTools", _DISALLOWED_NATIVE_TOOLS') == 1
+        assert src.count("_claude_tool_args()") >= 2
         for tool in ("Bash", "Write", "Edit"):
             assert tool in src.split("_DISALLOWED_NATIVE_TOOLS =")[1].split("\n")[0]
 

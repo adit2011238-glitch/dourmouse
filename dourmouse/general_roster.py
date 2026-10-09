@@ -34,6 +34,7 @@ from __future__ import annotations
 import contextlib
 import contextvars
 import difflib
+import hashlib
 import json
 import os
 import re
@@ -52,7 +53,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable
 
-from dourmouse import config, git_safety, net_errors
+from dourmouse import config, git_safety, net_errors, path_identity
 from dourmouse.device_wiki_tools import build_device_wiki_subagent
 from dourmouse.dispatch import (
     DispatchRegistry,
@@ -315,10 +316,15 @@ def _run_cli_delegate(
     reported honestly. The output cap is read from the module global at CALL
     time so tests can shrink it deterministically."""
     output_cap = globals().get(output_cap_attr, 20_000)  # type: ignore[no-any-return]
+    from dourmouse.code_backends import _cli_env
+
     try:
         proc = subprocess.run(
             argv,
             cwd=cwd,
+            # A Dock-launched app has PATH=/usr/bin:/bin:..., with neither node
+            # nor ~/.local/bin; _cli_env adds them (finding P2-16).
+            env=_cli_env(cli),
             # The task rides on stdin, not argv (finding #088, see
             # code_backends._run_claude_once). DEVNULL when there is none:
             # both CLIs wait on an open stdin otherwise.
@@ -330,7 +336,13 @@ def _run_cli_delegate(
             check=False,  # non-zero exits are surfaced, never raised
         )
     except subprocess.TimeoutExpired:
-        return f"ERROR: {tool_label} timed out after {timeout}s (task still running)."
+        # subprocess.run kills the child on timeout; it is NOT still running
+        # (finding P2-17), but it may already have changed files.
+        return (
+            f"ERROR: {tool_label} timed out after {timeout}s and the process was stopped. It may have "
+            "changed files or run commands before it was stopped; check the working directory before "
+            "retrying."
+        )
     except OSError as exc:
         return f"ERROR: could not run the {cli_name} CLI: {exc}"
     out = (proc.stdout or "").strip()
@@ -369,6 +381,11 @@ def _claude_code_tool(arguments: dict[str, Any]) -> str:
     task = (arguments.get("task") or "").strip()
     if not task:
         return "ERROR: claude_code requires a non-empty 'task'."
+    if len(task) > _MAX_CLI_TASK_CHARS:
+        return (
+            f"REFUSED: the task is {len(task)} characters; claude_code takes at most {_MAX_CLI_TASK_CHARS} so "
+            "the approval prompt can show all of it. Split it into smaller tasks."
+        )
     cli = _find_claude_cli()
     if cli is None:
         return (
@@ -425,18 +442,56 @@ def _claude_code_tool(arguments: dict[str, Any]) -> str:
 
 
 def _claude_code_mcp_args() -> list[str]:
-    """--mcp-config/--allowedTools args giving this Claude Code CLI call
-    real access to Dourmouse's own tool registry (see mcp_bridge.py) — the
-    SAME config file code_backends._run_claude uses (one file per process,
-    cached there), so claude_code and code_claude never disagree about
-    what Claude can reach. Best-effort: a broken/missing MCP setup must
-    never break claude_code's own core job (delegating a coding task)."""
-    try:
-        from dourmouse.code_backends import _MCP_ALLOWED_TOOLS, _ensure_mcp_config_path
+    """The MCP and settings args for this Claude Code CLI call, from
+    code_backends._claude_tool_args() so claude_code and code_claude cannot
+    drift apart: --strict-mcp-config (only Dourmouse's own bridge, never the
+    owner's claude.ai connectors), the Dourmouse tool allow-list, and the
+    plugin override. A failure to prepare the bridge config still leaves
+    --strict-mcp-config on and is logged there (finding P3-8 / H-FS1-2).
 
-        return ["--mcp-config", _ensure_mcp_config_path(), "--allowedTools", _MCP_ALLOWED_TOOLS]
-    except Exception:  # noqa: BLE001 - best-effort, see docstring above
-        return []
+    The one thing NOT taken over is the native-tool deny list
+    (--disallowedTools Bash,Write,Edit,...): this tool exists to let Claude
+    Code edit files and run commands in the project, and the owner approves
+    each call first. Whether those native tools should stay on is the owner's
+    open decision; the approval text and the description say plainly that
+    they are on."""
+    from dourmouse.code_backends import _claude_tool_args
+
+    args, _bridge_wired = _claude_tool_args()
+    kept: list[str] = []
+    skip_next = False
+    for arg in args:
+        if skip_next:
+            skip_next = False
+            continue
+        if arg == "--disallowedTools":
+            skip_next = True
+            continue
+        kept.append(arg)
+    return kept
+
+
+#: The longest task claude_code / codex_code will take. The approval prompt
+#: shows the whole task, so what the owner approves is exactly what runs; a
+#: longer one is refused rather than shown in part (finding P2-15).
+_MAX_CLI_TASK_CHARS = 8000
+
+
+def _cli_delegate_confirm(label: str, arguments: dict[str, Any]) -> str:
+    cwd = arguments.get("cwd") or _PROJECT_ROOT
+    task = str(arguments.get("task", ""))
+    if label == "Codex":
+        power = (
+            f"It runs under the Codex CLI's own sandbox policy (~/.codex/config.toml): it can edit files "
+            f"and run commands in {cwd} as that policy allows."
+        )
+    else:
+        power = (
+            f"It runs with its own permission prompts OFF: it can read, create, change and delete files "
+            f"and run shell commands in {cwd} and anywhere your Mac user account can reach, and it can "
+            f"use Dourmouse's tools."
+        )
+    return f"Hand this task to {label}? {power} This is the whole task that will be sent ({len(task)} characters):\n\n{task}"
 
 
 # --------------------------------------------------------------------------- #
@@ -499,6 +554,11 @@ def _codex_code_tool(arguments: dict[str, Any]) -> str:
     task = (arguments.get("task") or "").strip()
     if not task:
         return "ERROR: codex_code requires a non-empty 'task'."
+    if len(task) > _MAX_CLI_TASK_CHARS:
+        return (
+            f"REFUSED: the task is {len(task)} characters; codex_code takes at most {_MAX_CLI_TASK_CHARS} so "
+            "the approval prompt can show all of it. Split it into smaller tasks."
+        )
     cli = _find_codex_cli()
     if cli is None:
         return (
@@ -748,6 +808,15 @@ def _open_url_tool(arguments: dict[str, Any]) -> str:
     url = (arguments.get("url") or "").strip()
     if not url:
         return "ERROR: open_url requires a 'url'."
+    # Only a plain http(s) address with a host: file://, smb://, app schemes and
+    # scheme-less spellings are not opened (finding P2-7).
+    try:
+        parts = urllib.parse.urlsplit(url)
+        valid = parts.scheme in ("http", "https") and bool(parts.hostname)
+    except ValueError:
+        valid = False
+    if not valid:
+        return f"REFUSED: open_url only opens http or https addresses with a host name, not {url!r}."
     import webbrowser
 
     try:
@@ -1273,10 +1342,55 @@ _PROTECTED_FILE_RE = re.compile(
 )
 
 
+#: name -> (sha256 of the module file as it was exec'd, its TOOL_SPEC). A registry
+#: is built per delegated task, per schedule and per approval; without this every
+#: build re-exec'd every approved self-extension (finding P2-14).
+_APPROVED_SPEC_CACHE: dict[str, tuple[str, ToolSpec]] = {}
+_APPROVED_SPEC_LOCK = threading.Lock()
+
+
+def _approved_extension_spec(se_module: Any, name: str) -> ToolSpec:
+    """The TOOL_SPEC of an approved self-extension, executing its module once
+    per process for as long as its bytes are unchanged.
+
+    The reuse is only taken when the file's current hash equals the hash a
+    human approved, so a module edited, planted or un-approved since is sent
+    back through ``load_approved`` (which refuses it) exactly as before."""
+    path = se_module._approved_dir() / f"{name}.py"
+    digest = hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else ""
+    with _APPROVED_SPEC_LOCK:
+        hit = _APPROVED_SPEC_CACHE.get(name)
+        if hit is not None and digest and hit[0] == digest and se_module._expected_module_hash(name, None) == digest:
+            return hit[1]
+    spec = se_module.load_approved(name).TOOL_SPEC
+    with _APPROVED_SPEC_LOCK:
+        _APPROVED_SPEC_CACHE[name] = (digest, spec)
+    return spec
+
+
+def _workspace_rel(target: Path) -> Path:
+    """``target`` relative to the workspace root. ``_safe_resolve`` returns a
+    symlink-resolved path while ``_workspace_root()`` is not resolved, so the
+    root is resolved here too (finding P2-20)."""
+    return target.relative_to(_workspace_root().resolve())
+
+
+def _is_protected_parts(parts: tuple[str, ...]) -> bool:
+    """True for a workspace-relative path inside one of Dourmouse's own folders
+    or naming a secret file. Names are compared with the shared folding rule
+    (case and Unicode normalisation), because the default macOS volume treats
+    ``Self_Extensions`` and ``self_extensions`` as the same folder (P2-13)."""
+    if not parts:
+        return False
+    return path_identity.name_in(parts[0], _PROTECTED_WORKSPACE_TOP) or bool(
+        _PROTECTED_FILE_RE.search(path_identity.fold(parts[-1]))
+    )
+
+
 def _refuse_protected(base: Path, target: Path, action: str) -> None:
     """Raise ValueError when ``target`` is one of Dourmouse's own state or secret files."""
     parts = target.relative_to(base.resolve()).parts
-    if (parts and parts[0] in _PROTECTED_WORKSPACE_TOP) or (parts and _PROTECTED_FILE_RE.search(parts[-1])):
+    if _is_protected_parts(parts):
         raise ValueError(
             f"{action} of {'/'.join(parts)!r} is refused: it is where Dourmouse keeps its own state or "
             "secrets. Use another path in the workspace."
@@ -1369,7 +1483,9 @@ def _is_secret_workspace_path(base: Path, target: Path) -> bool:
         parts = target.resolve().relative_to(base.resolve()).parts
     except ValueError:
         return False
-    return bool(parts) and (parts[0] == "auth" or bool(_PROTECTED_FILE_RE.search(parts[-1])))
+    return bool(parts) and (
+        path_identity.name_in(parts[0], ("auth",)) or bool(_PROTECTED_FILE_RE.search(path_identity.fold(parts[-1])))
+    )
 
 
 def _read_file_tool(arguments: dict[str, Any]) -> str:
@@ -1428,7 +1544,7 @@ def _search_files_tool(arguments: dict[str, Any]) -> str:
             try:
                 for i, line in enumerate(p.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
                     if query in line:
-                        raw += f"{p.relative_to(_workspace_root())}:{i}:{line}\n"
+                        raw += f"{_workspace_rel(p)}:{i}:{line}\n"
             except OSError:
                 continue
             if raw.count("\n") >= max_results:
@@ -1455,16 +1571,23 @@ def _diff_preview_tool(arguments: dict[str, Any], *, for_write: bool = False) ->
         target = _safe_resolve(_workspace_root(), arguments.get("path", ""))
     except ValueError as exc:
         return f"REFUSED: {exc}"
+    if _is_secret_workspace_path(_workspace_root(), target):
+        # The diff prints the current file; read_file refuses these paths, so a
+        # preview must too (same guard, H-FR-1).
+        return (
+            f"REFUSED: {arguments.get('path')!r} is where Dourmouse keeps its own logins, tokens or databases; "
+            "the file tools never read there."
+        )
     new_content = arguments.get("content", "")
     header = "DIFF (what changed in this write):" if for_write else "DIFF PREVIEW (not written):"
     if not target.exists():
-        return f"DIFF (new file): {target.relative_to(_workspace_root())} would be created ({len(new_content)} chars)."
+        return f"DIFF (new file): {_workspace_rel(target)} would be created ({len(new_content)} chars)."
     if not target.is_file():
         return f"ERROR: not a file in workspace: {arguments.get('path')!r}"
     old = target.read_text(encoding="utf-8", errors="replace").splitlines()
     new = new_content.splitlines()
     diff = "\n".join(
-        difflib.unified_diff(old, new, fromfile=str(target.relative_to(_workspace_root())), tofile=str(target.relative_to(_workspace_root())))
+        difflib.unified_diff(old, new, fromfile=str(_workspace_rel(target)), tofile=str(_workspace_rel(target)))
     )
     if not diff.strip():
         return f"DIFF: no changes ({arguments.get('path')!r} already matches the proposed content)."
@@ -1499,7 +1622,7 @@ def _write_file_tool(arguments: dict[str, Any]) -> str:
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(arguments.get("content", ""))
     verb = "UPDATED" if existed else "WROTE"
-    msg = f"{verb} workspace file: {target.relative_to(_workspace_root())} ({len(arguments.get('content', ''))} chars)"
+    msg = f"{verb} workspace file: {_workspace_rel(target)} ({len(arguments.get('content', ''))} chars)"
     msg += _auto_commit_note(target, "wrote" if not existed else "edited")
     if diff_note:
         msg += "\n\n" + diff_note
@@ -1538,11 +1661,11 @@ def _edit_file_tool(arguments: dict[str, Any]) -> str:
     diff = "\n".join(
         difflib.unified_diff(
             text.splitlines(), new_text.splitlines(),
-            fromfile=str(target.relative_to(_workspace_root())), tofile=str(target.relative_to(_workspace_root())),
+            fromfile=str(_workspace_rel(target)), tofile=str(_workspace_rel(target)),
         )
     )
     note = _auto_commit_note(target, "edited")
-    return "EDITED workspace file " + str(target.relative_to(_workspace_root())) + " (1 occurrence):" + note + "\n" + diff
+    return "EDITED workspace file " + str(_workspace_rel(target)) + " (1 occurrence):" + note + "\n" + diff
 
 
 def _deploy_tool(arguments: dict[str, Any]) -> str:
@@ -1574,6 +1697,7 @@ def _delete_file_tool(arguments: dict[str, Any]) -> str:
     # runs. This function is the confirmed action.
     try:
         target = _safe_resolve(_workspace_root(), arguments.get("path", ""))
+        _refuse_protected(_workspace_root(), target, "deleting")
     except ValueError as exc:
         return f"REFUSED: {exc}"
     if not target.is_file():
@@ -1814,13 +1938,20 @@ def _send_message_tool(registry: DispatchRegistry) -> ToolSpec:
         body = (arguments.get("body") or "").strip()
         ctx = current_dispatch_context(registry)
         real_agent = ctx.forced_agent if ctx is not None else None
+        if not real_agent and ctx is not None and "messenger" in ctx.routed_agents:
+            # An ordinary chat turn whose tools the planner scoped to the
+            # messenger agent ("send a message to the markets agent ...") is
+            # the messenger speaking; send_message is only offered on such a
+            # turn through that scope, and no other agent's name can be
+            # claimed this way (finding P2-22).
+            real_agent = "messenger"
         if not real_agent:
             return (
                 "REFUSED: send_message needs a real, single-agent caller "
                 "identity (a delegate_task/delegate_parallel branch scoped "
-                "to one subagent) — it cannot be called from an untargeted "
-                "orchestrator turn, and 'from_agent' is never taken on the "
-                "caller's own say-so."
+                "to one subagent, or a turn routed to the messenger agent): it cannot be "
+                "called from an untargeted orchestrator turn, and 'from_agent' is never "
+                "taken on the caller's own say-so."
             )
         if claimed_from and claimed_from != real_agent:
             return (
@@ -1908,6 +2039,15 @@ def _read_agent_inbox_tool(registry: DispatchRegistry) -> ToolSpec:
             return (
                 f"REFUSED: unknown agent {agent!r} — read_agent_inbox reads "
                 "the inbox of a real roster agent."
+            )
+        # Reading marks the messages read for that agent, so a run scoped to one
+        # agent (a delegate branch, which may be reading hostile pages) reads only
+        # its own inbox, as send_message only sends as itself (finding P2-18).
+        ctx = current_dispatch_context(registry)
+        if ctx is not None and ctx.forced_agent and agent != ctx.forced_agent:
+            return (
+                f"REFUSED: this call is running as {ctx.forced_agent!r}; it can read only its own "
+                f"inbox, not {agent!r}'s."
             )
         try:
             limit = int(arguments.get("limit", 10))
@@ -4229,8 +4369,8 @@ def build_general_registry() -> DispatchRegistry:
                     handler=_docs_insert_image_h,
                     permission=Permission.REQUIRES_CONFIRMATION,
                     confirm_prompt=lambda a: (
-                        f"Insert an image into Google Doc "
-                        f"{a.get('document_id', '?')!r}?"
+                        f"Insert an image into Google Doc {a.get('document_id', '?')!r}? "
+                        f"Google will fetch this address: {a.get('image_url', '(none)')}"
                     ),
                 ),
                 ToolSpec(
@@ -4465,9 +4605,11 @@ def build_general_registry() -> DispatchRegistry:
                         "owner asks for Claude Code by name, or for complex code work, debugging or "
                         "codebase reasoning; for one small known edit use edit_file or "
                         "apply_search_replace instead. Requires the 'claude' CLI on PATH or "
-                        "CLAUDE_CODE_CLI set; honestly NOT CONFIGURED if not found. Note: headless mode "
-                        "runs with default permissions, so permission-gated file edits are typically "
-                        "declined."
+                        "CLAUDE_CODE_CLI set; honestly NOT CONFIGURED if not found. Note: it runs with "
+                        "Claude Code's own permission prompts OFF (--permission-mode bypassPermissions), so "
+                        "it really edits files and runs shell commands in the given cwd without asking "
+                        "again; the owner approves each call once, and the whole task text is shown to "
+                        "them. Tasks over 8000 characters are refused."
                     ),
                     parameters={
                         "type": "object",
@@ -4480,7 +4622,7 @@ def build_general_registry() -> DispatchRegistry:
                     },
                     handler=_claude_code_tool,
                     permission=Permission.REQUIRES_CONFIRMATION,
-                    confirm_prompt=lambda a: f"Hand this task to Claude Code (it can edit files and run commands in {a.get('cwd') or _PROJECT_ROOT})?\n\n" + str(a.get("task", ""))[:1500],
+                    confirm_prompt=lambda a: _cli_delegate_confirm("Claude Code", a),
                 ),
                 ToolSpec(
                     name="codex_code",
@@ -4508,7 +4650,7 @@ def build_general_registry() -> DispatchRegistry:
                     },
                     handler=_codex_code_tool,
                     permission=Permission.REQUIRES_CONFIRMATION,
-                    confirm_prompt=lambda a: f"Hand this task to Codex (it can edit files and run commands in {a.get('cwd') or _PROJECT_ROOT})?\n\n" + str(a.get("task", ""))[:1500],
+                    confirm_prompt=lambda a: _cli_delegate_confirm("Codex", a),
                 ),
                 ToolSpec(
                     name="deploy",
@@ -6655,7 +6797,7 @@ def build_general_registry() -> DispatchRegistry:
     self_extended_errors: list[str] = []
     for _ext_name in se_module.list_approved_names():
         try:
-            self_extended_tools.append(se_module.load_approved(_ext_name).TOOL_SPEC)
+            self_extended_tools.append(_approved_extension_spec(se_module, _ext_name))
         except Exception as exc:  # noqa: BLE001 -- one broken self-extension must never break server startup
             self_extended_errors.append(f"{_ext_name}: {type(exc).__name__}: {exc}")
     if self_extended_tools:

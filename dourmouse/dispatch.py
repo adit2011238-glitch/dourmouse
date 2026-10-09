@@ -704,6 +704,11 @@ def _call_with_retry(
             if not abandoned.is_set():
                 _real_on_thinking(text)
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    # Set by the worker once it holds the local-model slot (immediately on any
+    # other backend). The deadline below only starts counting then, so a call
+    # queued behind another local generation is not "timed out" for waiting,
+    # and a call abandoned while queued never runs (finding P2-11).
+    admitted = threading.Event()
     try:
         future = executor.submit(
             _call_with_retry_inner,
@@ -716,8 +721,16 @@ def _call_with_retry(
             on_delta=on_delta,
             on_thinking=on_thinking,
             client_factory=client_factory,
+            abandoned=abandoned,
+            admitted=admitted,
         )
         try:
+            queue_deadline = time.monotonic() + _model_call_deadline_s()
+            while not admitted.wait(timeout=0.05):
+                if future.done():
+                    break  # failed before it was admitted: result() below raises it
+                if time.monotonic() >= queue_deadline:
+                    raise concurrent.futures.TimeoutError()
             response = future.result(timeout=_model_call_deadline_s())
         except concurrent.futures.TimeoutError as exc:
             abandoned.set()
@@ -798,6 +811,8 @@ def _call_with_retry_inner(
     on_delta: Callable[[str], None] | None = None,
     on_thinking: Callable[[str], None] | None = None,
     client_factory: Callable[[], tuple[Any, str] | None] | None = None,
+    abandoned: threading.Event | None = None,
+    admitted: threading.Event | None = None,
 ) -> Any:
     """Real network call, gated by the local-model concurrency semaphore
     (finding #074) when ``config`` identifies a genuinely local backend --
@@ -815,6 +830,14 @@ def _call_with_retry_inner(
         semaphore = _get_local_model_semaphore()
         semaphore.acquire()
         try:
+            if abandoned is not None and abandoned.is_set():
+                # The caller gave up while this call was queued: do not run a
+                # full generation whose answer nobody will read.
+                raise ModelCallDeadlineExceeded(
+                    f"model call to {model!r} was abandoned while queued behind another local model call"
+                )
+            if admitted is not None:
+                admitted.set()
             return _call_with_retry_inner_impl(
                 client, model=model, messages=messages, tools=tools, config=config,
                 call_log=call_log, on_delta=on_delta, on_thinking=on_thinking,
@@ -822,6 +845,8 @@ def _call_with_retry_inner(
             )
         finally:
             semaphore.release()
+    if admitted is not None:
+        admitted.set()
     return _call_with_retry_inner_impl(
         client, model=model, messages=messages, tools=tools, config=config,
         call_log=call_log, on_delta=on_delta, on_thinking=on_thinking,
@@ -880,13 +905,33 @@ def _call_with_retry_inner_impl(
 
     last_exc: Exception | None = None
     attempt = 0
+    # A retry after text was already streamed to the user would send the whole
+    # answer again behind the part they have seen (no UI has a "reset" event),
+    # so once anything visible went out, a failure is reported, not retried.
+    shown_anything = False
+    stream_on_delta: Callable[[str], None] | None = None
+    stream_on_thinking: Callable[[str], None] | None = None
+    if on_delta is not None:
+        real_delta = on_delta
+
+        def stream_on_delta(text: str) -> None:  # noqa: F811 - the tracking wrapper
+            nonlocal shown_anything
+            shown_anything = True
+            real_delta(text)
+    if on_thinking is not None:
+        real_thinking = on_thinking
+
+        def stream_on_thinking(text: str) -> None:  # noqa: F811 - the tracking wrapper
+            nonlocal shown_anything
+            shown_anything = True
+            real_thinking(text)
     while True:
         try:
             if call_log is not None:
                 call_log.append({"model": model, "attempt": attempt + 1})
-            if on_delta is not None:
+            if stream_on_delta is not None:
                 return _stream_completion(
-                    client, model, messages, tools, extra_body, on_delta, on_thinking
+                    client, model, messages, tools, extra_body, stream_on_delta, stream_on_thinking
                 )
             return client.chat.completions.create(
                 model=model,
@@ -899,6 +944,8 @@ def _call_with_retry_inner_impl(
         except Exception as exc:  # noqa: BLE001 - inspect then decide
             last_exc = exc
             if not _is_transient_error(exc):
+                raise
+            if shown_anything:
                 raise
             limited = _is_rate_limited(exc)
             if attempt >= (max(retries, _RATE_LIMIT_RETRIES) if limited else retries):
@@ -1048,6 +1095,34 @@ def _stream_completion(
     if mcp_toolcall_log:
         final_message.dourmouse_mcp_tool_uses = mcp_toolcall_log
     return _OllamaResponse(final_message, usage=stream_usage)
+
+
+# Tool results that are situations for the model to react to, not answers to
+# hand to the user as the final reply (finding P2-12).
+_NOT_AN_ANSWER_PREFIXES = (
+    "ERROR", "REFUSED", "NOT CONFIGURED", "DECLINED", "CONFIRMATION REQUIRED", "BLOCKED BY HOOK",
+)
+
+
+def _redact_tool_arguments(dlp: Any, raw: str) -> str:
+    """The model's raw tool-call arguments with secrets redacted, keeping the
+    JSON valid: every string value is redacted on its own (finding P2-9)."""
+    try:
+        parsed = json.loads(raw)
+    except (TypeError, ValueError):
+        return dlp.redact(raw)[0] if isinstance(raw, str) else raw
+
+    def walk(value: Any) -> Any:
+        if isinstance(value, str):
+            return dlp.redact(value)[0]
+        if isinstance(value, list):
+            return [walk(v) for v in value]
+        if isinstance(value, dict):
+            return {k: walk(v) for k, v in value.items()}
+        return value
+
+    cleaned = walk(parsed)
+    return raw if cleaned == parsed else json.dumps(cleaned)
 
 
 class Permission(str, Enum):
@@ -1826,6 +1901,18 @@ class _HarmonyDeltaFilter:
         self._buf = ""
         self._scanning = True  # True until the first "<|" is seen at all
         self._channel: str | None = None
+        # True once a REAL Harmony header or marker matched. Until then a "<|"
+        # that turns out not to be a marker is ordinary content (an F#/Elm/
+        # Haskell pipe, a shell example) and is shown, not swallowed.
+        self._saw_marker = False
+
+    def _bail_literal(self) -> None:
+        """The buffer's leading "<" is content, not the start of a marker."""
+        if self._channel == "final" or not self._saw_marker:
+            self._on_delta(self._buf[0])
+        self._buf = self._buf[1:]
+        if not self._saw_marker:
+            self._scanning = True
 
     def feed(self, text: str) -> None:
         if not text:
@@ -1854,6 +1941,7 @@ class _HarmonyDeltaFilter:
             # match a complete channel header first.
             m = _HARMONY_HEADER_RE.match(self._buf)
             if m:
+                self._saw_marker = True
                 self._channel = m.group(1)
                 self._buf = self._buf[m.end() :]
                 continue
@@ -1866,14 +1954,14 @@ class _HarmonyDeltaFilter:
                 # standalone boundary marker on its own. Real Harmony output
                 # never emits "<|channel|>" without a following name and
                 # "<|message|>", so always wait for the rest.
+                self._saw_marker = True  # a real Harmony token, whatever follows
                 if len(self._buf) > 64:
-                    if self._channel == "final":
-                        self._on_delta(self._buf[0])
-                    self._buf = self._buf[1:]
+                    self._bail_literal()
                     continue
                 return
             m2 = _HARMONY_MARKER_RE.match(self._buf)
             if m2:
+                self._saw_marker = True
                 # A non-header marker (<|end|>, <|start|>, <|return|>,
                 # <|call|>). Ends the current channel; the next segment
                 # starts unknown (dropped) until its own header names it.
@@ -1886,10 +1974,10 @@ class _HarmonyDeltaFilter:
                 # long for any real marker, meaning it's not actually one
                 # (a literal "<|" in real content, e.g. a shell pipe
                 # example). Bail out and treat the leading "<" as content.
-                if len(self._buf) > 64:
-                    if self._channel == "final":
-                        self._on_delta(self._buf[0])
-                    self._buf = self._buf[1:]
+                if len(self._buf) > 64 or (len(self._buf) >= 3 and not self._buf[2].isalpha()):
+                    # Too long for any marker, or the character after "<|"
+                    # cannot start a marker name ("<| f", "<|>"): content.
+                    self._bail_literal()
                     continue
                 return
             # We're between markers, inside a channel's body. Emit live if
@@ -1913,7 +2001,7 @@ class _HarmonyDeltaFilter:
     def finish(self) -> None:
         """Flush any trailing held-back text (e.g. a lone trailing "<" that
         never turned out to be a marker) once the stream is truly done."""
-        if self._buf and (self._scanning or self._channel == "final"):
+        if self._buf and (self._scanning or self._channel == "final" or not self._saw_marker):
             self._on_delta(self._buf)
         self._buf = ""
 
@@ -2366,7 +2454,12 @@ def _nvidia_rotation_factory(
         return None
     if len(pool) < 2:
         return None
-    state: dict[str, model_router.Account | None] = {"current": None}
+    # The caller's client was built from the config key, not from the pool,
+    # so the account that is actually in use is the pool entry holding that
+    # key. Without this the first rotation marked nothing as cooling and
+    # could hand the same exhausted account straight back (finding P2-6).
+    in_use = next((a for a in pool.accounts() if a.api_key and a.api_key == getattr(config, "api_key", None)), None)
+    state: dict[str, model_router.Account | None] = {"current": in_use}
 
     def factory() -> tuple[Any, str] | None:
         previous = state["current"]
@@ -2396,6 +2489,20 @@ def _nvidia_rotation_factory(
         )
         return OllamaNativeClient(fallback_cfg), fallback_cfg.model
 
+    def start_on_available_account() -> tuple[Any, str] | None:
+        """When the account the caller's client was built from is already in
+        cooldown from an earlier turn, the client for the next available one
+        (no new cooldown is recorded); otherwise None."""
+        current = state["current"]
+        if current is None or current in pool.available():
+            return None
+        account = pool.select(exclude=current.name)
+        if account is None or account.name == current.name:
+            return None
+        state["current"] = account
+        return (_client_for(account), model)
+
+    factory.start_on_available_account = start_on_available_account  # type: ignore[attr-defined]
     return factory
 
 
@@ -2798,6 +2905,8 @@ OUTBOUND_TOOLS: frozenset[str] = frozenset({
     "browser_fill", "browser_fill_form", "browser_select", "browser_press", "browser_click",
     "browser_type",
     "gmail_send", "email_own_send", "send_draft", "send_app_keystrokes", "freebuff_dispatch",
+    # Google fetches the image URL server-side, so a query string can carry data out.
+    "docs_insert_image",
 })
 
 #: Tools that open a URL in a browser.
@@ -2868,9 +2977,13 @@ def _url_gate(spec_name: str, url: str, actor: str) -> tuple[str, str] | None:
         parts = _up.urlsplit(url.strip())
         port = parts.port or (443 if parts.scheme == "https" else 80)
     except ValueError:
-        return None  # the tool itself refuses a malformed address
+        return ("refuse", f"{url!r} is not a valid web address.")
     if parts.scheme not in ("http", "https") or not parts.hostname:
-        return None
+        # Not a plain http(s) address with a host: "http:127.0.0.1:8765", "//127.0.0.1:8765/",
+        # "localhost:8765/x", "file:///..." and app schemes. Browsers read several of these as
+        # a local address, so they were never allowed to skip the checks below (finding P2-7).
+        return ("refuse", f"{url!r} is not a plain http or https address with a host name. Give the full "
+                "address, for example https://example.com/page.")
     # Chromium reads these spellings differently from urlsplit (a backslash ends the host, a
     # percent-encoded host is decoded), so a loopback address could slip past the check below.
     if "\\" in url or "%" in (parts.netloc or "") or "@" in (parts.netloc or ""):
@@ -2892,7 +3005,15 @@ def _url_gate(spec_name: str, url: str, actor: str) -> tuple[str, str] | None:
     return None
 
 
-_ENTER_KEYS = frozenset({"enter", "return", "numpadenter", "kp_enter"})
+# Enter submits a form; so does Space on a focused submit button (finding #173, H-FB-3)
+_ENTER_KEYS = frozenset({"enter", "return", "numpadenter", "kp_enter", "space", " ", "spacebar"})
+
+
+def _press_token(key: Any) -> str:
+    """The last key of a chord, lowercased; a bare space (" ") is the Space key."""
+    raw = str(key or "")
+    token = raw.split("+")[-1].strip().lower()
+    return token or ("space" if raw and not raw.strip() else "")
 
 
 def _argument_gate(spec: ToolSpec, arguments: dict[str, Any], actor: str) -> tuple[str, str] | None:
@@ -2910,7 +3031,15 @@ def _argument_gate(spec: ToolSpec, arguments: dict[str, Any], actor: str) -> tup
             decision = _url_gate(name, url, actor)
             if decision is not None:
                 return decision
-    if name == "browser_press" and str(arguments.get("key") or "").strip().lower().split("+")[-1].strip() in _ENTER_KEYS:
+    if name == "browser_click":
+        # finding #173 (H-1, owner decision 2026-10-09): clicks on Send, Submit, Buy, Pay, Delete and
+        # similar controls ask first; browser_agent decides what looks submit-like.
+        from dourmouse import browser_agent
+
+        decision = browser_agent.click_gate(arguments)
+        if decision is not None:
+            return decision
+    if name == "browser_press" and _press_token(arguments.get("key")) in _ENTER_KEYS:
         return ("confirm", "Press Enter on the current browser page? Enter can submit a form: send a message, "
                 "sign in, or place an order.")
     if name == "browser_type" and str(arguments.get("mode") or "text").strip().lower() == "keys" and (
@@ -2936,6 +3065,7 @@ def _execute_tool(
     ledger: list[dict[str, Any]] | None = None,
     policy: Any = None,
     actor: str = "",
+    scope: str = "",
 ) -> str:
     """R7 (finding #133): the model proposes, the runtime decides. Every
     call is recorded in the action ledger (proposed, then denied / declined
@@ -2972,7 +3102,8 @@ def _execute_tool(
         spec = _dataclass_replace(spec, permission=Permission.REQUIRES_CONFIRMATION, confirm_prompt=_prompt)
     if policy is not None and spec.permission is not Permission.PROHIBITED:
         reason = policy.decide(spec.name, arguments,
-                               consequential=spec.permission is Permission.REQUIRES_CONFIRMATION)
+                               consequential=spec.permission is Permission.REQUIRES_CONFIRMATION,
+                               scope=scope)
         if reason:
             _ep.record("denied", spec.name, arguments, actor, reason=reason)
             return f"REFUSED BY POLICY: {reason}"
@@ -3119,21 +3250,28 @@ def _execute_tool_inner(
     try:
         result = spec.handler(arguments)
     except Exception as exc:  # noqa: BLE001 - deliberate boundary catch
+        from dourmouse import execution_policy as _ep
         from dourmouse import net_errors, obs
 
+        # Arguments can hold a password, a message body or a pasted key, and
+        # logs/errors.log has no DLP of its own: log only the names and a
+        # hash, and pass the traceback and message through the DLP filter
+        # (finding P2-4).
+        arg_names, arg_digest = _ep._args_fingerprint(arguments)
+        _dlp = DlpFilter()
         obs.log_error(
             source=f"tool:{spec.name}",
             kind=net_errors.classify(exc).value,
             what=spec.name,
-            detail=traceback.format_exc(),
+            detail=_dlp.redact(traceback.format_exc())[0],
             status=net_errors.http_status(exc),
-            extra={"arguments": arguments},
+            extra={"argument_names": arg_names, "arguments_sha": arg_digest},
         )
         obs.log_agent_call(
             tool=spec.name,
             ok=False,
             duration_ms=(time.perf_counter() - start) * 1000.0,
-            detail=f"{type(exc).__name__}: {exc}",
+            detail=_dlp.redact(f"{type(exc).__name__}: {exc}")[0],
         )
         # Keep the long-standing "ERROR: tool 'x' failed:" prefix — callers
         # and the DLP boundary below key off an ERROR prefix, and the model
@@ -3768,6 +3906,11 @@ class DispatchContext:
     # owns whichever ONE agent it was forced to), so there is nothing to
     # propagate.
     forced_agent: str | None = None
+    # The agents the planner scoped an ordinary (not hard-scoped) turn's tools
+    # to. Unlike ``forced_agent`` this is not a security identity; it only lets
+    # send_message speak as ``messenger`` on a turn whose tools were scoped to
+    # the messenger agent (finding P2-22).
+    routed_agents: frozenset[str] = frozenset()
     # Finding #134 (AGENT-3): this run is one branch of a delegate_parallel
     # fan-out. Live-caught: each branch received the parent conversation as
     # context, including the user's own "use delegate_parallel with 8
@@ -3840,10 +3983,16 @@ class DispatchContext:
 
     def consume_delegate(self) -> bool:
         """Atomically claim one delegation budget slot."""
-        if self.budget[0] >= self.max_delegates:
-            return False
-        self.budget[0] += 1
-        return True
+        with _DELEGATE_BUDGET_LOCK:
+            if self.budget[0] >= self.max_delegates:
+                return False
+            self.budget[0] += 1
+            return True
+
+
+# delegate_parallel branches run on several threads sharing one budget list; the
+# check and the increment must be one step (finding P2-10).
+_DELEGATE_BUDGET_LOCK = threading.Lock()
 
 
 def _registry_ctx_stack(registry: DispatchRegistry) -> list[DispatchContext]:
@@ -5062,6 +5211,7 @@ def _run_dispatch_loop(
     # prompt): fall back to the existing generic roster prompt exactly as
     # v8.30 left it.
     bespoke_agent_prompt = None
+    ctx.routed_agents = frozenset(plan_agents)
     if len(plan_agents) == 1:
         from dourmouse.agent_prompts import AGENT_SYSTEM_PROMPTS
 
@@ -5236,6 +5386,13 @@ def _run_dispatch_loop(
         # docstring for why a single-account setup is completely
         # unaffected by this existing at all.
         client_factory = _nvidia_rotation_factory(client, ctx.config, model)
+        if client_factory is not None:
+            # This turn's account may have been rate limited on an earlier
+            # turn: start on the next one instead of spending a failed call
+            # to learn it.
+            _start = client_factory.start_on_available_account()  # type: ignore[attr-defined]
+            if _start is not None:
+                client, model = _start
 
         # v4.2 speed: the LLM sees a bounded rolling window (system +
         # in-flight exchange + recent history), never the unbounded
@@ -5510,9 +5667,15 @@ def _run_dispatch_loop(
                 for tc in tool_calls
             ],
         }
+        if dlp is not None:
+            # The arguments the model wrote are stored in the history and the
+            # transcript; a secret in them is redacted like one in a result.
+            # The real call below still runs on the original text.
+            for _call in assistant_msg["tool_calls"]:
+                _call["function"]["arguments"] = _redact_tool_arguments(dlp, _call["function"]["arguments"])
         messages.append(assistant_msg)
 
-        for tool_call in tool_calls:
+        for call_index, tool_call in enumerate(tool_calls):
             # v13.5 "stop/directive bug" fix: re-checked before EACH tool
             # call, not just between turns — a single turn can request
             # several tool calls back to back, and STOP should not have to
@@ -5521,12 +5684,22 @@ def _run_dispatch_loop(
                 entry = _stop_entry()
                 transcript.append(entry)
                 _emit_event(event_sink, entry, ctx=ctx)
+                # Every tool_call id in the assistant message needs a tool
+                # message, or the next request is rejected (finding P2-8).
+                for _pending in tool_calls[call_index:]:
+                    messages.append(
+                        {"role": "tool", "tool_call_id": _pending.id,
+                         "content": "CANCELLED: the user stopped this run before the tool ran."}
+                    )
                 return {"final_text": "", "transcript": transcript, "messages": messages}
             name = tool_call.function.name
             use_entry = {
                 "type": "tool_use",
                 "name": name,
-                "raw_arguments": tool_call.function.arguments,
+                "raw_arguments": (
+                    _redact_tool_arguments(dlp, tool_call.function.arguments)
+                    if dlp is not None else tool_call.function.arguments
+                ),
             }
             transcript.append(use_entry)
             _emit_event(event_sink, use_entry, ctx=ctx)
@@ -5594,7 +5767,15 @@ def _run_dispatch_loop(
                 else:
                     # Contract enforcement: validate args against the declared
                     # schema BEFORE any handler runs (spec: rigid JSON schemas).
-                    validation_error = validate_tool_arguments(spec.parameters, arguments)
+                    if arguments is None:
+                        arguments = {}  # "null" for a tool that takes nothing
+                    if isinstance(arguments, dict):
+                        validation_error = validate_tool_arguments(spec.parameters, arguments)
+                    else:
+                        # A list, string or number is not a call (finding P2-5).
+                        validation_error = (
+                            f"tool arguments must be a JSON object, got {type(arguments).__name__}"
+                        )
                     if validation_error is not None:
                         result_text = (
                             f"ERROR: invalid arguments for '{name}': {validation_error}"
@@ -5626,6 +5807,9 @@ def _run_dispatch_loop(
                                 result_text = _execute_tool(
                                     spec, arguments, confirmation_gate, ledger=transcript,
                                     policy=ctx.policy, actor=ctx.forced_agent or "orchestrator",
+                                    # A fan-out branch counts its own repeated read-only
+                                    # calls (finding P2-31).
+                                    scope=ctx.call_id if ctx.fanout_branch else "",
                                 )
                             except Exception as exc:  # surface handler errors honestly
                                 result_text = f"ERROR: tool '{name}' failed: {exc}"
@@ -5670,7 +5854,7 @@ def _run_dispatch_loop(
             ctx.forced_agent
             and len(tool_calls) == 1
             and name in _COMPLETE_ANSWER_TOOLS
-            and not result_text.startswith(("ERROR", "REFUSED", "NOT CONFIGURED"))
+            and not result_text.startswith(_NOT_AN_ANSWER_PREFIXES)
         ):
             _maybe_ingest_memory(ctx.depth, str(last_user), result_text, plan_agents)
             return {"final_text": result_text, "transcript": transcript, "messages": messages}

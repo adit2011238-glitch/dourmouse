@@ -94,7 +94,7 @@ printf 'stock electron version before: %s\n' "$CUR" > "$BACKUP/NOTE.txt"
 say "backed up to $BACKUP (Electron $CUR)"
 
 step "2. Install the castLabs ECS build"
-TAG="$(pick_tag "$MAJOR")"
+TAG="$(pick_tag "$MAJOR" || true)"  # a failed lookup must reach the message below, not end the script silently under set -e
 if [ -z "$TAG" ]; then
   echo "No castLabs tag was found for Electron $MAJOR (network down, or no such release)." >&2
   echo "List them yourself:  git ls-remote --tags $REPO_URL | grep wvcus | tail" >&2

@@ -26,6 +26,7 @@ import contextlib
 import hashlib
 import re
 import subprocess
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -47,6 +48,15 @@ BROWSER_AUDIO = {"aac", "mp3", "opus", "vorbis", "flac"}
 
 _jobs: dict[str, dict[str, Any]] = {}
 _lock = threading.Lock()
+
+#: A failed job is served from the cache for this long, then tried again (an
+#: installed ffmpeg, freed disk space or a network share coming back should
+#: not need an app restart).
+_RETRY_FAILED_S = 30.0
+#: One conversion may run for at least this long, or this many times the
+#: media's duration, before ffmpeg is killed and the job fails.
+_MIN_RUN_LIMIT_S = 1800.0
+_RUN_LIMIT_X_DURATION = 8.0
 
 
 def ffmpeg_exe() -> str | None:
@@ -85,8 +95,16 @@ def probe(src: Path) -> dict[str, Any]:
     proc = subprocess.run([exe, "-hide_banner", "-protocol_whitelist", _FFMPEG_PROTOCOLS, "-i", str(src)], capture_output=True, text=True, encoding="utf-8",
                           errors="replace", timeout=60, check=False)
     text = proc.stderr
-    video = re.findall(r"Stream #\d+:\d+(?:\[\w+\])?(?:\(\w+\))?: Video: (\w+)", text)
-    audio = re.findall(r"Stream #\d+:\d+(?:\[\w+\])?(?:\(\w+\))?: Audio: (\w+)", text)
+    video: list[str] = []
+    audio: list[str] = []
+    for line in text.splitlines():
+        m = re.search(r"Stream #\d+:\d+(?:\[\w+\])?(?:\(\w+\))?: (Video|Audio): (\w+)", line)
+        if m is None:
+            continue
+        if m.group(1) == "Audio":
+            audio.append(m.group(2))
+        elif "(attached pic)" not in line:  # cover art in a .flac/.m4a is not a video track
+            video.append(m.group(2))
     subs = re.findall(r"Stream #\d+:(\d+)(?:\[\w+\])?(?:\((\w+)\))?: Subtitle: (\w+)", text)
     dur = re.search(r"Duration: (\d+):(\d+):([\d.]+)", text)
     if not video and not audio:
@@ -123,27 +141,48 @@ def _run(key: str, src: Path, out: Path, p: dict[str, Any], duration: float | No
     tmp = out.with_suffix(out.suffix + ".part")
     cmd = [ffmpeg_exe() or "ffmpeg", "-hide_banner", "-nostdin", "-y", "-protocol_whitelist", _FFMPEG_PROTOCOLS, "-i", str(src), *p["args"],
            "-progress", "pipe:1", "-nostats", str(tmp)]
+    limit = max(_MIN_RUN_LIMIT_S, (duration or 0.0) * _RUN_LIMIT_X_DURATION)
+    timed_out = threading.Event()
+    watchdog: threading.Timer | None = None
     try:
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8",
-                                errors="replace")
-        job["pid"] = proc.pid
-        assert proc.stdout is not None
-        for line in proc.stdout:
-            if line.startswith("out_time_us=") and duration:
-                with contextlib.suppress(ValueError):  # "N/A" before the first frame
-                    job["progress"] = min(0.99, int(line.split("=", 1)[1]) / 1e6 / duration)
-        err = proc.stderr.read() if proc.stderr else ""
-        code = proc.wait()
-        if code == 0 and tmp.exists() and tmp.stat().st_size > 0:
+        # stderr goes to a file, not a pipe: ffmpeg warnings can exceed the pipe
+        # buffer while only stdout is being read, which blocked ffmpeg forever.
+        with tempfile.TemporaryFile() as err_file:
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=err_file, text=True, encoding="utf-8",
+                                    errors="replace")
+            job["pid"] = proc.pid
+
+            def _kill() -> None:
+                timed_out.set()
+                proc.kill()
+
+            watchdog = threading.Timer(limit, _kill)
+            watchdog.daemon = True
+            watchdog.start()
+            assert proc.stdout is not None
+            for line in proc.stdout:
+                if line.startswith("out_time_us=") and duration:
+                    with contextlib.suppress(ValueError):  # "N/A" before the first frame
+                        job["progress"] = min(0.99, int(line.split("=", 1)[1]) / 1e6 / duration)
+            code = proc.wait()
+            err_file.seek(0)
+            err = err_file.read().decode("utf-8", errors="replace")
+        if timed_out.is_set():
+            job.update(state="failed", failed_at=time.time(), error=f"ffmpeg timed out after {limit:g}s and was stopped")
+            tmp.unlink(missing_ok=True)
+        elif code == 0 and tmp.exists() and tmp.stat().st_size > 0:
             tmp.replace(out)
             job.update(state="ready", progress=1.0, finished_at=time.time())
         else:
             tail = [ln for ln in err.splitlines() if ln.strip()][-3:]
-            job.update(state="failed", error="ffmpeg could not convert it: " + " / ".join(tail))
+            job.update(state="failed", failed_at=time.time(), error="ffmpeg could not convert it: " + " / ".join(tail))
             tmp.unlink(missing_ok=True)
     except Exception as exc:  # noqa: BLE001 -- recorded on the job, never lost
-        job.update(state="failed", error=f"{type(exc).__name__}: {exc}")
+        job.update(state="failed", failed_at=time.time(), error=f"{type(exc).__name__}: {exc}")
         tmp.unlink(missing_ok=True)
+    finally:
+        if watchdog is not None:
+            watchdog.cancel()
 
 
 def ensure_playable(src: Path, *, wait_s: float = 0.0) -> dict[str, Any]:
@@ -155,22 +194,38 @@ def ensure_playable(src: Path, *, wait_s: float = 0.0) -> dict[str, Any]:
     key = _key(src)
     with _lock:
         job = _jobs.get(key)
+        if job is not None and job["state"] == "failed" and time.time() - job.get("failed_at", 0.0) >= _RETRY_FAILED_S:
+            job = None  # a failure is remembered for a while, not forever
         if job is None:
-            info = probe(src)
-            if not info["ok"]:
-                job = {"state": "failed", "error": info["error"]}
-                _jobs[key] = job
-                return dict(job)
-            p = plan(info)
-            out = cache_dir() / f"{key}{p['out_ext']}"
-            job = {"state": "ready" if out.exists() else "converting", "route": p["route"], "path": str(out),
-                   "content_type": p["content_type"], "progress": 1.0 if out.exists() else 0.0,
-                   "started_at": time.time(), "streams": {"video": info["video"], "audio": info["audio"]},
-                   "duration": info["duration"]}
+            # Another request for this file sees this placeholder while the
+            # probe runs below, outside the lock.
+            job = {"state": "converting", "route": None, "progress": 0.0, "started_at": time.time()}
             _jobs[key] = job
-            if job["state"] == "converting":
-                threading.Thread(target=_run, args=(key, src, out, p, info["duration"]), daemon=True,
-                                 name=f"media-{key[:8]}").start()
+            mine = True
+        else:
+            mine = False
+    if mine:
+        try:
+            info = probe(src)
+        except (subprocess.SubprocessError, OSError) as exc:
+            info = {"ok": False, "error": f"ffmpeg could not inspect the file: {type(exc).__name__}: {exc}"}
+        if not info["ok"]:
+            with _lock:
+                if ffmpeg_exe() is None:
+                    _jobs.pop(key, None)  # nothing was tried: do not remember it
+                    return {"state": "failed", "error": info["error"]}
+                job.update(state="failed", failed_at=time.time(), error=info["error"])
+            return dict(job)
+        p = plan(info)
+        out = cache_dir() / f"{key}{p['out_ext']}"
+        with _lock:
+            job.update(state="ready" if out.exists() else "converting", route=p["route"], path=str(out),
+                       content_type=p["content_type"], progress=1.0 if out.exists() else 0.0,
+                       streams={"video": info["video"], "audio": info["audio"]}, duration=info["duration"])
+            start = job["state"] == "converting"
+        if start:
+            threading.Thread(target=_run, args=(key, src, out, p, info["duration"]), daemon=True,
+                             name=f"media-{key[:8]}").start()
     deadline = time.monotonic() + wait_s
     while job["state"] == "converting" and time.monotonic() < deadline:
         time.sleep(0.1)
@@ -187,9 +242,12 @@ def _srt_to_vtt(text: str) -> str:
 def sidecar_subtitles(src: Path) -> list[dict[str, str]]:
     """Subtitle files next to the media: movie.srt, movie.en.srt, movie.vtt."""
     out = []
-    for f in sorted(src.parent.glob(src.stem + "*")):
-        if f.suffix.lower() in (".srt", ".vtt") and f.is_file():
-            label = f.name[len(src.stem):].rsplit(".", 1)[0].strip(".") or "default"
+    stem = src.stem
+    # Not glob(stem + "*"): [ ] ? * in a release name are pattern syntax, and a
+    # bare prefix also matched another film's file ("Matrix" / "Matrix Reloaded").
+    for f in sorted(src.parent.iterdir()):
+        if f.name.startswith(stem + ".") and f.suffix.lower() in (".srt", ".vtt") and f.is_file():
+            label = f.name[len(stem):].rsplit(".", 1)[0].strip(".") or "default"
             out.append({"path": str(f), "label": label})
     return out
 

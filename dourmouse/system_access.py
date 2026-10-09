@@ -54,6 +54,7 @@ from typing import Any
 
 from dourmouse import git_safety
 from dourmouse.dispatch import Permission, Subagent, ToolSpec
+from dourmouse.path_identity import folded_parts, is_under_folded, name_in
 from dourmouse.sandbox import run_sandboxed
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -398,7 +399,9 @@ _SYSTEM_DIRS = ("/Library", "/Applications", "/System", "/usr", "/opt/homebrew",
 
 
 def _under_dir(path: Path, base: Path) -> bool:
-    return path == base or base in path.parents
+    """Deny-side containment: the default macOS volume is case- and
+    normalisation-insensitive, so compare folded real paths (P5-65)."""
+    return is_under_folded(path, base)
 
 
 def _protected_target_reason(target: Path) -> str | None:
@@ -417,11 +420,11 @@ def _protected_target_reason(target: Path) -> str | None:
     except (OSError, RuntimeError):
         return "cannot be resolved"
     root = _PROJECT_ROOT.resolve()
-    if any(_under_dir(path, root / d) for d in ("dourmouse", "ui", "electron", "scripts", "extension", ".venv")) or path == root / ".env":
+    if any(_under_dir(path, root / d) for d in ("dourmouse", "ui", "electron", "scripts", "extension", ".venv")) or _under_dir(path, root / ".env"):
         return "is part of Dourmouse's own code or its secrets"
-    if ".git" in path.parts:
+    if name_in(".git", path.parts):
         return "is inside a .git folder (hooks and config run when git runs)"
-    if path.parent == home and path.name in _STARTUP_FILES:
+    if folded_parts(path.parent) == folded_parts(home) and name_in(path.name, _STARTUP_FILES):
         return "is a shell or tool start-up file (it runs whenever a terminal or git starts)"
     if any(_under_dir(path, home / d) for d in _STARTUP_DIRS) or any(_under_dir(path, Path(d)) for d in _SYSTEM_DIRS):
         return "is a start-up, application or system location"
@@ -432,7 +435,7 @@ def _protected_target_reason(target: Path) -> str | None:
         if _under_dir(path, Path(user_config_dir()).expanduser().resolve()):
             return "is Dourmouse's settings folder"
         ws = Path(workspace_dir()).resolve()
-        if any(_under_dir(path, ws / d) for d in _PROTECTED_WORKSPACE_DIRS) or path in (ws / "mcp_servers.json", ws / "spotify_tokens.json"):
+        if any(_under_dir(path, ws / d) for d in _PROTECTED_WORKSPACE_DIRS) or any(_under_dir(path, ws / f) for f in ("mcp_servers.json", "spotify_tokens.json")):
             return "is Dourmouse's own state, approvals or secrets"
     except Exception as exc:  # noqa: BLE001 -- the rest of the list still applies
         logging.getLogger(__name__).debug("workspace protections not evaluated: %s", exc)

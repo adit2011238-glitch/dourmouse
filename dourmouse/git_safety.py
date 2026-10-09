@@ -130,14 +130,19 @@ def auto_commit(path: Path, action: str) -> str | None:
     add = _run_git(["add", "--", str(rel)], cwd=root)
     if add.returncode != 0:
         return None
-    # Nothing staged (e.g. deleting a file git never tracked) — no commit
-    # to make, and that is not a failure.
-    diff = _run_git(["diff", "--cached", "--name-only"], cwd=root)
+    # Nothing staged FOR THIS PATH (e.g. deleting a file git never tracked,
+    # or rewriting a file with identical content): no commit to make, and
+    # that is not a failure. Finding P5-18: both this check and the commit
+    # are limited to ``rel``. A plain `git commit` swept in everything the
+    # human already had staged under the auto prefix, and undo_last then
+    # reverted their work with the agent's; `--only -- rel` commits just
+    # this path and leaves the rest of the index exactly as it was.
+    diff = _run_git(["diff", "--cached", "--name-only", "--", str(rel)], cwd=root)
     if not diff.stdout.strip():
         return None
     shown = str(rel)[:_SUBJECT_PATH_MAX]
     subject = f"{AUTO_COMMIT_PREFIX}{action} {shown}"
-    commit = _run_git(["commit", "-m", subject, "--no-verify"], cwd=root)
+    commit = _run_git(["commit", "-m", subject, "--no-verify", "--only", "--", str(rel)], cwd=root)
     if commit.returncode != 0:
         return None
     rev = _run_git(["rev-parse", "--short", "HEAD"], cwd=root)

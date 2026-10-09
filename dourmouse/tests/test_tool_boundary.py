@@ -80,7 +80,11 @@ def test_traceback_is_preserved_in_the_error_log():
     assert row["source"] == "tool:my_tool"
     assert "ValueError: the real cause" in row["detail"]
     assert "Traceback" in row["detail"]
-    assert row["extra"]["arguments"] == {"a": 1}
+    # FR P2-4: this used to assert the raw arguments were logged, which put
+    # passwords and message bodies in logs/errors.log. Names and a hash only.
+    assert "arguments" not in row["extra"]
+    assert row["extra"]["argument_names"] == ["a"]
+    assert len(row["extra"]["arguments_sha"]) == 16
 
 
 def test_failure_is_recorded_as_a_failed_agent_call():

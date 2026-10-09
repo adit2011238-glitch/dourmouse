@@ -27,6 +27,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from .platform_adapter import parse_firewall_state
+
 _TIMEOUT = 10.0
 
 
@@ -164,7 +166,7 @@ def get_host_protections() -> dict[str, Any]:
     checks = out["checks"]
 
     ok, txt = _run(["/usr/libexec/ApplicationFirewall/socketfilterfw", "--getglobalstate"])
-    checks["firewall"] = {"on": ("State = 1" in txt or "enabled" in txt.lower()) if ok else None, "raw": txt.strip()[:200]}
+    checks["firewall"] = {"on": parse_firewall_state(txt) if ok else None, "raw": txt.strip()[:200]}
     ok, txt = _run(["/usr/libexec/ApplicationFirewall/socketfilterfw", "--getstealthmode"])
     checks["stealth_mode"] = {"on": ("is on" in txt) if ok else None, "raw": txt.strip()[:200]}
     ok, txt = _run(["fdesetup", "status"])

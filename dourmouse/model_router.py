@@ -19,6 +19,7 @@ error message, never the key itself.
 from __future__ import annotations
 
 import os
+import re
 import time
 from dataclasses import dataclass, field
 
@@ -32,18 +33,37 @@ DEFAULT_COOLDOWN_SECONDS = 60.0
 #: this router serves — real API responses observed in this codebase's own
 #: error-handling modules (net_errors.py), not a guess.
 _RATE_LIMIT_MARKERS = (
-    "429",
     "rate limit",
     "rate_limit",
     "too many requests",
     "quota exceeded",
     "quota_exceeded",
 )
+#: "429" only counts as a whole number: "request id 4291" or "port 8429" are not
+#: a rate limit.
+_STATUS_429 = re.compile(r"(?<![0-9A-Za-z])429(?![0-9A-Za-z])")
+
+
+def _http_status_of(exc: BaseException) -> int | None:
+    for holder in (exc, getattr(exc, "response", None)):
+        for attr in ("status_code", "status", "code"):
+            value = getattr(holder, attr, None)
+            if isinstance(value, int) and not isinstance(value, bool):
+                return value
+    return None
 
 
 def is_rate_limit_error(exc: BaseException) -> bool:
+    status = _http_status_of(exc)
+    if status == 429:
+        return True
     text = str(exc).lower()
-    return any(marker in text for marker in _RATE_LIMIT_MARKERS)
+    if any(marker in text for marker in _RATE_LIMIT_MARKERS):
+        return True
+    # A real HTTP status that is not 429 (a 500 whose message happens to carry
+    # the digits) is never a rate limit; only a status-less error text is
+    # searched for the number (finding P2-30).
+    return status is None and bool(_STATUS_429.search(text))
 
 
 def pool_exhausted(pool: "AccountPool", *, now: float | None = None) -> bool:

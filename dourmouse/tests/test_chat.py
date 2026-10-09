@@ -489,11 +489,14 @@ class TestPersistence:
         assert record["display_text"] == "say hi"
         assert record["screen"] == "HOME"
 
-    def test_corrupt_state_raises_not_silent(self, tmp_path):
+    def test_corrupt_state_is_recovered_not_fatal_and_says_so(self, tmp_path):
+        # FR P4-15: this used to assert RuntimeError, which pinned the bug that
+        # a snapshot truncated by a kill made every later launch fail.
         session_file = tmp_path / "session.jsonl"
         (tmp_path / "session.messages.json").write_text("{not json")
-        with pytest.raises(RuntimeError, match="cannot resume"):
-            ChatSession(_registry(), client=FakeClient([]), session_file=session_file)
+        session = ChatSession(_registry(), client=FakeClient([]), session_file=session_file)
+        assert session.state_recovery and "unreadable" in session.state_recovery
+        assert (tmp_path / "session.messages.json.corrupt").exists()
 
 
 class TestMostRecentSessionFile:

@@ -104,9 +104,10 @@ def remote_control_apps(process_names: list[str], persistence_programs: list[str
     return list(found.values())
 
 
-def _running_process_names() -> list[str]:
+def _running_process_names() -> tuple[bool, list[str]]:
+    """(the listing could be read, the process names)."""
     ok, out = mt._run(["ps", "-axo", "comm"])
-    return out.splitlines()[1:] if ok else []
+    return ok, (out.splitlines()[1:] if ok else [])
 
 
 def analyze(host_protections: dict[str, Any] | None = None, persistence: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -150,33 +151,54 @@ def analyze(host_protections: dict[str, Any] | None = None, persistence: dict[st
         ind.append(Indicator("configuration_profiles", UNKNOWN, out.strip()[:200], "", "none: the check could not run"))
 
     roots: list[str] = []
+    trust_errors: list[str] = []
     for args, domain in ((["security", "dump-trust-settings", "-d"], "admin"), (["security", "dump-trust-settings"], "user")):
-        _, out = mt._run(args)
-        if "No Trust Settings were found" not in out:
-            roots.extend(f"{domain}: {m}" for m in re.findall(r"Cert \d+:\s*(.+)", out))
-    ind.append(Indicator(
-        "extra_trusted_roots", PRESENT if roots else ABSENT,
-        "; ".join(roots)[:400] or "no user- or admin-added certificate trust settings",
-        "A root certificate you trust lets whoever holds its key impersonate any HTTPS site to this Mac "
-        "(TLS interception): the classic way corporate filters and spyware read encrypted traffic.",
-        "high for user and admin trust settings; system-wide roots added by an MDM show under profiles"))
+        ok, out = mt._run(args)
+        if "No Trust Settings were found" in out:
+            continue  # macOS's own "nothing set" answer (it exits non-zero with it)
+        if not ok:
+            trust_errors.append(f"{domain}: {out.strip()[:120]}")
+            continue
+        roots.extend(f"{domain}: {m}" for m in re.findall(r"Cert \d+:\s*(.+)", out))
+    if roots:
+        ind.append(Indicator(
+            "extra_trusted_roots", PRESENT,
+            "; ".join(roots)[:400] + (f" (could not read: {'; '.join(trust_errors)})" if trust_errors else ""),
+            "A root certificate you trust lets whoever holds its key impersonate any HTTPS site to this Mac "
+            "(TLS interception): the classic way corporate filters and spyware read encrypted traffic.",
+            "high for user and admin trust settings; system-wide roots added by an MDM show under profiles"))
+    elif trust_errors:
+        ind.append(Indicator("extra_trusted_roots", UNKNOWN, "; ".join(trust_errors)[:400], "",
+                             "none: the check could not run"))
+    else:
+        ind.append(Indicator(
+            "extra_trusted_roots", ABSENT, "no user- or admin-added certificate trust settings",
+            "A root certificate you trust lets whoever holds its key impersonate any HTTPS site to this Mac "
+            "(TLS interception): the classic way corporate filters and spyware read encrypted traffic.",
+            "high for user and admin trust settings; system-wide roots added by an MDM show under profiles"))
 
     ok, out = mt._run(["scutil", "--nc", "list"])
-    vpns = parse_nc_list(out) if ok else []
-    connected = [v for v in vpns if v["state"].lower() == "connected"]
-    ind.append(Indicator(
-        "vpn", PRESENT if connected else ABSENT,
-        "; ".join(f"{v['name']} ({v['provider']}, {v['state']})" for v in vpns) or "no VPN configured",
-        "A connected VPN carries this Mac's traffic through its operator's network. Usually your own "
-        "(Tailscale, a work VPN); worth knowing who runs it.", "high: read from the network configuration"))
+    if ok:
+        vpns = parse_nc_list(out)
+        connected = [v for v in vpns if v["state"].lower() == "connected"]
+        ind.append(Indicator(
+            "vpn", PRESENT if connected else ABSENT,
+            "; ".join(f"{v['name']} ({v['provider']}, {v['state']})" for v in vpns) or "no VPN configured",
+            "A connected VPN carries this Mac's traffic through its operator's network. Usually your own "
+            "(Tailscale, a work VPN); worth knowing who runs it.", "high: read from the network configuration"))
+    else:
+        ind.append(Indicator("vpn", UNKNOWN, out.strip()[:200], "", "none: the check could not run"))
 
-    _, out = mt._run(["systemextensionsctl", "list"])
-    exts = [e for e in parse_system_extensions(out) if e["active"]]
-    ind.append(Indicator(
-        "system_extensions", PRESENT if exts else ABSENT,
-        "; ".join(f"{e['name']} [{e['category']}, team {e['team_id']}]" for e in exts) or "none active",
-        "Network extensions can see or filter traffic; endpoint-security extensions can watch every process "
-        "and file. Security tools and VPNs use them legitimately.", "high: listed by macOS"))
+    ok, out = mt._run(["systemextensionsctl", "list"])
+    if ok:
+        exts = [e for e in parse_system_extensions(out) if e["active"]]
+        ind.append(Indicator(
+            "system_extensions", PRESENT if exts else ABSENT,
+            "; ".join(f"{e['name']} [{e['category']}, team {e['team_id']}]" for e in exts) or "none active",
+            "Network extensions can see or filter traffic; endpoint-security extensions can watch every process "
+            "and file. Security tools and VPNs use them legitimately.", "high: listed by macOS"))
+    else:
+        ind.append(Indicator("system_extensions", UNKNOWN, out.strip()[:200], "", "none: the check could not run"))
 
     remote = []
     if (checks.get("remote_login") or {}).get("on"):
@@ -189,13 +211,19 @@ def analyze(host_protections: dict[str, Any] | None = None, persistence: dict[st
         "high: read from launchd"))
 
     programs = [str(i.get("program") or i.get("label") or "") for i in pers.get("items", [])]
-    rc = remote_control_apps(_running_process_names(), programs)
-    ind.append(Indicator(
-        "remote_control_software", PRESENT if rc else ABSENT,
-        "; ".join(f"{r['app']} ({r['where']}: {Path(r['evidence']).name})" for r in rc) or "none of the known tools found",
-        "Remote-control apps can show or control this screen from elsewhere. Legitimate when you installed "
-        "them (second-screen and support tools); a common spyware vehicle otherwise.",
-        f"medium: matched against {len(REMOTE_CONTROL_APPS)} known tools by name; a renamed tool would be missed"))
+    ps_ok, names = _running_process_names()
+    rc = remote_control_apps(names, programs)
+    if rc or ps_ok:
+        ind.append(Indicator(
+            "remote_control_software", PRESENT if rc else ABSENT,
+            "; ".join(f"{r['app']} ({r['where']}: {Path(r['evidence']).name})" for r in rc) or "none of the known tools found",
+            "Remote-control apps can show or control this screen from elsewhere. Legitimate when you installed "
+            "them (second-screen and support tools); a common spyware vehicle otherwise.",
+            f"medium: matched against {len(REMOTE_CONTROL_APPS)} known tools by name; a renamed tool would be missed"))
+    else:
+        ind.append(Indicator("remote_control_software", UNKNOWN,
+                             "the list of running programs could not be read and no startup item matched", "",
+                             "none: the check could not run"))
 
     unknowns = [
         "Which apps hold Screen Recording, Accessibility or Input Monitoring permission (needs Full Disk Access "

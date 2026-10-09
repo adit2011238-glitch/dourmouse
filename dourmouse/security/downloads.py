@@ -236,8 +236,11 @@ class DownloadsWatcher:
         self.folder = folder or default_downloads_dir()
         self.on_file = on_file
         self.interval = interval
-        self._seen: set[str] = set()
-        self._sizes: dict[str, int] = {}
+        # name -> identity (inode, mtime, size) of what was already handed on (or
+        # existed at start-up); a different identity under the same name is a new file.
+        self._seen: dict[str, tuple[int, int, int]] = {}
+        # name -> identity at the previous poll; two equal polls in a row = settled.
+        self._pending: dict[str, tuple[int, int, int]] = {}
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._primed = False
@@ -249,28 +252,48 @@ class DownloadsWatcher:
         except OSError:
             return {}
 
+    @staticmethod
+    def _identity(p: Path) -> tuple[int, int, int] | None:
+        try:
+            st = p.stat()
+        except OSError:
+            return None
+        return (st.st_ino, st.st_mtime_ns, st.st_size if p.is_file() else -1)
+
     def poll_once(self) -> list[Path]:
         """Returns the files that became ready this poll. The first poll only
-        records what was already there: the watcher reports new arrivals."""
+        records what was already there: the watcher reports new arrivals.
+
+        A file is identified by (inode, mtime, size), not by its name: a name
+        that comes back after the file was deleted or replaced is a new file,
+        and a download that was assessed while stalled is assessed again when
+        it changes."""
         entries = self._entries()
         if not self._primed:
-            self._seen = set(entries)
+            for name, p in entries.items():
+                ident = self._identity(p)
+                if ident is not None:
+                    self._seen[name] = ident
             self._primed = True
             return []
+        for gone in [n for n in self._seen if n not in entries]:
+            del self._seen[gone]
+        for gone in [n for n in self._pending if n not in entries]:
+            del self._pending[gone]
         ready = []
         for name, p in entries.items():
-            if name in self._seen:
+            ident = self._identity(p)
+            if ident is None:
                 continue
-            try:
-                size = p.stat().st_size if p.is_file() else -1
-            except OSError:
+            if self._seen.get(name) == ident:
+                self._pending.pop(name, None)
                 continue
-            if self._sizes.get(name) == size:
-                self._seen.add(name)
-                self._sizes.pop(name, None)
+            if self._pending.get(name) == ident:
+                self._seen[name] = ident
+                del self._pending[name]
                 ready.append(p)
             else:
-                self._sizes[name] = size  # still growing: check again next poll
+                self._pending[name] = ident  # new or still changing: check again next poll
         return ready
 
     def start(self) -> None:
@@ -323,6 +346,6 @@ def handle_new_file(path: Path, store: Any, now: float, write_alerts: bool = Tru
             recommended_action="Do not open it until you know what it is. Quarantining it (moved out of Downloads, "
                                "execute permission removed) is available through the approval gate.",
         )
-        if store.record_and_classify(finding, now) == "new" and write_alerts and a.risk == "high":
+        if store.record_and_classify(finding, now, fresh_event=True) == "new" and write_alerts and a.risk == "high":
             _write_alert(finding)
     return a

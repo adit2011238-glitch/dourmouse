@@ -216,7 +216,11 @@ class TestTransientFailureRetry:
         assert result == []
         assert calls["n"] == 2
 
-    def test_a_timeout_also_gets_one_retry(self, configured_env):
+    def test_a_timeout_is_not_retried(self, configured_env):
+        """Changed by FS1 (finding P4-20): this used to assert a TIMEOUT
+        gets one retry, which doubled the worst-case wait a chat turn
+        could block for (two full timeouts plus the delay). A TIMEOUT has
+        already used the whole budget, so it is now reported at once."""
         import subprocess
 
         calls = {"n": 0}
@@ -228,9 +232,10 @@ class TestTransientFailureRetry:
                 raise subprocess.TimeoutExpired(cmd, timeout)
             return SimpleNamespace(returncode=0, stdout=good_stdout, stderr="")
 
-        result = query_desktop_rag("x", runner=flaky)
-        assert result == []
-        assert calls["n"] == 2
+        with pytest.raises(DesktopRagError) as exc:
+            query_desktop_rag("x", runner=flaky)
+        assert exc.value.kind == "TIMEOUT"
+        assert calls["n"] == 1
 
     def test_still_failing_after_the_retry_raises_the_real_kind(self, configured_env):
         calls = {"n": 0}

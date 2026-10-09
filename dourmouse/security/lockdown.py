@@ -56,6 +56,7 @@ from dourmouse.config import user_config_dir
 # The hosts format and the domain rule come from the root helper itself, so
 # the Mac side and the helper can never disagree about what gets written.
 from .lockdown_helper import INSTALLED as HELPER_PATH
+from .lockdown_helper import MAX_DOMAINS
 from .lockdown_helper import PLIST as HELPER_PLIST
 from .lockdown_helper import is_reserved as _is_reserved
 from .lockdown_helper import is_valid_name as _is_valid_name
@@ -205,9 +206,21 @@ class Blocklist:
         del data["load_warning"]
         atomic_write_text(path or config_path(), json.dumps(data, indent=2))
 
+    def _blocked_names(self) -> set[str]:
+        return {s["domain"] for s in self.sites} | {s["domain"] for s in self.always}
+
+    def _check_room(self, domain: str) -> None:
+        """The root helper refuses a request of more than MAX_DOMAINS names and then
+        clears every block; so the list never grows past it (finding P3-58)."""
+        names = self._blocked_names()
+        if domain not in names and len(names) >= MAX_DOMAINS:
+            raise ValueError(f"the blocklist already holds {MAX_DOMAINS} websites (including the ones blocked for good), "
+                             "which is the most the lockdown helper accepts; remove some first")
+
     def add_site(self, entry: str) -> dict[str, str]:
         row = normalize_site(entry)
         if all(s["domain"] != row["domain"] for s in self.sites):
+            self._check_room(row["domain"])
             self.sites.append(row)
         return row
 
@@ -469,18 +482,38 @@ def notify_user(message: str) -> None:
 
 def write_hosts_request(bl: Blocklist, path: Path | None = None) -> Path:
     p = path or hosts_request_path()
-    names = {s["domain"] for s in (bl.sites if bl.active else [])} | {s["domain"] for s in bl.always}
-    domains = sorted(d for d in names if not _is_reserved(d))
-    atomic_write_text(p, json.dumps({"domains": domains, "written_at": time.time()}))
+    always = {s["domain"] for s in bl.always}
+    sites = {s["domain"] for s in (bl.sites if bl.active else [])}
+    # The helper refuses a request over MAX_DOMAINS and then clears every block, so an
+    # already-oversized list is cut here instead, keeping the security blocks first.
+    ordered = [d for d in sorted(always) if not _is_reserved(d)] + [
+        d for d in sorted(sites - always) if not _is_reserved(d)]
+    domains = ordered[:MAX_DOMAINS]
+    request: dict[str, Any] = {"domains": sorted(domains), "written_at": time.time()}
+    if len(ordered) > MAX_DOMAINS:
+        request["truncated"] = len(ordered) - MAX_DOMAINS
+    atomic_write_text(p, json.dumps(request))
     return p
 
 
-def site_is_blocked(domain: str) -> bool:
-    """Resolve it the way apps do: blocked means it now resolves to 0.0.0.0/::."""
-    try:
-        addrs = {i[4][0] for i in socket.getaddrinfo(domain, 443)}
-    except socket.gaierror:
-        return True
+def site_is_blocked(domain: str, timeout: float = 3.0) -> bool | None:
+    """Resolve it the way apps do: blocked means it now resolves to 0.0.0.0/::.
+    None when that could not be found out (no network, a resolver that failed or
+    did not answer within ``timeout``): not knowing is not the same as blocked."""
+    result: dict[str, Any] = {}
+
+    def lookup() -> None:
+        try:
+            result["addrs"] = {i[4][0] for i in socket.getaddrinfo(domain, 443)}
+        except OSError:  # socket.gaierror is an OSError
+            result["failed"] = True
+
+    worker = threading.Thread(target=lookup, daemon=True, name="lockdown-resolve")
+    worker.start()
+    worker.join(timeout)
+    addrs = result.get("addrs")
+    if addrs is None:
+        return None
     return bool(addrs) and addrs <= {"0.0.0.0", "::"}  # noqa: S104 -- the block address, compared not bound
 
 
@@ -532,7 +565,13 @@ def status(bl: Blocklist | None = None, *, check_sites: bool = True) -> dict[str
         row: dict[str, Any] = dict(s)
         row["blocks"] = hosts_names(s["domain"])
         if bl.active and check_sites:
-            row["blocked_now"] = all(site_is_blocked(n) for n in row["blocks"])
+            answers = [site_is_blocked(n) for n in row["blocks"]]
+            if False in answers:
+                row["blocked_now"] = False
+            elif None in answers:
+                row["blocked_now_unknown"] = True  # could not be checked: neither claim is made
+            else:
+                row["blocked_now"] = True
         sites.append(row)
     limits = ["A website block covers exactly the listed name and its www. form; other subdomains such as m. "
               "or old. are not blocked, and a URL's path cannot be blocked this way."]
@@ -542,6 +581,9 @@ def status(bl: Blocklist | None = None, *, check_sites: bool = True) -> dict[str
     if ((bl.active and bl.sites) or bl.always) and not helper:
         limits.insert(0, "Websites are NOT blocked yet: the lockdown helper is not installed. Run once: "
                          + install_command())
+    if len(bl._blocked_names()) > MAX_DOMAINS:
+        limits.append(f"The blocklist is longer than the {MAX_DOMAINS} websites the helper accepts, so not all of it is "
+                      "blocked; blocks for good come first. Remove some websites.")
     limits.append("A browser using its own DNS-over-HTTPS, or an app using a fixed IP address, can bypass a hosts block.")
     warnings = [bl.load_warning] if bl.load_warning else []
     warnings += [f"{a['name']} will never be closed: {protected_app_reason(a)}" for a in bl.apps if protected_app_reason(a)]
@@ -556,6 +598,7 @@ def block_domain_always(entry: str, reason: str = "", bl: Blocklist | None = Non
         bl = bl or Blocklist.load()
         row = {**normalize_site(entry), "reason": reason, "blocked_at": str(int(time.time()))}
         if all(s["domain"] != row["domain"] for s in bl.always):
+            bl._check_room(row["domain"])
             bl.always.append(row)
         bl.save()
         write_hosts_request(bl)
