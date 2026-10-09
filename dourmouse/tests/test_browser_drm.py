@@ -195,12 +195,14 @@ class TestTheOptInPieces:
         text = (ROOT / "scripts" / "install_drm_electron.sh").read_text(encoding="utf-8")
         assert 'SAVE_FLAG="--no-save"; [ "$SAVE" -eq 1 ] && SAVE_FLAG="--save-dev"' in text
 
-    def test_package_json_was_not_changed_by_this_phase(self):
+    def test_electron_is_the_pinned_castlabs_build(self):
+        """Finding #172: the owner approved the DRM build on 2026-10-09. Electron is the castLabs
+        ECS release pinned by commit (not a loose tag), so a plain `npm install` keeps it."""
         pkg = json.loads((ELECTRON / "package.json").read_text(encoding="utf-8"))
-        for section in ("dependencies", "devDependencies"):
-            for name, spec in pkg.get(section, {}).items():
-                assert "castlabs" not in spec.lower() and "wvcus" not in spec.lower(), (name, spec)
-        assert pkg["devDependencies"]["electron"] == "^44.3.0"
+        spec = pkg["devDependencies"]["electron"]
+        assert spec == "github:castlabs/electron-releases#9b90904e4fe174122b99eca5b7b967aa79681cc6", spec
+        others = {n: s for sec in ("dependencies", "devDependencies") for n, s in pkg.get(sec, {}).items() if n != "electron"}
+        assert not any("castlabs" in s.lower() for s in others.values()), others
 
     def test_the_plan_document_covers_what_was_asked(self):
         plan = Path.home() / "Documents" / "DOURMOUSE" / "B3_DRM_PLAN.md"

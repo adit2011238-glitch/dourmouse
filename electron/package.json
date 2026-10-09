@@ -10,9 +10,9 @@
     "build:mac": "npm run prepare-venv && CSC_NAME=\"${DOURMOUSE_SIGN_IDENTITY:-$CSC_NAME}\" electron-builder --mac"
   },
   "devDependencies": {
-    "electron": "^44.3.0",
-    "electron-builder": "^26.15.3",
-    "@electron/notarize": "^2.5.0"
+    "@electron/notarize": "^2.5.0",
+    "electron": "github:castlabs/electron-releases#9b90904e4fe174122b99eca5b7b967aa79681cc6",
+    "electron-builder": "^26.15.3"
   },
   "build": {
     "appId": "com.dourmouse.app",
@@ -40,12 +40,25 @@
       {
         "from": "../dourmouse",
         "to": "dourmouse",
-        "filter": ["**/*", "!tests/**", "!workspace/**", "!__pycache__/**", "!**/__pycache__/**", "!**/*.pyc", "!**/.DS_Store", "!**/*.orig"]
+        "filter": [
+          "**/*",
+          "!tests/**",
+          "!workspace/**",
+          "!__pycache__/**",
+          "!**/__pycache__/**",
+          "!**/*.pyc",
+          "!**/.DS_Store",
+          "!**/*.orig"
+        ]
       },
       {
         "from": "../ui",
         "to": "ui",
-        "filter": ["**/*", "!**/*.orig", "!**/.DS_Store"]
+        "filter": [
+          "**/*",
+          "!**/*.orig",
+          "!**/.DS_Store"
+        ]
       },
       {
         "from": "build/venv-stage/.venv",
@@ -59,7 +72,15 @@
       "gatekeeperAssess": false,
       "entitlements": "resources/entitlements.mac.plist",
       "entitlementsInherit": "resources/entitlements.mac.plist",
-      "target": [{ "target": "dmg", "arch": ["arm64", "x64"] }],
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
       "extendInfo": {
         "NSMicrophoneUsageDescription": "DourMouse's wake-word listener (optional, off by default — DOURMOUSE_WAKEWORD=1) listens locally for its wake word.",
         "NSCameraUsageDescription": "DourMouse's optional in-browser hand-tracking feature (started explicitly by you, per session) uses the camera."

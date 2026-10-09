@@ -681,5 +681,10 @@ class TestBuildConfigListsWhatTheShellLoads:
         assert "**/*" in py_filter, "so dourmouse/browser_scripts and os_api and the rest are included"
 
     def test_no_dependency_was_changed(self):
-        assert self.PKG["devDependencies"] == {"electron": "^44.3.0", "electron-builder": "^26.15.3", "@electron/notarize": "^2.5.0"}
+        # finding #172: electron is the castLabs ECS build pinned by commit (owner approved 2026-10-09)
+        assert self.PKG["devDependencies"] == {
+            "electron": "github:castlabs/electron-releases#9b90904e4fe174122b99eca5b7b967aa79681cc6",
+            "electron-builder": "^26.15.3",
+            "@electron/notarize": "^2.5.0",
+        }
         assert "dependencies" not in self.PKG
