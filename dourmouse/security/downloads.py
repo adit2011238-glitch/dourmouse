@@ -241,6 +241,9 @@ class DownloadsWatcher:
         self._seen: dict[str, tuple[int, int, int]] = {}
         # name -> identity at the previous poll; two equal polls in a row = settled.
         self._pending: dict[str, tuple[int, int, int]] = {}
+        # name -> sha256 of a file at the moment it was handed on. A later change of the
+        # modification time alone is judged by content against this (W1R-7).
+        self._hashes: dict[str, str] = {}
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._primed = False
@@ -260,6 +263,38 @@ class DownloadsWatcher:
             return None
         return (st.st_ino, st.st_mtime_ns, st.st_size if p.is_file() else -1)
 
+    @staticmethod
+    def _file_hash(p: Path) -> str | None:
+        try:
+            digest = hashlib.sha256()
+            with p.open("rb") as fh:
+                for chunk in iter(lambda: fh.read(1 << 20), b""):
+                    digest.update(chunk)
+            return digest.hexdigest()
+        except OSError:
+            return None
+
+    def _really_changed(self, name: str, p: Path, before: tuple[int, int, int], now: tuple[int, int, int]) -> bool:
+        """Whether an entry that was handed on once is a different thing now, as opposed to
+        merely touched. A new inode or a new size is a change. A folder's modification time moves
+        whenever something inside it is added or removed, so a folder is the same folder while its
+        inode is. A file with the same inode and size but a newer modification time is judged by
+        its content when it was hashed at hand-off (an editor, a backup or a sync tool touching a
+        file you kept must not raise a new alert every time); with no earlier hash to compare it
+        counts as changed, as it did before, because an in-place same-size rewrite is also how
+        a file is swapped for a different one."""
+        if before[0] != now[0] or before[2] != now[2]:
+            return True
+        if now[2] == -1:  # a folder
+            return False
+        known = self._hashes.get(name)
+        if known is None:
+            return True
+        current = self._file_hash(p)
+        if current is None or current != known:
+            return current is not None
+        return False
+
     def poll_once(self) -> list[Path]:
         """Returns the files that became ready this poll. The first poll only
         records what was already there: the watcher reports new arrivals.
@@ -278,6 +313,7 @@ class DownloadsWatcher:
             return []
         for gone in [n for n in self._seen if n not in entries]:
             del self._seen[gone]
+            self._hashes.pop(gone, None)
         for gone in [n for n in self._pending if n not in entries]:
             del self._pending[gone]
         ready = []
@@ -285,12 +321,21 @@ class DownloadsWatcher:
             ident = self._identity(p)
             if ident is None:
                 continue
-            if self._seen.get(name) == ident:
+            seen = self._seen.get(name)
+            if seen == ident:
                 self._pending.pop(name, None)
+                continue
+            if seen is not None and name not in self._pending and not self._really_changed(name, p, seen, ident):
+                self._seen[name] = ident  # touched, not changed: remember the new time so it is not judged again
                 continue
             if self._pending.get(name) == ident:
                 self._seen[name] = ident
                 del self._pending[name]
+                self._hashes.pop(name, None)
+                if ident[2] != -1:
+                    digest = self._file_hash(p)
+                    if digest is not None:
+                        self._hashes[name] = digest
                 ready.append(p)
             else:
                 self._pending[name] = ident  # new or still changing: check again next poll

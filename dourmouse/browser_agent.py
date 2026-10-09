@@ -814,6 +814,15 @@ def _is_loopback_host(host: str) -> bool:
     return len(parts) == 4 and parts[0] == "127" and all(p.isdigit() and int(p) < 256 for p in parts)
 
 
+def _same_site_host(a: str, b: str) -> bool:
+    """Equal host names, or the one pair of names every site treats as one: ``example.com`` and
+    ``www.example.com``. No other subdomain is the same site."""
+    if a == b:
+        return True
+    short, long_ = sorted((a, b), key=len)
+    return long_ == f"www.{short}" and "." in short
+
+
 def _signin_landing_problem(page_url: str, vault_host: str) -> str | None:
     """None when ``page_url`` is on the host the stored credentials belong to (same host name, same
     port, https; plain http only for a loopback address, which never leaves this machine), else a
@@ -829,7 +838,7 @@ def _signin_landing_problem(page_url: str, vault_host: str) -> str | None:
         return f"the page address {page_url[:80]!r} could not be read"
     if scheme not in ("http", "https") or not got_host:
         return f"the page is at {page_url[:80]!r}, not a web page of {vault_host}"
-    if got_host != want_host or got_port != want_port:
+    if not _same_site_host(got_host, want_host) or got_port != want_port:
         shown = got_host + (f":{got.port}" if got.port else "")
         return f"the page is on {shown}, not {vault_host}"
     if scheme != "https" and not _is_loopback_host(got_host):
@@ -1377,8 +1386,9 @@ async def _settle_after_action(page: Any, mark: dict[str, Any]) -> Any:
 # --------------------------------------------------------------------------- #
 
 _CLICK_FACTS_JS = r"""function (p) {
-  const deep = (x, y) => {
-    let el = document.elementFromPoint(x, y);
+  const FRAMES = new Set(["IFRAME", "FRAME", "OBJECT", "EMBED"]);
+  const deep = (doc, x, y) => {
+    let el = doc.elementFromPoint(x, y);
     while (el && el.shadowRoot) {
       const inner = el.shadowRoot.elementFromPoint(x, y);
       if (!inner || inner === el) break;
@@ -1386,8 +1396,47 @@ _CLICK_FACTS_JS = r"""function (p) {
     }
     return el;
   };
-  const hit = deep(p.x, p.y);
+  const frameDoc = (f) => { try { return f.contentDocument || null; } catch (_) { return null; } };
+  let hit = null;
+  if (p.mode === "focus") {
+    // The element that has keyboard focus, through shadow roots and same-origin frames.
+    hit = document.activeElement;
+    for (let i = 0; i < 8 && hit; i++) {
+      if (hit.shadowRoot && hit.shadowRoot.activeElement) { hit = hit.shadowRoot.activeElement; continue; }
+      const d = FRAMES.has(hit.tagName) ? frameDoc(hit) : null;
+      if (d && d.activeElement) { hit = d.activeElement; continue; }
+      break;
+    }
+    if (hit === document.body || hit === document.documentElement) hit = null;
+  } else {
+    // The element under the point; a point inside a same-origin frame is read in that frame's own document.
+    let doc = document, x = p.x, y = p.y;
+    for (let i = 0; i < 8; i++) {
+      hit = deep(doc, x, y);
+      if (!hit || !FRAMES.has(hit.tagName)) break;
+      const d = frameDoc(hit);
+      if (!d) break;
+      const r = hit.getBoundingClientRect();
+      x -= r.left + (hit.clientLeft || 0);
+      y -= r.top + (hit.clientTop || 0);
+      doc = d;
+    }
+  }
   if (!hit) return { found: false };
+  if (FRAMES.has(hit.tagName)) {
+    // A frame this script cannot read into (another origin, or sandboxed): what is inside is unknown.
+    const src = String(hit.src || hit.data || hit.getAttribute("src") || hit.getAttribute("data") || "");
+    let host = "";
+    try { host = new URL(src, location.href).hostname; } catch (_) { host = ""; }
+    return {
+      found: true, tag: hit.tagName.toLowerCase(), frame: true, type: "", role: "", submits: false,
+      name: String(hit.title || hit.getAttribute("name") || host || "").replace(/\s+/g, " ").slice(0, 80),
+      words: [hit.id, hit.getAttribute("name"), hit.title, hit.className && String(hit.className)].join(" ").slice(0, 200),
+      frameSrc: src.slice(0, 200), frameHost: host, href: "", action: "",
+      pageUrl: location.href.slice(0, 200), pageTitle: String(document.title || "").slice(0, 100),
+      pagePassword: Boolean(document.querySelector("input[type=password]")),
+    };
+  }
   const t = hit.closest("button, a[href], input, select, summary, [role='button'], [role='link'], [role='menuitem'], [onclick]") || hit;
   const tag = t.tagName.toLowerCase();
   const attr = (n) => (t.getAttribute(n) || "");
@@ -1408,8 +1457,20 @@ _CLICK_FACTS_JS = r"""function (p) {
   const words = [t.id, attr("name"), cls, attr("data-testid"), attr("data-action"), attr("data-test")].join(" ");
   let action = "";
   if (submits) { try { action = String(t.formAction || form.action || ""); } catch (_) { action = ""; } }
+  // Keyboard facts: a text field takes Enter as "send" (a form's implicit submit, a chat box) and Space as a letter.
+  const role = attr("role").toLowerCase();
+  const buttonTypes = ["button", "submit", "reset", "image", "file", "range", "color"];
+  const editable = tag === "textarea" || tag === "select" || Boolean(t.isContentEditable)
+    || role === "textbox" || role === "searchbox" || role === "combobox"
+    || (tag === "input" && !buttonTypes.includes(type) && type !== "checkbox" && type !== "radio");
+  const fieldInForm = tag === "input" && Boolean(t.form) && !["button", "reset", "file", "range", "color"].includes(type);
+  // A form that only reads: it goes by GET to an address it names, carries no password, and has no submit
+  // handler written on it (a script may do anything with the click).
+  const formAction = form ? String(t.getAttribute("formaction") || form.getAttribute("action") || "") : "";
+  const formGet = Boolean(form) && String(t.getAttribute("formmethod") || form.getAttribute("method") || "get").toLowerCase() === "get"
+    && formAction !== "" && !/^\s*javascript:/i.test(formAction) && !form.hasAttribute("onsubmit") && !form.querySelector("input[type=password]");
   return {
-    found: true, tag, type, role: attr("role").toLowerCase(), submits,
+    found: true, tag, type, role, submits, formGet, editable, fieldInForm,
     name: name.replace(/\s+/g, " ").slice(0, 80), words: words.slice(0, 200),
     href: tag === "a" ? String(t.href || "") : "", action: action.slice(0, 200),
   };
@@ -1442,10 +1503,75 @@ _ATTR_WORDS = frozenset({
 _ATTR_PHRASES = ("place order", "order now", "complete order", "submit order", "confirm order", "sign in", "log in", "sign up")
 
 
+# Labels that start with an action word but are help, sort or display controls. Matched as the start
+# of the label, or by a closing word that makes the whole label about something else ("... help").
+# Kept short on purpose: "Send details", "Delete history" and "Book time slot" still do the thing.
+_INERT_LABEL_STARTS = (
+    "order by", "sort by", "pay attention", "publish date", "post date", "order date", "order number",
+    "order status", "order history",
+)
+_INERT_LABEL_ENDS = frozenset({"help", "faq", "visibility"})
+# Words that make a class or id name a container or a piece of page furniture, not the control.
+_ATTR_NOISE = frozenset({
+    "banner", "wrapper", "container", "section", "list", "text", "label", "icon", "info", "field", "input", "form",
+    "modal", "popup", "panel", "menu", "nav", "link", "header", "footer", "email", "newsletter", "help", "tooltip",
+    "message", "later", "history", "page", "title", "price", "total", "summary",
+})
+
+
+def _label_is_inert(words: list[str]) -> bool:
+    joined = " ".join(words)
+    return any(joined.startswith(p) for p in _INERT_LABEL_STARTS) or (len(words) > 1 and words[-1] in _INERT_LABEL_ENDS)
+
+
+def _attr_hit(raw: str) -> str:
+    """The action word an element's id, name, class or test-id names, judged one name at a time: a
+    name of more than three words, or one with a container word in it (``pay-later-banner``,
+    ``email-subscribe``), is page furniture and says nothing about what a click does."""
+    for token in (raw or "").split():
+        words = _words_of(token)
+        if not words or len(words) > 3 or any(w in _ATTR_NOISE for w in words):
+            continue
+        hit = next((w for w in words if w in _ATTR_WORDS), "")
+        if not hit:
+            joined = " ".join(words)
+            hit = next((p for p in _ATTR_PHRASES if p in joined), "")
+        if hit:
+            return hit
+    return ""
+
+
 def _words_of(raw: str) -> list[str]:
     """Lower-case words of a label, a class list or an id: camelCase and punctuation split them."""
     spaced = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", raw or "")
     return re.findall(r"[a-z0-9]+", spaced.lower())
+
+
+# A frame the page script cannot read into (another origin, or sandboxed) hides the control that is
+# clicked or has focus. Checkout and sign-in widgets are exactly such frames, so on a page that looks
+# like one the owner is asked; elsewhere (an embedded video, a map) the frame is left alone.
+_PAY_FRAME_WORDS = frozenset({
+    "pay", "payment", "payments", "checkout", "card", "billing", "purchase", "order", "cart", "buy",
+    "stripe", "paypal", "braintreegateway", "braintree", "adyen", "klarna", "squareup", "razorpay", "paddle",
+    "mollie", "recurly", "worldpay", "paystack", "wallet",
+})
+_LOGIN_FRAME_WORDS = frozenset({"login", "signin", "logon", "auth", "oauth", "sso", "password", "2fa", "mfa"})
+
+
+def _frame_reasons(facts: dict[str, Any]) -> list[str]:
+    """Why a click (or key) landing in an unreadable frame should ask, judged from where it is."""
+    src = urllib.parse.urlsplit(str(facts.get("frameSrc") or ""))
+    page = urllib.parse.urlsplit(str(facts.get("pageUrl") or ""))
+    clues = " ".join([
+        src.netloc, src.path, str(facts.get("words") or ""),
+        page.netloc, page.path, str(facts.get("pageTitle") or ""), str(facts.get("name") or ""),
+    ])
+    words = set(_words_of(clues))
+    kind = "payment" if words & _PAY_FRAME_WORDS else "sign-in" if (words & _LOGIN_FRAME_WORDS or facts.get("pagePassword")) else ""
+    if not kind:
+        return []
+    host = str(facts.get("frameHost") or "") or "another site"
+    return [f"it is inside an embedded frame from {host} whose contents cannot be read, on what looks like a {kind} page"]
 
 
 def _click_reasons(facts: dict[str, Any]) -> list[str]:
@@ -1456,16 +1582,20 @@ def _click_reasons(facts: dict[str, Any]) -> list[str]:
     id, name, class and test-id words; and, for a link, a destructive word in its address path."""
     if not facts or not facts.get("found"):
         return []
+    if facts.get("frame"):
+        return _frame_reasons(facts)
     reasons: list[str] = []
     name = str(facts.get("name") or "")
     words = _words_of(name)
     is_link = facts.get("tag") == "a" or facts.get("role") == "link"
-    if facts.get("submits"):
+    if facts.get("submits") and not facts.get("formGet"):  # a form that only reads (search, filter) is not a send
         action = str(facts.get("action") or "")
         reasons.append("it submits a form" + (f" to {action.split('?')[0]}" if action else ""))
     joined = " ".join(words)
     phrase = next((p for p in _ACT_PHRASES if joined.startswith(p) or f" {p}" in f" {joined}"[:80]), "")
-    if phrase and not (is_link and phrase in ("sign in", "log in", "sign up", "create account")):
+    if _label_is_inert(words):
+        pass
+    elif phrase and not (is_link and phrase in ("sign in", "log in", "sign up", "create account")):
         reasons.append(f'its label says "{_one_line(name, 60)}"')
     elif words:
         pool = _LINK_WORDS if is_link else _BUTTON_WORDS
@@ -1474,11 +1604,7 @@ def _click_reasons(facts: dict[str, Any]) -> list[str]:
         if first or anywhere:
             reasons.append(f'its label says "{_one_line(name, 60)}"')
     if not is_link:
-        attr_words = _words_of(str(facts.get("words") or ""))
-        hit = next((w for w in attr_words if w in _ATTR_WORDS), "")
-        joined_attr = " ".join(attr_words)
-        if not hit:
-            hit = next((p for p in _ATTR_PHRASES if p in joined_attr), "")
+        hit = _attr_hit(str(facts.get("words") or ""))
         if hit:
             reasons.append(f'its id, name or class names "{hit}"')
     else:
@@ -1507,7 +1633,8 @@ def _one_line(text: str, limit: int) -> str:
 
 def _click_prompt(facts: dict[str, Any], reasons: list[str], page_url: str, page_title: str) -> str:
     """What the owner is asked: which control, on which page, and why it looks like a submit."""
-    kind = {"a": "link", "input": "input", "button": "button"}.get(str(facts.get("tag")), "control")
+    kind = {"a": "link", "input": "input", "button": "button", "iframe": "embedded frame", "frame": "embedded frame",
+            "embed": "embedded frame", "object": "embedded frame"}.get(str(facts.get("tag")), "control")
     where = urllib.parse.urlsplit(page_url)
     shown_url = _one_line(f"{where.scheme}://{where.netloc}{where.path}" if where.netloc else page_url, 120)
     title = f' "{_one_line(page_title, 60)}"' if page_title else ""
@@ -1541,8 +1668,8 @@ def _take_click_approval(key: tuple[str, str, str, str]) -> bool:
     return at is not None and time.monotonic() - at <= _CLICK_APPROVAL_SECONDS
 
 
-async def _facts_at(page: Any, x: float, y: float) -> dict[str, Any]:
-    """What is under the point (x, y), read in the isolated world."""
+async def _facts_in_world(page: Any, params: dict[str, Any]) -> dict[str, Any]:
+    """Run _CLICK_FACTS_JS in the isolated world with ``params`` (a point, or ``{"mode": "focus"}``)."""
     world = _WORLDS.get(page)
     if world is None or world.get("ctx") is None:
         world = await _make_world(page, world["session"] if world else None)
@@ -1553,7 +1680,7 @@ async def _facts_at(page: Any, x: float, y: float) -> dict[str, Any]:
                 {
                     "functionDeclaration": _CLICK_FACTS_JS,
                     "executionContextId": world["ctx"],
-                    "arguments": [{"value": {"x": float(x), "y": float(y)}}],
+                    "arguments": [{"value": params}],
                     "returnByValue": True,
                 },
             )
@@ -1568,6 +1695,16 @@ async def _facts_at(page: Any, x: float, y: float) -> dict[str, Any]:
             raise RuntimeError(f"CLICK CHECK script error: {detail}")
         return (res.get("result") or {}).get("value") or {"found": False}
     raise RuntimeError("CLICK CHECK UNAVAILABLE: the page kept replacing its document.")  # pragma: no cover
+
+
+async def _facts_at(page: Any, x: float, y: float) -> dict[str, Any]:
+    """What is under the point (x, y), read in the isolated world."""
+    return await _facts_in_world(page, {"mode": "point", "x": float(x), "y": float(y)})
+
+
+async def _focus_facts(page: Any) -> dict[str, Any]:
+    """What has keyboard focus now, read in the isolated world; ``{"found": False}`` when nothing does."""
+    return await _facts_in_world(page, {"mode": "focus"})
 
 
 async def _click_facts(page: Any, target: str) -> dict[str, Any] | None:
@@ -1623,6 +1760,108 @@ def click_gate(arguments: dict[str, Any]) -> tuple[str, str] | None:
         return None
     _grant_click_approval(_approval_key(target, url, facts or {}))
     return ("confirm", _click_prompt(facts or {}, reasons, url, title))
+
+
+# --------------------------------------------------------------------------- #
+# Enter and Space ask the owner only when they would do something (finding W1R-4).
+#
+# Enter sends or submits from a form field, a chat box or a button; Space presses a focused button.
+# Space is also page-down, play and pause and a checkbox toggle, so asking for every Space (and
+# calling it "Enter") made ordinary scrolling cost an approval each time. The key is judged by what
+# has keyboard focus, read the same way a click target is: the same facts, the same one-shot
+# approval, the same refusal in the handler when a caller skipped dispatch.
+# --------------------------------------------------------------------------- #
+
+_ENTER_TOKENS = frozenset({"enter", "return", "numpadenter", "kp_enter"})
+_SPACE_TOKENS = frozenset({"space", " ", "spacebar"})
+
+
+def press_kind(key: Any) -> str:
+    """"enter" or "space" when the last key of the chord (Control+Enter, Shift+Space) is one of those, else ""."""
+    raw = str(key or "")
+    last = raw.split("+")[-1].strip().lower()
+    if not last and raw and not raw.strip():
+        last = "space"  # a bare " " is the Space key
+    return "enter" if last in _ENTER_TOKENS else "space" if last in _SPACE_TOKENS else ""
+
+
+def _press_reasons(kind: str, facts: dict[str, Any]) -> list[str]:
+    """Why this key, with this element focused, should ask; an empty list means it is harmless here."""
+    if not facts or not facts.get("found"):
+        return []  # nothing has focus: the key goes to the page itself (scroll, shortcuts)
+    if facts.get("frame"):
+        return _frame_reasons(facts)
+    editable = bool(facts.get("editable"))
+    if kind == "space":
+        # Space types a space into a field and scrolls on a link; it presses a button.
+        if editable or facts.get("tag") == "a" or facts.get("role") == "link":
+            return []
+        return _click_reasons(facts)
+    reasons = _click_reasons(facts)
+    if editable or facts.get("fieldInForm"):
+        reasons.append("Enter in a form field or message box can send or submit it")
+    return reasons
+
+
+def _press_unreadable_prompt(kind: str, key: str) -> str:
+    if kind == "space":
+        return (f"Press {_one_line(key, 40)} on the current browser page? I could not tell what has keyboard focus, "
+                "and Space presses a focused button.")
+    return (f"Press {_one_line(key, 40)} on the current browser page? I could not tell what has keyboard focus, "
+            "and Enter can submit a form: send a message, sign in, or place an order.")
+
+
+def _press_prompt(kind: str, key: str, facts: dict[str, Any], reasons: list[str], page_url: str, page_title: str) -> str:
+    where = urllib.parse.urlsplit(page_url)
+    shown_url = _one_line(f"{where.scheme}://{where.netloc}{where.path}" if where.netloc else page_url, 120)
+    title = f' "{_one_line(page_title, 60)}"' if page_title else ""
+    label = _one_line(str(facts.get("name") or ""), 60) or "(no label)"
+    if facts.get("frame"):
+        what = f'the embedded frame "{label}"'
+    elif facts.get("editable") or facts.get("fieldInForm"):
+        what = f'a text field ("{label}")'
+    else:
+        what = f'the {"link" if facts.get("tag") == "a" else "button" if facts.get("tag") == "button" else "control"} "{label}"'
+    does = "Enter there can send, submit or confirm something" if kind == "enter" else "Space presses it"
+    return (f"Press {_one_line(key, 40)} on the page{title} at {shown_url}? The keyboard focus is on {what}, "
+            f"and {does}: {'; '.join(reasons)}.")
+
+
+def _press_approval_key(kind: str, page_url: str, facts: dict[str, Any]) -> tuple[str, str, str, str]:
+    return _approval_key(f"press:{kind}", page_url, facts)
+
+
+def press_gate(arguments: dict[str, Any]) -> tuple[str, str] | None:
+    """The hook for dispatch._argument_gate: ``("confirm", prompt)`` when browser_press would press Enter
+    or Space with a field or control focused that sends, submits or confirms, else None. Like click_gate
+    it leaves a one-shot approval for that exact control on that exact page. When focus cannot be read
+    (no page, a stuck page) it asks, in generic words: a key press with unknown focus is not known to
+    be harmless."""
+    key = str((arguments or {}).get("key") or "")  # not stripped: a bare " " is the Space key
+    kind = press_kind(key)
+    if not kind:
+        return None
+    facts: dict[str, Any] | None = None
+    url = title = ""
+    if _electron_pane_configured() is not None or (_PAGE is not None and not _PAGE.is_closed()):
+
+        async def _probe() -> tuple[dict[str, Any], str, str]:
+            page = await _ensure_browser(quiet=True)
+            return await _focus_facts(page), page.url, await _safe_title(page)
+
+        try:
+            facts, url, title = _call(_probe, timeout=20.0)
+        except RuntimeError as exc:
+            _log("press", f"focus check failed: {_one_line(str(exc), 120)}")
+            facts = None
+    if facts is None:
+        _grant_click_approval(_press_approval_key(kind, "", {}))
+        return ("confirm", _press_unreadable_prompt(kind, key))
+    reasons = _press_reasons(kind, facts)
+    if not reasons:
+        return None
+    _grant_click_approval(_press_approval_key(kind, url, facts))
+    return ("confirm", _press_prompt(kind, key, facts, reasons, url, title))
 
 
 # --------------------------------------------------------------------------- #
@@ -1880,22 +2119,51 @@ def browser_type(arguments: dict[str, Any]) -> str:
     return _call(_type, timeout=max(60.0, 30.0 + len(text) * max(0, min(delay_ms, 500)) / 1000.0 * (1 if mode == "keys" else 1 / _TYPE_CHUNK)))
 
 
+async def _check_press_approved(page: Any, kind: str, key: str) -> None:
+    """Refuse an Enter or Space that would send or submit unless press_gate got the owner's yes for it."""
+    try:
+        facts: dict[str, Any] | None = await _focus_facts(page)
+    except Exception as exc:  # noqa: BLE001 - unreadable focus is asked about, never assumed harmless
+        _log("press", f"focus check failed: {type(exc).__name__}")
+        facts = None
+    if facts is None:
+        if not _take_click_approval(_press_approval_key(kind, "", {})):
+            raise _ClickNeedsApproval(_press_unreadable_prompt(kind, key))
+        return
+    _take_click_approval(_press_approval_key(kind, "", {}))  # a generic yes is spent whatever focus turned out to be
+    reasons = _press_reasons(kind, facts or {})
+    if reasons and not _take_click_approval(_press_approval_key(kind, page.url, facts or {})):
+        raise _ClickNeedsApproval(_press_prompt(kind, key, facts or {}, reasons, page.url, await _safe_title(page)))
+
+
 def browser_press(arguments: dict[str, Any]) -> str:
-    key = (arguments.get("key") or "").strip()
+    raw_key = str(arguments.get("key") or "")
+    key = raw_key.strip() or ("Space" if raw_key else "")  # a bare " " is the Space key, not an empty one
     if not key:
         return "ERROR: browser_press requires a key (Enter, Tab, Escape...)."
 
     async def _press():
         page = await _ensure_browser()
         mark = _action_mark()
-        async with _acting(page, "press"):
-            try:
-                await _press_key(page, key)
-            except Exception as exc:  # noqa: BLE001
-                raise RuntimeError(
-                    f"BROWSER PRESS FAILED: {type(exc).__name__}: {exc} (key={key!r})"
-                ) from exc
-            page = await _settle_after_action(page, mark)
+        kind = press_kind(key)
+        try:
+            async with _acting(page, "press"):
+                if kind:
+                    await _check_press_approved(page, kind, key)
+                try:
+                    await _press_key(page, key)
+                except Exception as exc:  # noqa: BLE001
+                    raise RuntimeError(
+                        f"BROWSER PRESS FAILED: {type(exc).__name__}: {exc} (key={key!r})"
+                    ) from exc
+                page = await _settle_after_action(page, mark)
+        except _ClickNeedsApproval as need:
+            return (
+                f"CONFIRMATION REQUIRED: {need} NOT pressed. A key like this needs the owner's approval and "
+                "this call did not get it, so nothing was done. Tell the owner what you wanted to press and "
+                "where; the owner can press it in the browser pane, or ask for it again so the approval "
+                "prompt can be shown. (browser agent)"
+            )
         try:
             await page.wait_for_load_state("domcontentloaded", timeout=15_000)
         except Exception:  # noqa: BLE001

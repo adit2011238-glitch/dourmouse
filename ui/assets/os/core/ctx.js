@@ -72,6 +72,15 @@ export function createScreenCtx({ id, root, deps }) {
       onStatus: (fn) => events.onStatus(fn),
     },
     every: (ms, fn) => deps.timers.every(ms, fn, owner),
+    /* The Electron shell hides the console when its window is closed (the page keeps running) and tells
+       the page first with this event; a screen that holds the microphone or camera drops it here. The
+       listener goes when the screen is left. */
+    onConsoleHiding(fn) {
+      const w = globalThis;
+      if (typeof w.addEventListener !== 'function') return () => {};
+      w.addEventListener('dourmouse:console-hiding', fn, { signal: ac.signal });
+      return () => w.removeEventListener('dourmouse:console-hiding', fn);
+    },
     notify: (n) => deps.toasts.show(n),
     approvals: {
       /* Renders (or re-renders) the approval card for a confirmation_requested

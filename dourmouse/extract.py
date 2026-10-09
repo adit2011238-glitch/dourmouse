@@ -87,7 +87,10 @@ _DATE_RE = re.compile(
 #: matched when it is part of "subtotal", "sub-total" or "sub total".
 _TOTAL_LABELS = (
     r"\bgrand\s+total\b",
-    r"\b(?<!sub-)(?<!sub )total\b",
+    # "Total" is the receipt's total unless the next word says it is a different figure
+    # (Total savings, Total VAT, Total items, Total before tax): those follow the real total.
+    r"\b(?<!sub-)(?<!sub )total\b(?!\s+(?:savings?|saved|items?|qty|quantity|points?|discounts?|rewards?|weight"
+    r"|vat|tax|taxes|before|excl|excluding|ex|net)\b)",
     r"\bamount\s+due\b",
     r"\bbalance\s+due\b",
     r"\bamount:",

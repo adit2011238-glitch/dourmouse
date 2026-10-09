@@ -356,6 +356,8 @@ def _build_external_mcp_subagent(
 #: crashes at start-up does not cost a full timeout on every registry build.
 _FAILURE_RETRY_SECONDS = 60.0
 _cache_lock = threading.Lock()
+#: Held for a whole build so concurrent callers share one set of servers.
+_build_lock = threading.Lock()
 #: (config key, subagent, clients, retry-not-before); only for the configured-servers path.
 _external_cache: tuple[str, Subagent | None, list[McpClient], float] | None = None
 
@@ -394,6 +396,31 @@ def build_external_mcp_subagent(
         return _build_external_mcp_subagent(servers)
     loaded = load_external_mcp_servers()
     key = json.dumps(loaded, sort_keys=True, default=str)
+    hit = _cached_result(key)
+    if hit is not None:
+        return hit
+    # Single flight: building spawns every server and can take the full start
+    # timeout, so threads that arrive while the cache is empty wait here and
+    # then read the first thread's result instead of starting their own set
+    # (a set that lost the race would never be closed).
+    with _build_lock:
+        hit = _cached_result(key)
+        if hit is not None:
+            return hit
+        if not loaded:
+            return None, []
+        subagent, clients = _build_external_mcp_subagent(loaded)
+        with _cache_lock:
+            _external_cache = (key, subagent, clients, time.monotonic() + _FAILURE_RETRY_SECONDS)
+        return subagent, list(clients)
+
+
+def _cached_result(key: str) -> tuple[Subagent | None, list[McpClient]] | None:
+    """The cached build for this config, or None when a build is needed.
+
+    A stale entry (config changed, or a server died) is dropped and its
+    servers closed, so the next build starts clean."""
+    global _external_cache
     with _cache_lock:
         cached = _external_cache
         if cached is not None and cached[0] == key:
@@ -405,12 +432,7 @@ def build_external_mcp_subagent(
     if cached is not None:
         for client in cached[2]:
             client.close()
-    if not loaded:
-        return None, []
-    subagent, clients = _build_external_mcp_subagent(loaded)
-    with _cache_lock:
-        _external_cache = (key, subagent, clients, time.monotonic() + _FAILURE_RETRY_SECONDS)
-    return subagent, list(clients)
+    return None
 
 
 if __name__ == "__main__":

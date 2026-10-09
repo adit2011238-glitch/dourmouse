@@ -3736,6 +3736,37 @@ ipcMain.handle("bridge:open_map", () => {
 // The console window. Start-up and the Dock "activate" both come through here, so a console made
 // again after the owner closed it gets the same wiring: saved geometry, the resize handler that keeps
 // the pane following the window, and the active pane view attached to it (finding A-1).
+// A hidden console is still a live page. Closing it must end what a person expects "closed" to end: the
+// microphone and the camera. preload.js keeps a list of the capture streams the page opened and exposes
+// window.__dmStopMedia() (it tells the page first, so a screen can drop a half-made recording instead of
+// acting on it, then stops every track that is still live). The first time this really stops something,
+// say so, because the app keeps running in the menu bar and nothing else would tell the owner.
+let captureHintShown = false;
+function stopConsoleCapture(win) {
+  let pending;
+  try {
+    pending = win.webContents.executeJavaScript("window.__dmStopMedia ? window.__dmStopMedia() : 0");
+  } catch (exc) {
+    log("could not stop capture before hiding the console:", (exc && exc.message) || exc);
+    return Promise.resolve(0);
+  }
+  return Promise.resolve(pending).then((stopped) => {
+    if (!(Number(stopped) > 0)) return 0;
+    log(`console hidden: stopped ${stopped} microphone or camera stream(s)`);
+    if (!captureHintShown && Notification.isSupported()) {
+      captureHintShown = true;
+      new Notification({
+        title: "Dourmouse is still running",
+        body: "The window is hidden and the microphone and camera were turned off. Click the Dock icon to bring it back, or use Quit in the menu bar icon.",
+      }).show();
+    }
+    return Number(stopped);
+  }, (exc) => {
+    log("could not stop capture before hiding the console:", (exc && exc.message) || exc);
+    return 0;
+  });
+}
+
 function createMainWindow() {
   const geometry = readWindowState();
   const win = new BrowserWindow({
@@ -3763,6 +3794,7 @@ function createMainWindow() {
   win.on("close", (evt) => {
     if (serverQuitting || win !== mainWindow) return;
     evt.preventDefault();
+    stopConsoleCapture(win); // hiding must not leave the microphone or camera running with no window (W1R-5)
     win.hide();
   });
   win.on("resize", () => {

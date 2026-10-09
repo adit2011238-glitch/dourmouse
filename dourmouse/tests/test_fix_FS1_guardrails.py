@@ -27,6 +27,10 @@ def test_daily_loss_is_enforced_from_the_account_snapshot():
     decision = evaluate_trade(trade, account, CFG, switch)
     assert decision.approved is False
     assert decision.checks["kill_switch"] is False
+    # FIX-R W1R-15: evaluating no longer latches (a preview must not trip the process-wide switch);
+    # the order-submission call asks for it with latch=True.
+    assert not switch.tripped
+    evaluate_trade(trade, account, CFG, switch, latch=True)
     assert switch.tripped  # latched, as the docstring promises
 
 

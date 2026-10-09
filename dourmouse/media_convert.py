@@ -185,6 +185,34 @@ def _run(key: str, src: Path, out: Path, p: dict[str, Any], duration: float | No
             watchdog.cancel()
 
 
+def _begin_conversion(key: str, src: Path, job: dict[str, Any]) -> dict[str, Any] | None:
+    """Inspect ``src`` and start the conversion thread for the placeholder ``job`` (the caller marks the
+    job failed if anything here raises). Returns the answer to give at once when the file cannot be
+    converted, or None when the job is under way and the caller may wait for it."""
+    try:
+        info = probe(src)
+    except (subprocess.SubprocessError, OSError) as exc:
+        info = {"ok": False, "error": f"ffmpeg could not inspect the file: {type(exc).__name__}: {exc}"}
+    if not info["ok"]:
+        with _lock:
+            if ffmpeg_exe() is None:
+                _jobs.pop(key, None)  # nothing was tried: do not remember it
+                return {"state": "failed", "error": info["error"]}
+            job.update(state="failed", failed_at=time.time(), error=info["error"])
+        return dict(job)
+    p = plan(info)
+    out = cache_dir() / f"{key}{p['out_ext']}"
+    with _lock:
+        job.update(state="ready" if out.exists() else "converting", route=p["route"], path=str(out),
+                   content_type=p["content_type"], progress=1.0 if out.exists() else 0.0,
+                   streams={"video": info["video"], "audio": info["audio"]}, duration=info["duration"])
+        start = job["state"] == "converting"
+    if start:
+        threading.Thread(target=_run, args=(key, src, out, p, info["duration"]), daemon=True,
+                         name=f"media-{key[:8]}").start()
+    return None
+
+
 def ensure_playable(src: Path, *, wait_s: float = 0.0) -> dict[str, Any]:
     """Start (or find) the conversion for ``src``. Returns the job: state
     ready (with ``path``), converting (with ``progress``), or failed."""
@@ -206,26 +234,13 @@ def ensure_playable(src: Path, *, wait_s: float = 0.0) -> dict[str, Any]:
             mine = False
     if mine:
         try:
-            info = probe(src)
-        except (subprocess.SubprocessError, OSError) as exc:
-            info = {"ok": False, "error": f"ffmpeg could not inspect the file: {type(exc).__name__}: {exc}"}
-        if not info["ok"]:
+            answer = _begin_conversion(key, src, job)
+        except Exception as exc:  # noqa: BLE001 - whatever stopped it, the placeholder must not stay "converting"
             with _lock:
-                if ffmpeg_exe() is None:
-                    _jobs.pop(key, None)  # nothing was tried: do not remember it
-                    return {"state": "failed", "error": info["error"]}
-                job.update(state="failed", failed_at=time.time(), error=info["error"])
+                job.update(state="failed", failed_at=time.time(), error=f"could not start the conversion: {type(exc).__name__}: {exc}")
             return dict(job)
-        p = plan(info)
-        out = cache_dir() / f"{key}{p['out_ext']}"
-        with _lock:
-            job.update(state="ready" if out.exists() else "converting", route=p["route"], path=str(out),
-                       content_type=p["content_type"], progress=1.0 if out.exists() else 0.0,
-                       streams={"video": info["video"], "audio": info["audio"]}, duration=info["duration"])
-            start = job["state"] == "converting"
-        if start:
-            threading.Thread(target=_run, args=(key, src, out, p, info["duration"]), daemon=True,
-                             name=f"media-{key[:8]}").start()
+        if answer is not None:
+            return answer
     deadline = time.monotonic() + wait_s
     while job["state"] == "converting" and time.monotonic() < deadline:
         time.sleep(0.1)

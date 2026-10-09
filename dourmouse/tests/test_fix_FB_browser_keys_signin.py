@@ -186,6 +186,8 @@ def test_browser_submit_on_a_focused_field_really_submits(chrome, site):
 def test_browser_press_enter_in_a_field_submits(chrome, site):
     ba.browser_open({"url": site.base + "/"})
     ba.browser_fill({"target": "Query", "value": "via-press"})
+    # Enter in a form field asks the owner first (W1R-4); this is the owner saying yes.
+    assert ba.press_gate({"key": "Enter"}) is not None
     out = ba.browser_press({"key": "Enter"})
     assert out.startswith("PRESSED Enter"), out
     assert _eval("document.title") == "submitted:via-press"

@@ -216,6 +216,11 @@ class KillSwitch:
             self._tripped = True
         return self._tripped
 
+    def would_trip(self, start_of_day_equity: float, current_equity: float) -> bool:
+        """What ``update`` would answer, without latching: True when the switch is already tripped or
+        the daily loss is at/beyond the limit now. Safe for a preview or what-if."""
+        return self._tripped or daily_loss_exceeded(start_of_day_equity, current_equity, self._limit)
+
     def rearm(self) -> None:
         """Manual re-arm. The ONLY way to clear a tripped switch."""
         self._tripped = False
@@ -230,11 +235,18 @@ def evaluate_trade(
     account: AccountState,
     config: GuardrailConfig,
     kill_switch: KillSwitch,
+    *,
+    latch: bool = False,
 ) -> RiskDecision:
     """Deterministically approve/reject a proposed trade.
 
     Order of checks: kill-switch first (a tripped switch blocks everything),
     then exposure-increasing limits, then the confirmation-threshold flag.
+
+    Evaluation does not change the kill-switch: the daily-loss limit is judged from the account
+    snapshot and blocks the trade, but a preview or what-if call (or a snapshot with a wrong
+    start-of-day equity) never trips the process-wide latch. The call that is about to submit a
+    real order passes ``latch=True`` so a breach is remembered until a manual re-arm (W1R-15).
     """
     decision = RiskDecision(approved=True, requires_confirmation=False)
 
@@ -242,8 +254,12 @@ def evaluate_trade(
     # account snapshot carries start_of_day_equity, so the daily-loss limit
     # is evaluated here rather than relying on every caller to have run
     # kill_switch.update() first (a fresh switch never tripped otherwise).
-    kill_switch.update(account.start_of_day_equity, account.equity)
-    ks_ok = not kill_switch.tripped
+    # The latch itself is only set when the caller asks for it (latch=True).
+    if latch:
+        tripped = kill_switch.update(account.start_of_day_equity, account.equity)
+    else:
+        tripped = kill_switch.would_trip(account.start_of_day_equity, account.equity)
+    ks_ok = not tripped
     decision.checks["kill_switch"] = ks_ok
     if not ks_ok:
         decision.approved = False

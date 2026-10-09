@@ -346,8 +346,9 @@ export default {
       reader.readAsDataURL(blob);
     }
 
-    /* release the microphone when leaving */
-    ctx.signal.addEventListener('abort', () => {
+    /* release the microphone when leaving, and when the shell hides the console (a recording made
+       up to that point is dropped, not transcribed and acted on) */
+    const releaseCapture = () => {
       try {
         if (st.sr) st.sr.abort();
         if (st.recorder && st.recorder.state !== 'inactive') {
@@ -358,6 +359,11 @@ export default {
         /* already stopped */
       }
       if (st.stream) st.stream.getTracks().forEach((t) => t.stop());
+    };
+    ctx.signal.addEventListener('abort', releaseCapture);
+    ctx.onConsoleHiding(() => {
+      releaseCapture();
+      endRecording();
     });
 
     ctx.events.onResync(() => load());

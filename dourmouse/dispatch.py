@@ -2909,6 +2909,14 @@ OUTBOUND_TOOLS: frozenset[str] = frozenset({
     "docs_insert_image",
 })
 
+#: Agents whose tools return text written by other people (web pages, mail, shared documents, files
+#: from outside, other apps' screens). A turn holding any of them cannot treat what it is about to
+#: send as the owner's own words (W1R-6).
+UNTRUSTED_CONTENT_AGENTS: frozenset[str] = frozenset({
+    "browser", "mail", "google_workspace", "docs", "research_info", "rnd", "news", "evidence_pipeline",
+    "worldmonitor", "system", "study", "app_driver", "freebuff",
+})
+
 #: Tools that open a URL in a browser.
 _URL_OPEN_TOOLS: frozenset[str] = frozenset({"browser_open", "open_browser_pane", "open_url"})
 
@@ -3005,20 +3013,28 @@ def _url_gate(spec_name: str, url: str, actor: str) -> tuple[str, str] | None:
     return None
 
 
-# Enter submits a form; so does Space on a focused submit button (finding #173, H-FB-3)
-_ENTER_KEYS = frozenset({"enter", "return", "numpadenter", "kp_enter", "space", " ", "spacebar"})
+def _argument_gate(
+    spec: ToolSpec, arguments: dict[str, Any], actor: str, routed: frozenset[str] = frozenset(),
+) -> tuple[str, str] | None:
+    """``("refuse", reason)``, ``("confirm", prompt)`` or None for this call.
 
-
-def _press_token(key: Any) -> str:
-    """The last key of a chord, lowercased; a bare space (" ") is the Space key."""
-    raw = str(key or "")
-    token = raw.split("+")[-1].strip().lower()
-    return token or ("space" if raw and not raw.strip() else "")
-
-
-def _argument_gate(spec: ToolSpec, arguments: dict[str, Any], actor: str) -> tuple[str, str] | None:
-    """``("refuse", reason)``, ``("confirm", prompt)`` or None for this call."""
+    ``routed`` is the set of agents the planner scoped this turn's tools to (empty when the call did
+    not come from an ordinary routed turn)."""
     name = spec.name
+    readers = routed & UNTRUSTED_CONTENT_AGENTS
+    if name == "send_message" and actor in ("", "orchestrator") and "messenger" in routed and readers:
+        # The turn speaks as the messenger (finding P2-22), but it also holds the tools of an agent that
+        # reads pages, mail or files written by other people, so what is about to be put in another
+        # agent's inbox may have been steered by them (W1R-6). The planner often adds a second, unrelated
+        # agent to a messenger turn; only the readers make the turn ask.
+        others = ", ".join(sorted(readers))
+        to_agent = str(arguments.get("to_agent") or "").strip() or "(no recipient)"
+        subject = _one_line_text(arguments.get("subject"), 60)
+        body = _one_line_text(arguments.get("body"), 200)
+        return ("confirm", f"Send a message from messenger to {to_agent}"
+                f"{f' with subject {subject!r}' if subject else ''}? This turn also uses other agents ({others}) whose tools "
+                "can read web pages, mail or files written by other people, so the text may have been steered by "
+                f"what they read. Message: {body!r}")
     if name in OUTBOUND_TOOLS or name.startswith("mcp__"):
         labels = DlpFilter().secrets_in_arguments(arguments)
         if labels:
@@ -3039,15 +3055,22 @@ def _argument_gate(spec: ToolSpec, arguments: dict[str, Any], actor: str) -> tup
         decision = browser_agent.click_gate(arguments)
         if decision is not None:
             return decision
-    if name == "browser_press" and _press_token(arguments.get("key")) in _ENTER_KEYS:
-        return ("confirm", "Press Enter on the current browser page? Enter can submit a form: send a message, "
-                "sign in, or place an order.")
+    if name == "browser_press":
+        # Enter and Space ask only when the focused element would send, submit or confirm (W1R-4);
+        # browser_agent judges the key by what has focus.
+        from dourmouse import browser_agent
+
+        decision = browser_agent.press_gate(arguments)
+        if decision is not None:
+            return decision
     if name == "browser_type" and str(arguments.get("mode") or "text").strip().lower() == "keys" and (
         "\n" in str(arguments.get("text") or "") or "\r" in str(arguments.get("text") or "")
     ):
         return ("confirm", "Type text with line breaks as real key presses? Each line break is an Enter key, "
                 "which can send a message or submit a form on this page.")
-    if name == "security_sentry_dismiss":
+    if name == "security_sentry_dismiss" and spec.permission is not Permission.REQUIRES_CONFIRMATION:
+        # The registered tool asks for itself, with the finding's title (security/tools.py); this is for a
+        # copy of it that lost that gate. Asking in both places stacked two questions in one card (W1R-10).
         return ("confirm", f"Dismiss security finding {arguments.get('fingerprint')!s} as a false positive? "
                 "Its alert stops showing and the same finding is not raised again.")
     if name == "security_incident_update":
@@ -3058,6 +3081,11 @@ def _argument_gate(spec: ToolSpec, arguments: dict[str, Any], actor: str) -> tup
     return None
 
 
+def _one_line_text(value: Any, limit: int) -> str:
+    one = " ".join(str(value or "").split())
+    return one if len(one) <= limit else one[: limit - 3] + "..."
+
+
 def _execute_tool(
     spec: ToolSpec,
     arguments: dict[str, Any],
@@ -3066,6 +3094,7 @@ def _execute_tool(
     policy: Any = None,
     actor: str = "",
     scope: str = "",
+    routed: frozenset[str] = frozenset(),
 ) -> str:
     """R7 (finding #133): the model proposes, the runtime decides. Every
     call is recorded in the action ledger (proposed, then denied / declined
@@ -3076,7 +3105,7 @@ def _execute_tool(
     actor = actor or (getattr(policy, "actor", "") if policy is not None else "")
     _ep.record("proposed", spec.name, arguments, actor, permission=spec.permission.name)
     decision = (
-        _argument_gate(spec, arguments, actor)
+        _argument_gate(spec, arguments, actor, routed)
         if spec.permission is not Permission.PROHIBITED and isinstance(arguments, dict)
         else None
     )
@@ -3092,12 +3121,14 @@ def _execute_tool(
         original = spec.confirm_prompt if was_gated else None
         tool_name = spec.name
 
-        def _prompt(args: dict[str, Any]) -> str:
+        def _prompt(args: dict[str, Any], _reason: str = reason) -> str:
+            # _reason is bound now: the name `reason` is reused below for the policy's answer, and a
+            # closure over it showed the owner "None" instead of the question.
             if original is not None:
-                return f"{reason} {original(args)}"
+                return f"{_reason} {original(args)}"
             if was_gated:
-                return f"{reason} Execute {tool_name} with {json.dumps(args, default=str)}?"
-            return reason
+                return f"{_reason} Execute {tool_name} with {json.dumps(args, default=str)}?"
+            return _reason
 
         spec = _dataclass_replace(spec, permission=Permission.REQUIRES_CONFIRMATION, confirm_prompt=_prompt)
     if policy is not None and spec.permission is not Permission.PROHIBITED:
@@ -3909,7 +3940,9 @@ class DispatchContext:
     # The agents the planner scoped an ordinary (not hard-scoped) turn's tools
     # to. Unlike ``forced_agent`` this is not a security identity; it only lets
     # send_message speak as ``messenger`` on a turn whose tools were scoped to
-    # the messenger agent (finding P2-22).
+    # the messenger agent (finding P2-22). When that turn also holds an agent in
+    # UNTRUSTED_CONTENT_AGENTS, _argument_gate asks the owner before the message
+    # is sent (W1R-6).
     routed_agents: frozenset[str] = frozenset()
     # Finding #134 (AGENT-3): this run is one branch of a delegate_parallel
     # fan-out. Live-caught: each branch received the parent conversation as
@@ -5810,6 +5843,7 @@ def _run_dispatch_loop(
                                     # A fan-out branch counts its own repeated read-only
                                     # calls (finding P2-31).
                                     scope=ctx.call_id if ctx.fanout_branch else "",
+                                    routed=ctx.routed_agents,
                                 )
                             except Exception as exc:  # surface handler errors honestly
                                 result_text = f"ERROR: tool '{name}' failed: {exc}"

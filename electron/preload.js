@@ -133,3 +133,66 @@ contextBridge.exposeInMainWorld("dourmouseShell", {
     },
   },
 });
+
+// W1R-5: the console is hidden, not destroyed, when the red button is pressed (main.js). A page that was
+// capturing would keep the microphone or camera open with no window to show it. This runs in the page's
+// own world before any page script: it records every capture stream and speech recognizer the page opens
+// and offers window.__dmStopMedia(), which main.js calls when it hides the console. The page is told first
+// (a "dourmouse:console-hiding" event) so a screen can discard a half-made recording instead of acting on
+// it; whatever is still live afterwards is stopped here. Returns how many captures it stopped.
+try {
+  contextBridge.executeInMainWorld({
+    func: () => {
+      if (window.__dmStopMedia) return;
+      const tracks = new Set();
+      const recognizers = new Set();
+      const md = navigator.mediaDevices;
+      if (md) {
+        for (const name of ["getUserMedia", "getDisplayMedia"]) {
+          const original = md[name];
+          if (typeof original !== "function") continue;
+          md[name] = function (...args) {
+            return original.apply(this, args).then((stream) => {
+              for (const t of stream.getTracks()) {
+                tracks.add(t);
+                t.addEventListener("ended", () => tracks.delete(t));
+              }
+              return stream;
+            });
+          };
+        }
+      }
+      for (const ctorName of ["SpeechRecognition", "webkitSpeechRecognition"]) {
+        const ctor = window[ctorName];
+        if (!ctor || !ctor.prototype || typeof ctor.prototype.start !== "function") continue;
+        const start = ctor.prototype.start;
+        ctor.prototype.start = function (...args) {
+          recognizers.add(this);
+          this.addEventListener("end", () => recognizers.delete(this));
+          return start.apply(this, args);
+        };
+      }
+      Object.defineProperty(window, "__dmStopMedia", {
+        value: () => {
+          try {
+            window.dispatchEvent(new CustomEvent("dourmouse:console-hiding"));
+          } catch (_e) { /* a screen's handler failing must not keep the microphone on */ }
+          let stopped = 0;
+          for (const t of [...tracks]) {
+            if (t.readyState === "live") { t.stop(); stopped += 1; }
+          }
+          tracks.clear();
+          for (const r of [...recognizers]) {
+            try { r.abort(); stopped += 1; } catch (_e) { /* already stopped */ }
+          }
+          recognizers.clear();
+          return stopped;
+        },
+        enumerable: false,
+      });
+    },
+  });
+} catch (exc) {
+  // main.js then finds no __dmStopMedia and a hidden console keeps whatever it was capturing.
+  console.warn("preload: could not install the capture tracker:", exc && exc.message ? exc.message : exc);
+}

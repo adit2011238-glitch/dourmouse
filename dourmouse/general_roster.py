@@ -6010,10 +6010,14 @@ def build_general_registry() -> DispatchRegistry:
                     name="browser_press",
                     description=(
                         "Send ONE keyboard key to the page (Enter, Tab, Escape, "
-                        "ArrowDown...). Enter can submit a form, so pressing "
-                        "Enter asks the owner first, like browser_submit; to "
-                        "submit a login, signup or order use browser_submit. "
-                        "To type text use browser_type or browser_fill."
+                        "ArrowDown...). Enter can submit a form and Space "
+                        "presses a focused button, so Enter or Space asks the "
+                        "owner first when the focused field or button would "
+                        "send, submit or confirm something (like "
+                        "browser_submit); Space that only scrolls or types a "
+                        "space does not ask. To submit a login, signup or "
+                        "order use browser_submit. To type text use "
+                        "browser_type or browser_fill."
                     ),
                     parameters={
                         "type": "object",

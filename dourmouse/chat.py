@@ -24,6 +24,7 @@ import hashlib
 import json
 import os
 import sys
+import threading
 import time
 import uuid
 from datetime import datetime
@@ -60,6 +61,65 @@ def _helper_sessions_dir() -> Path:
     helpers = _default_sessions_dir() / "helpers"
     helpers.mkdir(parents=True, exist_ok=True)
     return helpers
+
+
+#: Throwaway helper sessions write a ledger and a snapshot each; nothing else deletes them. Keep the
+#: newest ones for a while and prune the rest (W1R-11). The owner's own conversations live one folder
+#: up and are never touched.
+_HELPER_KEEP_MAX = 500
+_HELPER_KEEP_DAYS = 14.0
+_HELPER_PRUNE_EVERY = 600.0
+_HELPER_PRUNE_AT = 0.0  # monotonic time of the last prune; 0 = not yet this run
+_HELPER_PRUNE_LOCK = threading.Lock()
+_HELPER_SUFFIXES = (".messages.json.corrupt", ".messages.json", ".jsonl")
+
+
+def _prune_helper_sessions(directory: Path) -> int:
+    """Delete helper session files that are older than the age limit or beyond the count limit, a
+    ledger and its snapshot together. Runs at most once per interval per process. Returns the number
+    of sessions removed."""
+    global _HELPER_PRUNE_AT
+    with _HELPER_PRUNE_LOCK:
+        now = time.monotonic()
+        if _HELPER_PRUNE_AT and now - _HELPER_PRUNE_AT < _HELPER_PRUNE_EVERY:
+            return 0
+        _HELPER_PRUNE_AT = now
+    groups: dict[str, list[Path]] = {}
+    for f in directory.glob("session_*"):
+        suffix = next((x for x in _HELPER_SUFFIXES if f.name.endswith(x)), None)
+        if suffix is not None and f.is_file():
+            groups.setdefault(f.name[: -len(suffix)], []).append(f)
+
+    def newest(files: list[Path]) -> float:
+        times = []
+        for f in files:
+            try:
+                times.append(f.stat().st_mtime)
+            except OSError:
+                continue  # already gone
+        return max(times, default=0.0)
+
+    ranked = sorted(groups.values(), key=newest, reverse=True)
+    cutoff = time.time() - _HELPER_KEEP_DAYS * 86400
+    removed = 0
+    failed: list[str] = []
+    for index, files in enumerate(ranked):
+        if index < _HELPER_KEEP_MAX and newest(files) >= cutoff:
+            continue
+        for f in files:
+            try:
+                f.unlink()
+            except FileNotFoundError:
+                continue
+            except OSError as exc:
+                failed.append(f"{f.name}: {exc}")
+        removed += 1
+    if failed:
+        from dourmouse import obs
+
+        obs.log_error(source="chat", kind="helper_prune_failed", what="could not remove old helper sessions",
+                      detail="; ".join(failed[:5]))
+    return removed
 
 
 def _new_session_name() -> str:
@@ -144,6 +204,7 @@ class ChatSession:
         self._turn_blocks: list[dict[str, Any]] = []
         #: Set when a corrupt state snapshot was replaced by a rebuild.
         self.state_recovery: str | None = None
+        self._recovery_announced = False
         if session_file is None:
             # A ChatSession over a registry with no tools cannot be the
             # user's conversation: it is a one-shot helper (wiki summary,
@@ -151,6 +212,8 @@ class ChatSession:
             if ephemeral is None:
                 ephemeral = not registry.tool_names
             directory = _helper_sessions_dir() if ephemeral else _default_sessions_dir()
+            if ephemeral:
+                _prune_helper_sessions(directory)
             session_file = directory / _new_session_name()
         self.session_file = Path(session_file)
         self._state_file = self.session_file.with_suffix(".messages.json")
@@ -361,6 +424,17 @@ class ChatSession:
         from dourmouse.hooks import run_stop_hooks
 
         run_stop_hooks(report)
+        if self.state_recovery and not self._recovery_announced:
+            # The reply that follows a rebuilt snapshot says so (finding W1R-11): tool exchanges from
+            # before are gone, and the model has no memory of them. Shown once, not saved to the
+            # ledger or the history, so it never becomes part of what the model is told.
+            self._recovery_announced = True
+            report["state_recovery"] = self.state_recovery
+            report["final_text"] = (
+                "Note: the saved state of this conversation was damaged, so I rebuilt it from the log. "
+                "Your earlier messages and my replies are back, but what the tools returned in them is not, "
+                "so ask again if you need one of those results.\n\n" + str(report.get("final_text") or "")
+            )
         return report
 
     # ------------------------------------------------------------------ #

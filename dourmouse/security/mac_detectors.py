@@ -109,6 +109,18 @@ def _posture(state: dict[str, Any]) -> list[SentryFinding]:
     return out
 
 
+#: How far a listening port reaches, narrowest first. UNKNOWN is deliberately absent: a stored
+#: UNKNOWN is usually an older classifier's answer (for example every IPv6 bind), so a move from
+#: or to it is not evidence that the service changed how it listens.
+_EXPOSURE_REACH = {"LOOPBACK_ONLY": 0, "TAILSCALE": 1, "LOCAL_NETWORK": 1, "ALL_INTERFACES": 2}
+
+
+def _exposure_widened(before: str | None, now: str) -> bool:
+    """True only when both values are known and the port is reachable from more places than before."""
+    b, n = _EXPOSURE_REACH.get((before or "").upper()), _EXPOSURE_REACH.get((now or "").upper())
+    return b is not None and n is not None and n > b
+
+
 def _changes(anomalies: list[Anomaly], state: dict[str, Any]) -> list[SentryFinding]:
     out: list[SentryFinding] = []
     # The baseline key of a network process is the lsof COMMAND column (cut to
@@ -158,7 +170,7 @@ def _changes(anomalies: list[Anomaly], state: dict[str, Any]) -> list[SentryFind
                 "backdoors and forgotten dev servers become reachable.",
                 f"If you did not start {command}, stop it; if you did, bind it to 127.0.0.1.", o.key, o.value,
             ))
-        elif o.category == "listening_port" and a.kind == "changed":
+        elif o.category == "listening_port" and a.kind == "changed" and _exposure_widened(a.previous_value, o.value):
             command, proto, port = (o.key.split("|") + ["", "", ""])[:3]
             before = (a.previous_value or "").lower() or "exposure unknown"
             now = o.value.lower() or "exposure unknown"
