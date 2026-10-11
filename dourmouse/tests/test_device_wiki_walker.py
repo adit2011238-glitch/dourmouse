@@ -6,8 +6,6 @@ captured command output)."""
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from dourmouse.device_wiki.store import WikiStore
 from dourmouse.device_wiki.walker import ROOTS_ENV, configured_roots, scan, walk_roots
 

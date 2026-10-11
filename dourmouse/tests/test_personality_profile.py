@@ -188,16 +188,15 @@ class TestGenerateProfile:
         kwargs = client.chat.completions.calls[0]
         assert kwargs["max_tokens"] >= 3000
 
-    def test_unparseable_response_still_stores_something_not_nothing(self, store):
-        """A model that ignores the JSON instruction shouldn't burn the
-        one-shot budget for nothing -- store the raw prose rather than
-        silently discard a real (if malformed) answer."""
+    def test_unparseable_response_is_not_stored(self, store):
+        """Replaces test_unparseable_response_still_stores_something_not_nothing,
+        which pinned the P5-38 bug (raw prose stored as the once-only profile).
+        Now nothing is stored and the slot stays free."""
         _seed_history(store)
         client = _FakeClient(content="I cannot determine a working style from this.")
         result = pp.generate_profile(store, client=client, config=_cfg())
-        assert result["ok"] is True
-        fact = store.get(pp.PROFILE_SOURCE, pp.PROFILE_TITLE)
-        assert "cannot determine" in fact["body"]
+        assert result == {"ok": False, "reason": "unparseable_output"}
+        assert pp.has_profile(store) is False
 
     def test_system_prompt_forbids_biographical_data(self):
         """Structural guard, not just a vibe check: the instruction must

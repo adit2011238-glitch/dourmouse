@@ -28,11 +28,11 @@ from pathlib import Path
 from .brain import Brain
 from .core import (
     PHASE_ORDER,
+    STUDY_BUDGET_MIN,
     ConceptCard,
     Status,
     StudyDossier,
     StudyPhase,
-    STUDY_BUDGET_MIN,
 )
 
 _YEAR = re.compile(r"(19|20)\d{2}")

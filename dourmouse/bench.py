@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import statistics
 import sys
 import time
@@ -173,7 +174,8 @@ def percentile(values: list[float], pct: float) -> float | None:
     ordered = sorted(values)
     if len(ordered) == 1:
         return round(ordered[0], 1)
-    rank = max(1, min(len(ordered), int(round(pct / 100.0 * len(ordered) + 0.5))))
+    # ceil(pct/100 * n); the product is rounded first because e.g. 0.7 * 10 is 7.000000000000001 in floats
+    rank = max(1, min(len(ordered), math.ceil(round(pct * len(ordered) / 100.0, 9))))
     return round(ordered[rank - 1], 1)
 
 

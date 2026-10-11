@@ -55,6 +55,7 @@ stronger, opt-in check.
 from __future__ import annotations
 
 import dataclasses
+import math
 import os
 import sqlite3
 from pathlib import Path
@@ -320,7 +321,14 @@ def _metric_is_lower_better(index) -> bool:
         return False
 
 
-def _load_position_id_map(db_path: Path, schema: VaultSchema, index_total: int) -> list[int]:
+def _vault_score(raw: float, lower_is_better: bool) -> float:
+    """0..1, higher is better, from one raw FAISS score and nothing else."""
+    if lower_is_better:
+        return math.exp(-max(raw, 0.0))
+    return max(0.0, min(1.0, raw))
+
+
+def _load_position_id_map(db_path: Path, schema: VaultSchema, index_total: int) -> list[Any]:
     """Real, live-confirmed fix (v13.6, this session's own "understand
     and quiz the desktop's spatial vault" pass): a plain FAISS
     ``IndexFlatL2``/``IndexFlatIP`` (confirmed live to be exactly what
@@ -385,7 +393,9 @@ def _load_position_id_map(db_path: Path, schema: VaultSchema, index_total: int) 
             f'SELECT "{schema.id_col}" FROM "{schema.table}" {where_clause}ORDER BY {order_sql} LIMIT ?',
             (index_total,),
         ).fetchall()
-    return [int(r[0]) for r in rows]
+    # Ids are kept exactly as the table holds them: the id column may be a
+    # UUID or other text (the schema probe accepts uuid / doc_id / chunk_id).
+    return [r[0] for r in rows]
 
 
 def query_spatial_vault(query: str, *, top_k: int = 5) -> list[dict[str, Any]]:
@@ -404,7 +414,15 @@ def query_spatial_vault(query: str, *, top_k: int = 5) -> list[dict[str, Any]]:
     schema = probe_vault_schema(db_path)
     index = _load_faiss_index(index_path)
     _check_index_dimension(int(index.d))
-    position_to_id = _load_position_id_map(db_path, schema, int(index.ntotal))
+    try:
+        position_to_id = _load_position_id_map(db_path, schema, int(index.ntotal))
+    except sqlite3.Error as exc:
+        raise ExternalCorpusError(
+            "SCHEMA_MISMATCH",
+            f"could not build the vault's position-to-id map ({type(exc).__name__}: {exc}) -- "
+            "check DOURMOUSE_SPATIAL_VAULT_ID_FILTER_SQL / DOURMOUSE_SPATIAL_VAULT_ID_ORDER_SQL "
+            "and that the vault is readable.",
+        ) from exc
 
     qvec = embed_text(query)
     if qvec is None:
@@ -430,7 +448,12 @@ def query_spatial_vault(query: str, *, top_k: int = 5) -> list[dict[str, Any]]:
     lower_is_better = _metric_is_lower_better(index)
 
     uri = f"file:{db_path}?mode=ro"
-    conn = sqlite3.connect(uri, uri=True)
+    try:
+        conn = sqlite3.connect(uri, uri=True)
+    except sqlite3.Error as exc:
+        raise ExternalCorpusError(
+            "SCHEMA_MISMATCH", f"could not open the vault read-only ({type(exc).__name__}: {exc})"
+        ) from exc
     hits: list[dict[str, Any]] = []
     stale = 0
     try:
@@ -460,20 +483,23 @@ def query_spatial_vault(query: str, *, top_k: int = 5) -> list[dict[str, Any]]:
                 "raw_score": float(raw_score),
                 "metadata": {"raw": meta_val} if meta_val is not None else {},
             })
+    except sqlite3.Error as exc:
+        raise ExternalCorpusError(
+            "SCHEMA_MISMATCH", f"the vault query failed ({type(exc).__name__}: {exc})"
+        ) from exc
     finally:
         conn.close()
 
     if not hits:
         return []
 
-    raws = [h["raw_score"] for h in hits]
-    lo, hi = min(raws), max(raws)
-    span = (hi - lo) or 1.0
     for h in hits:
-        norm = (h["raw_score"] - lo) / span
-        # min-max normalize into 0..1 "higher is better" regardless of the
-        # underlying metric's own direction — see _metric_is_lower_better.
-        h["score"] = (1.0 - norm) if lower_is_better else norm
+        # An ABSOLUTE 0..1 "higher is better" score from the metric itself,
+        # never rescaled within this query's own results (that pinned a lone
+        # hit to 0.0 or 1.0 and made the best vault hit always outrank the
+        # local ones): inner product / cosine is clamped, an L2 distance maps
+        # through exp(-d). Still best effort across sources, see merged_search.
+        h["score"] = _vault_score(h["raw_score"], lower_is_better)
         h["screen"] = "spatial_vault"
         h["session_id"] = ""
         h["ts"] = None
@@ -510,31 +536,37 @@ def merged_search(
 
     Cross-source ranking is BEST EFFORT, not a precise unified score:
     local hits carry a true cosine similarity (0..1, well-defined); vault
-    hits carry a min-max-normalized rank within THIS query's own result set
-    (see ``query_spatial_vault``) because the vault's underlying metric
-    (L2 vs inner product, and whatever embedding model actually produced
-    it) is not something this module can verify from here. Each hit is
-    tagged with its source so a caller can weigh that honestly instead of
-    treating the combined sort as more precise than it is.
+    hits carry an absolute 0..1 score derived from the index metric alone
+    (inner product clamped, L2 through exp(-d); see ``_vault_score``),
+    because the embedding model that actually produced the vault is not
+    something this module can verify from here. Each hit is tagged with its
+    source so a caller can weigh that honestly instead of treating the
+    combined sort as more precise than it is.
     """
     hits: list[dict[str, Any]] = []
     sources_used: list[str] = []
     warnings: list[str] = []
 
     if global_memory_enabled():
-        mem = memory or get_default_memory()
-        local_hits = mem.search(query, top_k=top_k)
-        for h in local_hits:
-            h = dict(h)
-            h["source"] = "local"
-            hits.append(h)
-        sources_used.append("local")
+        try:
+            mem = memory or get_default_memory()
+            local_hits = mem.search(query, top_k=top_k)
+        except Exception as exc:  # noqa: BLE001 -- the contract is NEVER raises: report it, keep the other source
+            warnings.append(f"local shared memory failed: {type(exc).__name__}: {exc}")
+        else:
+            for h in local_hits:
+                h = dict(h)
+                h["source"] = "local"
+                hits.append(h)
+            sources_used.append("local")
 
     if spatial_vault_configured():
         try:
             vault_hits = query_spatial_vault(query, top_k=top_k)
         except ExternalCorpusError as exc:
             warnings.append(str(exc))
+        except Exception as exc:  # noqa: BLE001 -- anything else must not abort the turn either
+            warnings.append(f"spatial vault failed: {type(exc).__name__}: {exc}")
         else:
             for h in vault_hits:
                 h = dict(h)

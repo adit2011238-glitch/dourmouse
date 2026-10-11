@@ -128,14 +128,14 @@ def email_send_via_smtp(to: str, subject: str, body: str) -> str:
             "sign up on a provider you choose) and set DOURMOUSE_SMTP_HOST / "
             "DOURMOUSE_SMTP_USER / DOURMOUSE_SMTP_PASS in .env. Nothing was sent."
         )
-    port = int(smtp["port"] or 587)
     tls = smtp["tls"] not in ("0", "false", "False")
-    msg = EmailMessage()
-    msg["From"] = formataddr((display_name(), smtp["from"]))
-    msg["To"] = to
-    msg["Subject"] = subject
-    msg.set_content(body[:50_000])
     try:
+        port = int(smtp["port"] or 587)
+        msg = EmailMessage()
+        msg["From"] = formataddr((display_name(), smtp["from"]))
+        msg["To"] = to
+        msg["Subject"] = subject  # a newline in a header value raises ValueError
+        msg.set_content(body[:50_000])
         if port == 465:
             with smtplib.SMTP_SSL(smtp["host"], port, timeout=30) as server:
                 server.login(smtp["user"], os.environ.get("DOURMOUSE_SMTP_PASS", ""))
@@ -154,6 +154,10 @@ def email_send_via_smtp(to: str, subject: str, body: str) -> str:
         )
     except smtplib.SMTPException as exc:
         return f"EMAIL OWN SEND FAILED: SMTP error: {exc}. Nothing was sent."
+    except (OSError, ValueError) as exc:
+        # connection refused, DNS failure, timeout, TLS error (all OSError), a bad port value, or a header
+        # EmailMessage refuses: the same documented failure text instead of a traceback to the tool layer
+        return f"EMAIL OWN SEND FAILED: {type(exc).__name__}: {exc}. Nothing was sent."
     return (
         f"EMAIL OWN SEND OK: message delivered to {to} from "
         f"{display_name()} <{smtp['from']}> with subject {subject!r}."

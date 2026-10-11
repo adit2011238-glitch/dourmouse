@@ -10,7 +10,6 @@ import dourmouse.chat as chat_module
 from dourmouse.goal_runtime import GoalRuntime, goal_runtime_enabled
 from dourmouse.goals import GoalStore
 
-
 #: _verify_completion (goal_runtime.py) constructs its own ChatSession
 #: over the exact same chat_module.ChatSession reference this fake
 #: replaces -- so EVERY test using this fake also exercises the fake

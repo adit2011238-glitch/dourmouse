@@ -16,8 +16,7 @@ from datetime import datetime
 
 import pytest
 
-from dourmouse import google_auth
-from dourmouse import google_services
+from dourmouse import google_auth, google_services
 from dourmouse.artifacts import ArtifactStore
 from dourmouse.dispatch import DispatchRegistry
 from dourmouse.message_bus import MessageBus

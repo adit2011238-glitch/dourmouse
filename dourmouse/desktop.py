@@ -723,6 +723,14 @@ class DesktopNotifier:
                 pass
         print(f"[NOTIFY] {title}: {body}")
 
+    def prime(self) -> None:
+        """Seed the seen set from the alerts already present, notifying none,
+        so the first alert after launch is not swallowed as 'backlog'."""
+        with self._lock:
+            if self._primed:
+                return
+        self.refresh()
+
     def on_event(self, payload: dict[str, Any] | None) -> None:
         """Hub sink: react to alerts state_change broadcasts only.
 
@@ -1073,6 +1081,9 @@ def launch(
 
             notifier_sink = _HubSink()
             events_hub.register(notifier_sink)
+            # Prime off-thread now (P5-39): otherwise the first alert event
+            # is the first fetch and gets swallowed as backlog.
+            threading.Thread(target=notifier.prime, daemon=True).start()
         # Vision stage 7: proactive surfacing — a SECOND, independent
         # consumer of the SAME alert feed above, filtered to a short
         # hardcoded allowlist (dourmouse.proactive.ALLOWED_ALERT_KINDS) and
@@ -1095,6 +1106,7 @@ def launch(
 
             proactive_sink = _ProactiveSink()
             events_hub.register(proactive_sink)
+            threading.Thread(target=surfacer.prime, daemon=True).start()
         # v13.11: overlay/wakeword/tray, IN this process — must come after
         # `webview` is loaded (overlay needs it) and before the one shared
         # webview.start() below (pywebview only tolerates windows created

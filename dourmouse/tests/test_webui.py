@@ -3329,7 +3329,10 @@ class TestSystemBrowserClaimFlow:
         return location
 
     def _claim(self, server, code: str):
-        status, location, set_cookie, raw = self._get(server, f"/api/auth/claim?code={code}")
+        # FW A-20: the claim secret travels as the server-minted cookie, never
+        # as a caller-chosen query parameter.
+        cookie = f"dourmouse_claim={code}" if code else None
+        status, location, set_cookie, raw = self._get(server, "/api/auth/claim", cookie=cookie)
         body = json.loads(raw.decode() or "{}")
         return status, body, set_cookie
 
@@ -3384,10 +3387,12 @@ class TestSystemBrowserClaimFlow:
             server, "/api/auth/google/start?claim=claim-from-webview")
         assert status == 302
         assert location and location.startswith("https://accounts.google.com")
-        # The claim code was recorded against the pending state.
+        # FW A-20: the server mints the claim secret; the caller's value is
+        # never used as the code.
         srv, _ = server
-        pending = srv.oauth_pending.values()
-        assert any(p.get("claim") == "claim-from-webview" for p in pending)
+        pending = list(srv.oauth_pending.values())
+        assert any(p.get("claim") for p in pending)
+        assert not any(p.get("claim") == "claim-from-webview" for p in pending)
 
     def test_login_page_ships_chrome_bridge_and_fallback(self, server):
         """v5.22.12: the login page must open consent via the Chrome-first
@@ -3615,10 +3620,10 @@ class TestSetupWizardGoogleStep:
                 "created": "2026-01-01T00:00:00",
             }
 
-    def _get(self, server, path: str):
+    def _get(self, server, path: str, cookie: str | None = None):
         srv, port = server
         conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
-        conn.request("GET", path)
+        conn.request("GET", path, headers={"Cookie": cookie} if cookie else {})
         resp = conn.getresponse()
         status = resp.status
         location = resp.getheader("Location")
@@ -3664,7 +3669,7 @@ class TestSetupWizardGoogleStep:
         assert status == 302
         assert location == "/login?claimed=1"
 
-        status, _, raw = self._get(server, f"/api/auth/claim?code={claim}")
+        status, _, raw = self._get(server, "/api/auth/claim", cookie=f"dourmouse_claim={claim}")
         body = json.loads(raw.decode() or "{}")
         assert status == 200 and body["ok"] is True
         assert body["me"]["email"] == self._IDENTITY["email"]
@@ -3688,7 +3693,7 @@ class TestSetupWizardGoogleStep:
         assert location == "/login?reason=denied"
         assert raw == b""  # no traceback, no body leaked on the honest path
 
-        status2, _, raw2 = self._get(server, f"/api/auth/claim?code={claim}")
+        status2, _, raw2 = self._get(server, "/api/auth/claim", cookie=f"dourmouse_claim={claim}")
         body2 = json.loads(raw2.decode() or "{}")
         assert status2 == 404
         assert body2["ok"] is False

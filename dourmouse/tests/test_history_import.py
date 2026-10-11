@@ -259,7 +259,10 @@ class TestCodexImport:
         db = tmp_path / "empty.sqlite"
         sqlite3.connect(str(db)).close()
         result = import_codex_history(store, db_path=db)
-        assert result["configured"] is False
+        # a database with no threads table is what a Codex schema change looks like: it is reported with the
+        # reason (error), not folded into "Codex is not installed" (configured False)
+        assert result["configured"] is True
+        assert "no such table" in result["error"]
         assert result["imported"] == 0
 
     def test_rerunning_is_idempotent(self, store, tmp_path):

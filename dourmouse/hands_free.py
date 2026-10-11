@@ -65,6 +65,7 @@ from __future__ import annotations
 import io
 import os
 import threading
+import time
 import wave as _wave
 from typing import Any, Callable
 
@@ -79,6 +80,8 @@ _OFF_VALUES = {"", "0", "false", "no", "off"}
 _DEFAULT_SILENCE_MS = 900.0
 _DEFAULT_MAX_MS = 15_000.0
 _DEFAULT_ENERGY = 150.0
+#: How often the kill switch is re-read while an utterance is being recorded.
+_KILL_POLL_S = 0.1
 _CHUNK_MS = 1000.0 * _CHUNK_SAMPLES / _SAMPLE_RATE  # 80ms, matches wakeword.py
 
 
@@ -255,9 +258,10 @@ def record_utterance(
     seg.reset()
     frames: list[Any] = []
     done_evt = threading.Event()
+    killed_evt = threading.Event()
 
     def _on_audio(indata: Any, frames_count: int, time_info: Any, status: Any) -> None:  # noqa: ARG001 - sounddevice callback shape
-        if done_evt.is_set():
+        if done_evt.is_set() or killed_evt.is_set():
             return
         chunk = indata[:, 0].copy() if hasattr(indata, "shape") and len(indata.shape) > 1 else indata
         if denoiser is not None:
@@ -280,13 +284,31 @@ def record_utterance(
             # Real hard timeout, not just the segmenter's own max_ms bound —
             # belt and suspenders against a stream that never calls back at
             # all (a real, observed failure mode class for audio hardware).
-            done_evt.wait(timeout=(seg.max_ms / 1000.0) + 5.0)
+            # Waited in short slices so the kill switch is re-checked while recording, not only before
+            # the stream opened (the module contract: force-stopped the moment it flips mid-record).
+            deadline = time.monotonic() + (seg.max_ms / 1000.0) + 5.0
+            while not done_evt.is_set():
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                if done_evt.wait(timeout=min(_KILL_POLL_S, remaining)):
+                    break
+                try:
+                    still_allowed = mic_allowed()
+                except Exception:  # noqa: BLE001 - an unreadable switch must fail closed
+                    still_allowed = False
+                if not still_allowed:
+                    killed_evt.set()
+                    break
         finally:
             try:
                 stream.stop()
                 stream.close()
             except Exception:  # noqa: BLE001 - closing must never raise
                 pass
+        if killed_evt.is_set():
+            frames.clear()  # nothing captured before the switch flipped is kept, transcribed or sent on
+            return None
         if not frames:
             return None
         return _pcm_to_wav_bytes(frames)
@@ -381,6 +403,7 @@ class HandsFreeController:
         self._mic_allowed = mic_allowed
         self._on_turn = on_turn  # optional observability hook (heard, said)
         self._busy = threading.Lock()
+        self._turn_thread: threading.Thread | None = None
         if listener is not None:
             self._listener = listener
         else:
@@ -419,6 +442,19 @@ class HandsFreeController:
         # deterministic no-op rather than two turns racing each other.
         if not self._busy.acquire(blocking=False):
             return
+        # This is called from the sounddevice input callback. Running the whole turn here (record, STT, LLM,
+        # TTS, playback) would starve the wake stream and make stop()/the kill-switch watchdog block until
+        # the turn ended, so the turn runs on a daemon worker and the callback returns at once. The busy
+        # lock is released by the worker.
+        try:
+            worker = threading.Thread(target=self._run_turn, name="hands-free-turn", daemon=True)
+            self._turn_thread = worker
+            worker.start()
+        except BaseException:
+            self._busy.release()
+            raise
+
+    def _run_turn(self) -> None:
         try:
             self._handle_turn()
         finally:

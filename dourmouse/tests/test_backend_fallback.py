@@ -86,7 +86,7 @@ class TestLoadLlmConfigWithFallback:
         monkeypatch.delenv("OLLAMA_MODEL", raising=False)
         _unreachable(monkeypatch)
         cfg = backend_fallback.load_llm_config_with_fallback()
-        assert cfg.base_url == "http://127.0.0.1:11434"
+        assert cfg.base_url == "http://127.0.0.1:11434/v1"
         assert cfg.model == "phi:2b"
 
     def test_omniroute_is_unaffected(self, monkeypatch):
@@ -117,7 +117,7 @@ class TestProbeOllamaFallback:
         _reachable(monkeypatch)
         cfg = backend_fallback.probe_ollama_fallback()
         assert cfg is not None
-        assert cfg.base_url == "http://127.0.0.1:11434"
+        assert cfg.base_url == "http://127.0.0.1:11434/v1"
         assert cfg.model == "phi:2b"
 
     def test_honors_ollama_model_env_override(self, monkeypatch):

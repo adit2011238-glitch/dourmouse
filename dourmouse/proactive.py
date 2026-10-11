@@ -261,6 +261,19 @@ class ProactiveSurfacer:
         except (OSError, ValueError, urllib.error.URLError):
             return None
 
+    def prime(self) -> None:
+        """Seed the seen-set from the alerts already present, surfacing none.
+
+        Call once at start-up (off the main thread; it does a loopback
+        fetch). Without it the first refresh happens on the first alerts
+        event, whose fetch already contains the new alert, so that alert
+        would be swallowed as 'backlog'. A failed fetch leaves the surfacer
+        unprimed (the old first-refresh behaviour remains the fallback)."""
+        with self._lock:
+            if self._primed:
+                return
+        self.refresh()
+
     def on_event(self, payload: dict[str, Any] | None) -> None:
         """Hub sink: react to alerts state_change broadcasts only — same
         shape and same off-the-broadcast-thread guard as

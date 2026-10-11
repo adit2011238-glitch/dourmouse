@@ -17,10 +17,12 @@ apply live.
 from __future__ import annotations
 
 import os
+import threading
 from pathlib import Path
 from typing import Any
 
 from dourmouse import config
+from dourmouse.state_file import atomic_write_text
 
 FEATURES: list[dict[str, Any]] = [
     {"key": "DOURMOUSE_SECURITY_SENTRY_LOOP", "section": "security", "kind": "bool", "default": True,
@@ -84,6 +86,10 @@ def save_feature(key: str, value: Any) -> dict[str, Any]:
                 raise ValueError(f"{item!r} is not a full folder path")
             if not p.is_dir():
                 raise ValueError(f"{item!r} is not a folder on this Mac")
+            if os.pathsep in str(p):
+                # Folders are stored joined by os.pathsep; a name that contains
+                # it would read back as two bogus entries.
+                raise ValueError(f"{item!r} contains the path separator {os.pathsep!r}, which this setting cannot store")
             paths.append(str(p))
         stored = os.pathsep.join(paths)
     _write_user_setting(key, stored)
@@ -125,31 +131,51 @@ def reset_features() -> dict[str, Any]:
             "restart_required": True}
 
 
+_SETTINGS_LOCK = threading.Lock()
+_HEADER = ["# Dourmouse configuration: written by first-run setup and Settings.",
+           "# This file holds credentials. Keep it to yourself; it is never",
+           "# bundled into a build or uploaded anywhere.", ""]
+
+
+def _update_user_settings(mutate: Any) -> None:
+    """Read-modify-write the user's config file under one lock.
+
+    The file holds API keys, so: it is written through a private (0600) temp
+    file and ``os.replace`` (never created world-readable and chmodded later);
+    two concurrent saves cannot lose one change; and a file that EXISTS but
+    cannot be read is left exactly as it is and the save is refused, because
+    ``config._read_user_config_file`` reports it as empty and writing that back
+    would erase every saved key."""
+    with _SETTINGS_LOCK:
+        path = config.user_env_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.exists():
+            try:
+                path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError) as exc:
+                raise OSError(
+                    f"{path} exists but cannot be read ({type(exc).__name__}: {exc}); the setting was "
+                    "not changed and the file was left exactly as it is. Fix or move it, then try again."
+                ) from exc
+        values = config._read_user_config_file()
+        mutate(values)
+        atomic_write_text(path, "\n".join(_HEADER + config.env_lines(values)) + "\n", mode=0o600)
+
+
 def _remove_user_settings(keys: list[str]) -> None:
     """Drop these keys from the user's config file, keeping every other line
     and the file private (0600)."""
-    path = config.user_env_path()
-    values = config._read_user_config_file()
-    for key in keys:
-        values.pop(key, None)
-    body = ["# Dourmouse configuration: written by first-run setup and Settings.",
-            "# This file holds credentials. Keep it to yourself; it is never",
-            "# bundled into a build or uploaded anywhere.", ""]
-    body += config.env_lines(values)
-    path.write_text("\n".join(body) + "\n", encoding="utf-8")
-    path.chmod(0o600)
+    def drop(values: dict[str, str]) -> None:
+        for key in keys:
+            values.pop(key, None)
+
+    _update_user_settings(drop)
 
 
 def _write_user_setting(key: str, value: str) -> None:
     """Merge one key into the user's config file, keeping every other line
     and the file private (0600)."""
-    path = config.user_env_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    values = config._read_user_config_file()
-    values[key] = value
-    body = ["# Dourmouse configuration: written by first-run setup and Settings.",
-            "# This file holds credentials. Keep it to yourself; it is never",
-            "# bundled into a build or uploaded anywhere.", ""]
-    body += config.env_lines(values)
-    path.write_text("\n".join(body) + "\n", encoding="utf-8")
-    path.chmod(0o600)
+    def put(values: dict[str, str]) -> None:
+        values[key] = value
+
+    _update_user_settings(put)

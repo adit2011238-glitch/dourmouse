@@ -42,14 +42,18 @@ Run it standalone:
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import sys
 import threading
+from collections.abc import Iterator
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
+
+from dourmouse.state_file import atomic_write_text, set_aside
 
 _STATE_ENV = "DOURMOUSE_PRIVACY_STATE"
 _WORKSPACE_ENV = "DOURMOUSE_WORKSPACE"
@@ -97,31 +101,51 @@ class KillSwitchState:
         return asdict(self)
 
 
-def load_state(path: Path | None = None) -> KillSwitchState:
-    """Read the persisted state. Honest defaults (both enabled) when the
-    file is missing, unreadable, or corrupt — this NEVER raises, so a
-    reader (the overlay, a future stage-4/5 gate) always gets a usable
-    answer instead of crashing on a bad file."""
-    p = path or _state_path()
+def _parse_state(raw: Any) -> KillSwitchState | None:
+    """A strictly valid state, or None. Both flags must be real booleans:
+    ``bool("false")`` is True, which would silently re-arm a killed device."""
+    if not isinstance(raw, dict):
+        return None
+    mic, cam = raw.get("mic_enabled"), raw.get("camera_enabled")
+    if not isinstance(mic, bool) or not isinstance(cam, bool):
+        return None
+    return KillSwitchState(mic_enabled=mic, camera_enabled=cam, updated_at=str(raw.get("updated_at") or ""))
+
+
+def _killed_state() -> KillSwitchState:
+    return KillSwitchState(mic_enabled=False, camera_enabled=False)
+
+
+def _read_state(p: Path) -> tuple[KillSwitchState, bool]:
+    """(state, readable). A missing file is a fresh install: both enabled.
+    A file that EXISTS but cannot be read or is malformed is a privacy file
+    in an unknown state, so it fails CLOSED: both killed, ``readable`` False."""
     if not p.exists():
-        return KillSwitchState()
+        return KillSwitchState(), True
     try:
         raw = json.loads(p.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return KillSwitchState()
-    if not isinstance(raw, dict):
-        return KillSwitchState()
-    return KillSwitchState(
-        mic_enabled=bool(raw.get("mic_enabled", True)),
-        camera_enabled=bool(raw.get("camera_enabled", True)),
-        updated_at=str(raw.get("updated_at") or ""),
-    )
+        return _killed_state(), False
+    parsed = _parse_state(raw)
+    if parsed is None:
+        return _killed_state(), False
+    return parsed, True
+
+
+def load_state(path: Path | None = None) -> KillSwitchState:
+    """Read the persisted state. A missing file means a fresh install (both
+    enabled). An existing file that is unreadable, truncated or malformed
+    means BOTH KILLED (fail closed: a corrupt privacy file must not quietly
+    re-arm the mic and camera). This NEVER raises, so a reader (the
+    overlay, the vision bridge) always gets a usable answer."""
+    return _read_state(path or _state_path())[0]
 
 
 def save_state(state: KillSwitchState, path: Path | None = None) -> None:
+    """Write through a temp file and ``os.replace``, so a crash or a
+    concurrent reader never sees a truncated file."""
     p = path or _state_path()
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(state.to_dict(), indent=2) + "\n", encoding="utf-8")
+    atomic_write_text(p, json.dumps(state.to_dict(), indent=2) + "\n")
 
 
 def mic_allowed(path: Path | None = None) -> bool:
@@ -134,6 +158,24 @@ def camera_allowed(path: Path | None = None) -> bool:
     """The check future continuous-camera code (stage 5) must call before
     it ever arms continuous hand/face tracking."""
     return load_state(path).camera_enabled
+
+
+@contextlib.contextmanager
+def _file_lock(state_path: Path) -> Iterator[None]:
+    """Cross-process lock around a read-modify-write of the state file
+    (``fcntl.flock`` on a sibling lock file; a no-op where fcntl is missing)."""
+    try:
+        import fcntl
+    except ImportError:
+        yield
+        return
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(state_path.with_name(state_path.name + ".lock"), "a") as fh:
+        fcntl.flock(fh, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(fh, fcntl.LOCK_UN)
 
 
 class KillSwitch:
@@ -159,7 +201,10 @@ class KillSwitch:
 
     @property
     def state(self) -> KillSwitchState:
+        # Re-read the shared file: the overlay and the vision bridge are other
+        # readers/writers of the same flag, so the in-memory copy is a cache.
         with self._lock:
+            self._state = load_state(self._path)
             return KillSwitchState(**asdict(self._state))
 
     def kill_all(self) -> KillSwitchState:
@@ -174,8 +219,16 @@ class KillSwitch:
         return self._set(camera_enabled=bool(enabled))
 
     def _set(self, **kwargs: Any) -> KillSwitchState:
-        with self._lock:
-            data = asdict(self._state)
+        with self._lock, _file_lock(self._path):
+            # Start from what is on disk NOW (another process may have killed
+            # the camera since this instance last looked), not from a stale
+            # in-memory copy. An unreadable file is kept aside, never
+            # overwritten, and the new state starts from "killed".
+            current, readable = _read_state(self._path)
+            if not readable:
+                aside = set_aside(self._path)
+                print(f"[TRAY] kill-switch state file was unreadable; kept as {aside.name}, starting from killed.")
+            data = asdict(current)
             data.update(kwargs)
             data["updated_at"] = datetime.now().isoformat(timespec="seconds")
             self._state = KillSwitchState(**data)

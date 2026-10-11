@@ -37,6 +37,7 @@ from __future__ import annotations
 import argparse
 import io
 import ipaddress
+import os
 import secrets
 import socket
 import subprocess
@@ -103,6 +104,7 @@ def write_env(
 
     had_host = False
     had_token = False
+    changed = False
     out_lines: list[str] = []
     if path.exists():
         for line in path.read_text(encoding="utf-8").splitlines():
@@ -110,6 +112,7 @@ def write_env(
             if key == "DOURMOUSE_HOST":
                 had_host = True
                 if line != target_host:
+                    changed = True
                     out_lines.append(target_host)
                 else:
                     out_lines.append(line)
@@ -117,28 +120,32 @@ def write_env(
             if key == "DOURMOUSE_ACCESS_TOKEN":
                 had_token = True
                 if line != target_token:
+                    changed = True
                     out_lines.append(target_token)
                 else:
                     out_lines.append(line)
                 continue
             out_lines.append(line)
 
-    changed = False
+    # In-place value changes were flagged by the loop above (a replaced line
+    # that differed from its target); missing keys are appended here.
     if not had_host:
         out_lines.append(target_host)
         changed = True
     if not had_token:
         out_lines.append(target_token)
         changed = True
-    # Detect in-place value changes (the loop already replaced them).
-    if had_host and target_host not in out_lines:
-        changed = True
-    if had_token and target_token not in out_lines:
-        changed = True
 
     if changed:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("\n".join(out_lines) + "\n", encoding="utf-8")
+        # The file holds the access token: create it private from the first
+        # byte (temp file at 0o600, then replace), never default-permission.
+        tmp = path.with_name(path.name + ".tmp")
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write("\n".join(out_lines) + "\n")
+        os.replace(tmp, path)
+        path.chmod(0o600)
     return {"changed": changed, "host": host, "token_set": bool(token)}
 
 
@@ -292,9 +299,10 @@ def main(argv: list[str] | None = None) -> int:
         # Always paired with a real access token in the same write -- webui.py's
         # own run_server refuses a non-loopback bind without DOURMOUSE_ACCESS_TOKEN
         # set, so this can never widen the bind surface unauthenticated.
-        write_env("0.0.0.0", token)  # noqa: S104
-        print("[ENV] DOURMOUSE_HOST=0.0.0.0 written to .env (remote reach).")
-        print("[ENV] DOURMOUSE_ACCESS_TOKEN written to .env (auth gate).")
+        result = write_env("0.0.0.0", token)  # noqa: S104
+        verb = "written to" if result["changed"] else "already set in"
+        print(f"[ENV] DOURMOUSE_HOST=0.0.0.0 {verb} .env (remote reach).")
+        print(f"[ENV] DOURMOUSE_ACCESS_TOKEN {verb} .env (auth gate).")
         print("[ENV] RESTART the UI server for the new binding to take effect:")
         print("        python -m dourmouse.webui")
     else:

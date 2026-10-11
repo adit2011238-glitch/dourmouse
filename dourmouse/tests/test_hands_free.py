@@ -372,6 +372,14 @@ class _FakeListener:
         self._running = False
 
 
+def _wake_and_wait(ctrl):
+    """_on_wake hands the turn to a worker thread (it runs inside the audio callback), so wait for it."""
+    ctrl._on_wake("hey_jarvis", 0.9)
+    worker = ctrl._turn_thread
+    if worker is not None:
+        worker.join(timeout=5)
+
+
 class TestHandsFreeController:
     def _controller(self, **kw):
         listener = _FakeListener()
@@ -402,7 +410,7 @@ class TestHandsFreeController:
             speak_fn=lambda text: (calls.append(("speak", text)) or b"audio-bytes"),
             play_fn=lambda audio: (calls.append(("play", audio)) or True),
         )
-        ctrl._on_wake("hey_jarvis", 0.9)
+        _wake_and_wait(ctrl)
         assert calls == [
             "record",
             ("transcribe", b"wav-bytes"),
@@ -418,22 +426,22 @@ class TestHandsFreeController:
             dispatch_fn=lambda text: "done, lights on",
             on_turn=lambda heard, said: seen.update(heard=heard, said=said),
         )
-        ctrl._on_wake("hey_jarvis", 0.9)
+        _wake_and_wait(ctrl)
         assert seen == {"heard": "turn the lights on", "said": "done, lights on"}
 
     def test_mic_killed_before_recording_skips_the_whole_turn(self):
         ctrl, _, dispatch_calls = self._controller(mic_allowed=lambda: False)
-        ctrl._on_wake("hey_jarvis", 0.9)
+        _wake_and_wait(ctrl)
         assert dispatch_calls == []
 
     def test_no_utterance_recorded_skips_dispatch(self):
         ctrl, _, dispatch_calls = self._controller(record_fn=lambda **_: None)
-        ctrl._on_wake("hey_jarvis", 0.9)
+        _wake_and_wait(ctrl)
         assert dispatch_calls == []
 
     def test_empty_transcription_skips_dispatch(self):
         ctrl, _, dispatch_calls = self._controller(transcribe_fn=lambda wav: "   ")
-        ctrl._on_wake("hey_jarvis", 0.9)
+        _wake_and_wait(ctrl)
         assert dispatch_calls == []
 
     def test_transcription_failure_ends_the_turn_quietly(self):
@@ -441,7 +449,7 @@ class TestHandsFreeController:
             raise RuntimeError("whisper crashed")
 
         ctrl, _, dispatch_calls = self._controller(transcribe_fn=boom)
-        ctrl._on_wake("hey_jarvis", 0.9)  # must not raise
+        _wake_and_wait(ctrl)  # must not raise
         assert dispatch_calls == []
 
     def test_dispatch_failure_still_speaks_an_honest_error_not_a_crash(self):
@@ -456,7 +464,7 @@ class TestHandsFreeController:
             speak_fn=lambda text: (spoken.append(text) or b"audio"),
             play_fn=lambda audio: (played.append(audio) or True),
         )
-        ctrl._on_wake("hey_jarvis", 0.9)  # must not raise
+        _wake_and_wait(ctrl)  # must not raise
         assert len(spoken) == 1
         assert "dispatch exploded" in spoken[0]
         assert played == [b"audio"]
@@ -477,7 +485,7 @@ class TestHandsFreeController:
             mic_allowed=lambda: mic_state["allowed"],
             play_fn=lambda audio: (played.append(audio) or True),
         )
-        ctrl._on_wake("hey_jarvis", 0.9)
+        _wake_and_wait(ctrl)
         assert played == []
 
     def test_tts_failure_does_not_crash_the_loop(self):
@@ -485,7 +493,7 @@ class TestHandsFreeController:
             raise RuntimeError("piper crashed")
 
         ctrl, _, dispatch_calls = self._controller(speak_fn=boom_speak)
-        ctrl._on_wake("hey_jarvis", 0.9)  # must not raise
+        _wake_and_wait(ctrl)  # must not raise
         assert dispatch_calls == ["what is the weather"]  # dispatch DID run before the TTS failure
 
     def test_overlapping_wake_fires_do_not_start_a_second_turn(self):

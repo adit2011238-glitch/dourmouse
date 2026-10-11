@@ -14,6 +14,7 @@ No LLM judgment anywhere in this file.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -176,26 +177,48 @@ def iter_source_files(root: Path, *, max_files: int = 400):
     capped at ``max_files`` — the caller is told honestly when the cap bit
     (see generate_repo_map)."""
     found: list[Path] = []
-    for p in sorted(root.rglob("*")):
-        if not p.is_file():
-            continue
-        if any(part in _SKIP_DIRS or part.endswith(".egg-info") for part in p.parts):
-            continue
-        # v13.1 (live-caught, real bug): on a non-APFS volume (this repo's
-        # own — an external exFAT/SMB-style drive), macOS scatters
-        # AppleDouble shadow files ("._foo.py") next to every real one —
-        # binary resource-fork data that still matches the ".py" suffix
-        # filter. Unfiltered, these flooded a real map with dozens of
-        # "(no definitions found)" entries and pushed real files out past
-        # the char budget. Any dotfile is skipped, not just "._" — a
-        # hidden file is never a source file worth mapping.
-        if p.name.startswith("."):
-            continue
-        if language_for(p) is None:
-            continue
-        found.append(p)
-        if len(found) >= max_files:
-            break
+
+    def walk(directory: Path) -> bool:
+        """Depth-first in sorted name order (the same order sorted(rglob)
+        gave), pruning skipped directories before entering them. Returns
+        True once ``max_files`` is reached so the whole walk stops. Only the
+        names BELOW ``root`` are tested, so a project that itself sits under
+        a folder called build, dist or target is still mapped."""
+        try:
+            entries = sorted(os.scandir(directory), key=lambda e: e.name)
+        except OSError:
+            return False
+        for entry in entries:
+            name = entry.name
+            p = directory / name
+            if entry.is_dir(follow_symlinks=False):
+                if name in _SKIP_DIRS or name.endswith(".egg-info"):
+                    continue
+                if walk(p):
+                    return True
+                continue
+            if not entry.is_file():
+                continue
+            if name in _SKIP_DIRS or name.endswith(".egg-info"):
+                continue
+            # v13.1 (live-caught, real bug): on a non-APFS volume (this repo's
+            # own — an external exFAT/SMB-style drive), macOS scatters
+            # AppleDouble shadow files ("._foo.py") next to every real one —
+            # binary resource-fork data that still matches the ".py" suffix
+            # filter. Unfiltered, these flooded a real map with dozens of
+            # "(no definitions found)" entries and pushed real files out past
+            # the char budget. Any dotfile is skipped, not just "._" — a
+            # hidden file is never a source file worth mapping.
+            if name.startswith("."):
+                continue
+            if language_for(p) is None:
+                continue
+            found.append(p)
+            if len(found) >= max_files:
+                return True
+        return False
+
+    walk(root)
     return found
 
 

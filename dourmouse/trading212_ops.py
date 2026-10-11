@@ -28,6 +28,7 @@ the forex paper log.
 
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import urllib.error
@@ -110,8 +111,20 @@ def _request(base: str, key: str, path: str, payload: dict | None = None) -> Any
         except Exception:  # noqa: BLE001 -- best-effort detail
             pass
         raise RuntimeError(f"T212 API {exc.code} on {path}: {exc.reason}{detail}") from exc
-    except urllib.error.URLError as exc:
-        raise RuntimeError(f"T212 API unreachable ({path}): {exc.reason}") from exc
+    except (urllib.error.URLError, TimeoutError, OSError, http.client.HTTPException) as exc:
+        reason = getattr(exc, "reason", None) or exc
+        if payload is not None:
+            # A POST may have reached T212 before the connection failed or the
+            # read timed out. Reporting a plain "unreachable" invites a retry
+            # that places a second order, so say the outcome is unknown.
+            raise RuntimeError(
+                f"order status UNKNOWN: the request to {path} did not complete ({reason}) but T212 "
+                "may have executed it. Check t212_positions / t212_portfolio (open orders) "
+                "before retrying; do not place the order again until you have."
+            ) from exc
+        if isinstance(exc, TimeoutError) or isinstance(reason, TimeoutError):
+            raise RuntimeError(f"T212 API timed out ({path})") from exc
+        raise RuntimeError(f"T212 API unreachable ({path}): {reason}") from exc
 
 
 def t212_status() -> dict[str, Any]:
@@ -169,7 +182,9 @@ def t212_order(
     against T212's practice account — a real market order executes there.
     """
     base, key = _config()
-    if not paper_confirm:
+    # Literally True: the value is model-supplied, and a truthy string such as
+    # "false" must not pass.
+    if paper_confirm is not True:
         raise ValueError(
             "paper confirmation required: pass paper_confirm=true to place "
             "an order (paper-first, Rule 2.1)."

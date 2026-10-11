@@ -9,15 +9,36 @@ import os
 import urllib.error
 import urllib.request
 
-from dourmouse.config import OllamaConfig, llm_backend, load_llm_config
+from dourmouse.config import OLLAMA_DEFAULT_BASE_URL, OllamaConfig, llm_backend, load_llm_config
+
+_LOCAL_OLLAMA_ROOT = "http://127.0.0.1:11434"
+
+
+def _is_local_ollama(base_url: str) -> bool:
+    """True when ``base_url`` is the default local Ollama, with or without the /v1 suffix."""
+    root = base_url.rstrip("/")
+    if root.endswith("/v1"):
+        root = root[: -len("/v1")]
+    return root == _LOCAL_OLLAMA_ROOT
 
 
 def _probe_backend(base_url: str, timeout: float = 3.0) -> bool:
-    """Probe a backend's /models endpoint. Return True if reachable."""
+    """Probe a backend's OpenAI-compatible /v1/models endpoint. Return True if reachable.
+
+    Every backend serves its models under ``/v1``: the configured base URLs already end in it and a bare
+    root (``http://127.0.0.1:11434``) gets it added, because ``/models`` on its own does not exist (404).
+    An HTTP answer below 500 (a 401 or 404 included) means the host is up; urlopen raises HTTPError for
+    those, so it is read here instead of being treated as a transport failure.
+    """
+    root = base_url.rstrip("/")
+    if not root.endswith("/v1"):
+        root += "/v1"
     try:
-        req = urllib.request.Request(base_url + "/models")
+        req = urllib.request.Request(root + "/models")
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return 200 <= resp.status < 500
+    except urllib.error.HTTPError as exc:
+        return exc.code < 500
     except (urllib.error.URLError, OSError, ValueError):
         return False
 
@@ -57,26 +78,22 @@ def load_llm_config_with_fallback() -> dict:
             "(127.0.0.1:11434)"
         )
         # Synthesize an OllamaConfig pointing at local.
-        from dourmouse.config import OllamaConfig
-
         return OllamaConfig(
-            base_url="http://127.0.0.1:11434",
+            base_url=OLLAMA_DEFAULT_BASE_URL,
             model=os.environ.get("OLLAMA_MODEL", "phi:2b").strip() or "phi:2b",
         )
     elif backend == "ollama":
         if _probe_backend(cfg.base_url):
             return cfg
         # Configured Ollama unreachable; try default local.
-        if cfg.base_url != "http://127.0.0.1:11434":
+        if not _is_local_ollama(cfg.base_url):
             print(
                 f"[BACKEND] {cfg.base_url} unreachable, trying default "
                 "127.0.0.1:11434"
             )
-            if _probe_backend("http://127.0.0.1:11434"):
-                from dourmouse.config import OllamaConfig
-
+            if _probe_backend(OLLAMA_DEFAULT_BASE_URL):
                 return OllamaConfig(
-                    base_url="http://127.0.0.1:11434", model=cfg.model
+                    base_url=OLLAMA_DEFAULT_BASE_URL, model=cfg.model
                 )
         # All Ollama attempts failed; return what we have (will error on use).
         return cfg
@@ -110,10 +127,8 @@ def probe_ollama_fallback(timeout: float = 3.0) -> "OllamaConfig | None":
         "1", "true", "yes"
     ):
         return None
-    local_url = "http://127.0.0.1:11434"
+    local_url = OLLAMA_DEFAULT_BASE_URL
     if not _probe_backend(local_url, timeout=timeout):
         return None
-    from dourmouse.config import OllamaConfig
-
     model = os.environ.get("OLLAMA_MODEL", "phi:2b").strip() or "phi:2b"
     return OllamaConfig(base_url=local_url, model=model)

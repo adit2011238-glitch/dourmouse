@@ -223,7 +223,7 @@ def publish_artifact_tool(arguments: dict[str, Any]) -> str:
     describing {columns, rows} / {labels, values} for table/series. The
     model gets one back-text; the artifact itself appears in the HUD panel.
     """
-    kind = str(arguments.get("kind") or "").strip()
+    kind = str(arguments.get("kind") or "").strip().lower()  # ArtifactStore.publish lowercases too
     title = str(arguments.get("title") or "").strip()
     raw_content = arguments.get("content")
     if isinstance(raw_content, str) and kind in ("table", "series"):

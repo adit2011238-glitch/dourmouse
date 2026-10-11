@@ -97,6 +97,29 @@ def user_config_dir() -> Path:
 _ENV_KEY = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
+#: python-dotenv, which loads this file, ends an unquoted value at " #", trims
+#: it, expands ``${VAR}`` and treats quotes and backslashes specially. A value
+#: with outer whitespace, ``#``, a quote, a backslash or a tab is written
+#: single-quoted so what is saved is what is read back.
+_ENV_NEEDS_QUOTES = re.compile(r"""^\s|\s$|[#'"\\\t]""")
+
+
+def _env_value_text(key: str, text: str) -> str:
+    if not text:
+        return ""
+    if "${" in text:
+        # dotenv expands ${VAR} even inside single quotes, so it cannot be
+        # stored literally. A line the owner wrote by hand that way is kept as
+        # written (it already means what the loader makes of it); one that
+        # also needs quoting cannot be represented and is refused.
+        if _ENV_NEEDS_QUOTES.search(text.replace("$", "")):
+            raise ValueError(f"the value for {key} contains '${{' and other characters that cannot be stored together")
+        return text
+    if not _ENV_NEEDS_QUOTES.search(text):
+        return text
+    return "'" + text.replace("\\", "\\\\").replace("'", "\\'") + "'"
+
+
 def env_lines(values: dict[str, str]) -> list[str]:
     """KEY=VALUE lines for the user's config file, one per setting.
 
@@ -105,7 +128,10 @@ def env_lines(values: dict[str, str]) -> list[str]:
     level setting the allow-list never saw (a planted DOURMOUSE_AUTO_APPROVE=1
     or DOURMOUSE_ACCESS_TOKEN=... took effect at once and survived restarts).
     A key that is not a plain name, or a value with a line break or a NUL, is
-    refused here, in the one place all writers now go through."""
+    refused here, in the one place all writers now go through.
+
+    FW A-14: values that dotenv would read differently (a ' #' tail, spaces at
+    the ends, quotes, backslashes, ``$``) are single-quoted."""
     lines: list[str] = []
     for key, value in sorted(values.items()):
         if not _ENV_KEY.match(str(key)):
@@ -113,8 +139,36 @@ def env_lines(values: dict[str, str]) -> list[str]:
         text = str(value)
         if any(ch in text for ch in ("\n", "\r", "\x00")):
             raise ValueError(f"the value for {key} contains a line break or control character")
-        lines.append(f"{key}={text}")
+        lines.append(f"{key}={_env_value_text(str(key), text)}")
     return lines
+
+
+def write_user_config(path: Path, values: dict[str, str]) -> None:
+    """Write the user's config file: the header plus ``env_lines(values)``.
+
+    FW A-15: the file is created 0600 from its first byte (a temp file in the
+    same directory, then an atomic replace), never written world-readable and
+    chmod'ed afterwards, and a config directory this call has to create is
+    0700. A failed write leaves the old file untouched. Raises OSError or
+    ValueError; callers report them."""
+    body = [
+        "# Dourmouse configuration \u2014 written by first-run setup / settings.",
+        "# This file holds credentials. Keep it to yourself; it is never",
+        "# bundled into a build or uploaded anywhere.",
+        "",
+    ]
+    body += env_lines(values)
+    text = "\n".join(body) + "\n"
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
 
 
 def user_env_path() -> Path:
@@ -1019,21 +1073,22 @@ ORCHESTRATOR_BACKEND_SETTING_KEY = "DOURMOUSE_ORCHESTRATOR_BACKEND"
 
 
 def _read_user_config_file() -> dict[str, str]:
-    """Parse the user's config .env file into a dict. Never raises."""
+    """Parse the user's config .env file into a dict. Never raises.
+
+    Read with python-dotenv, the same parser that loads the file, so
+    ``export KEY=...``, quotes and inline comments mean here what they mean
+    at start-up (FW A-14). ``${VAR}`` is not expanded: the raw text is kept so
+    a save writes back what the owner wrote."""
+    from dotenv import dotenv_values
+
     path = user_env_path()
-    values: dict[str, str] = {}
     if not path.exists():
-        return values
-    try:
-        for line in path.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            k, _, v = line.partition("=")
-            values[k.strip()] = v.strip()
-    except OSError:
         return {}
-    return values
+    try:
+        parsed = dotenv_values(path, interpolate=False)
+    except (OSError, UnicodeDecodeError):
+        return {}
+    return {str(k): str(v) for k, v in parsed.items() if v is not None}
 
 
 def orchestrator_model_setting() -> str:
@@ -1109,7 +1164,6 @@ def save_orchestrator_model_setting(model: str, backend: str = "") -> dict[str, 
         return {"ok": False, "detail": "no model given"}
     path = user_env_path()
     try:
-        user_config_dir().mkdir(parents=True, exist_ok=True)
         existing = _read_user_config_file()
         existing[ORCHESTRATOR_MODEL_SETTING_KEY] = model
         if backend:
@@ -1119,18 +1173,7 @@ def save_orchestrator_model_setting(model: str, backend: str = "") -> dict[str, 
             # PREVIOUS backend tag too — an untagged model must never keep
             # riding a stale tag from an earlier, different save.
             existing.pop(ORCHESTRATOR_BACKEND_SETTING_KEY, None)
-        body = [
-            "# Dourmouse configuration — written by first-run setup / settings.",
-            "# This file holds credentials. Keep it to yourself; it is never",
-            "# bundled into a build or uploaded anywhere.",
-            "",
-        ]
-        body += env_lines(existing)
-        path.write_text("\n".join(body) + "\n", encoding="utf-8")
-        try:
-            os.chmod(path, 0o600)
-        except OSError:
-            pass
+        write_user_config(path, existing)
     except (OSError, ValueError) as exc:
         return {"ok": False, "detail": f"could not write config: {exc}"}
     return {"ok": True, "detail": "saved", "model": model, "backend": backend or None, "path": str(path)}
@@ -1174,21 +1217,9 @@ def save_claude_front_mode_setting(enabled: bool) -> dict[str, Any]:
     never clobbers unrelated saved settings."""
     path = user_env_path()
     try:
-        user_config_dir().mkdir(parents=True, exist_ok=True)
         existing = _read_user_config_file()
         existing[CLAUDE_FRONT_MODE_SETTING_KEY] = "on" if enabled else "off"
-        body = [
-            "# Dourmouse configuration — written by first-run setup / settings.",
-            "# This file holds credentials. Keep it to yourself; it is never",
-            "# bundled into a build or uploaded anywhere.",
-            "",
-        ]
-        body += env_lines(existing)
-        path.write_text("\n".join(body) + "\n", encoding="utf-8")
-        try:
-            os.chmod(path, 0o600)
-        except OSError:
-            pass
+        write_user_config(path, existing)
     except (OSError, ValueError) as exc:
         return {"ok": False, "detail": f"could not write config: {exc}"}
     return {"ok": True, "detail": "saved", "enabled": enabled, "path": str(path)}
@@ -1231,21 +1262,9 @@ def save_google_oauth_full_scopes_setting(enabled: bool) -> dict[str, Any]:
     file discipline as every other save_*_setting here."""
     path = user_env_path()
     try:
-        user_config_dir().mkdir(parents=True, exist_ok=True)
         existing = _read_user_config_file()
         existing[GOOGLE_OAUTH_FULL_SCOPES_SETTING_KEY] = "on" if enabled else "off"
-        body = [
-            "# Dourmouse configuration — written by first-run setup / settings.",
-            "# This file holds credentials. Keep it to yourself; it is never",
-            "# bundled into a build or uploaded anywhere.",
-            "",
-        ]
-        body += env_lines(existing)
-        path.write_text("\n".join(body) + "\n", encoding="utf-8")
-        try:
-            os.chmod(path, 0o600)
-        except OSError:
-            pass
+        write_user_config(path, existing)
     except (OSError, ValueError) as exc:
         return {"ok": False, "detail": f"could not write config: {exc}"}
     return {"ok": True, "detail": "saved", "enabled": enabled, "path": str(path)}
@@ -1303,21 +1322,9 @@ def save_grounded_mode_setting(enabled: bool) -> dict[str, Any]:
     settings. Never raises; a write failure is reported honestly."""
     path = user_env_path()
     try:
-        user_config_dir().mkdir(parents=True, exist_ok=True)
         existing = _read_user_config_file()
         existing[GROUNDED_MODE_SETTING_KEY] = "1" if enabled else "0"
-        body = [
-            "# Dourmouse configuration — written by first-run setup / settings.",
-            "# This file holds credentials. Keep it to yourself; it is never",
-            "# bundled into a build or uploaded anywhere.",
-            "",
-        ]
-        body += env_lines(existing)
-        path.write_text("\n".join(body) + "\n", encoding="utf-8")
-        try:
-            os.chmod(path, 0o600)
-        except OSError:
-            pass
+        write_user_config(path, existing)
     except (OSError, ValueError) as exc:
         return {"ok": False, "detail": f"could not write config: {exc}"}
     return {"ok": True, "detail": "saved", "enabled": enabled, "path": str(path)}
@@ -1351,21 +1358,9 @@ def save_auto_approve_setting(enabled: bool) -> dict[str, Any]:
     Never raises; a write failure is reported honestly."""
     path = user_env_path()
     try:
-        user_config_dir().mkdir(parents=True, exist_ok=True)
         existing = _read_user_config_file()
         existing[AUTO_APPROVE_SETTING_KEY] = "1" if enabled else "0"
-        body = [
-            "# Dourmouse configuration — written by first-run setup / settings.",
-            "# This file holds credentials. Keep it to yourself; it is never",
-            "# bundled into a build or uploaded anywhere.",
-            "",
-        ]
-        body += env_lines(existing)
-        path.write_text("\n".join(body) + "\n", encoding="utf-8")
-        try:
-            os.chmod(path, 0o600)
-        except OSError:
-            pass
+        write_user_config(path, existing)
     except (OSError, ValueError) as exc:
         return {"ok": False, "detail": f"could not write config: {exc}"}
     return {"ok": True, "detail": "saved", "enabled": enabled, "path": str(path)}
@@ -1406,21 +1401,9 @@ def save_app_control_dry_run_setting(enabled: bool) -> dict[str, Any]:
     settings. Never raises; a write failure is reported honestly."""
     path = user_env_path()
     try:
-        user_config_dir().mkdir(parents=True, exist_ok=True)
         existing = _read_user_config_file()
         existing[APP_CONTROL_DRY_RUN_SETTING_KEY] = "1" if enabled else "0"
-        body = [
-            "# Dourmouse configuration — written by first-run setup / settings.",
-            "# This file holds credentials. Keep it to yourself; it is never",
-            "# bundled into a build or uploaded anywhere.",
-            "",
-        ]
-        body += env_lines(existing)
-        path.write_text("\n".join(body) + "\n", encoding="utf-8")
-        try:
-            os.chmod(path, 0o600)
-        except OSError:
-            pass
+        write_user_config(path, existing)
     except (OSError, ValueError) as exc:
         return {"ok": False, "detail": f"could not write config: {exc}"}
     return {"ok": True, "detail": "saved", "enabled": enabled, "path": str(path)}
@@ -1462,27 +1445,18 @@ def save_api_key_setting(env_name: str, value: str) -> dict[str, Any]:
     reported honestly."""
     if env_name not in BYOK_API_KEY_NAMES:
         return {"ok": False, "detail": f"{env_name!r} is not a BYOK key this app accepts"}
+    if "${" in value:
+        # The config loader would expand it and silently change the key.
+        return {"ok": False, "detail": "a key containing '${' cannot be stored: the config loader would expand it"}
     path = user_env_path()
     try:
-        user_config_dir().mkdir(parents=True, exist_ok=True)
         existing = _read_user_config_file()
         value = value.strip()
         if value:
             existing[env_name] = value
         else:
             existing.pop(env_name, None)
-        body = [
-            "# Dourmouse configuration — written by first-run setup / settings.",
-            "# This file holds credentials. Keep it to yourself; it is never",
-            "# bundled into a build or uploaded anywhere.",
-            "",
-        ]
-        body += env_lines(existing)
-        path.write_text("\n".join(body) + "\n", encoding="utf-8")
-        try:
-            os.chmod(path, 0o600)
-        except OSError:
-            pass
+        write_user_config(path, existing)
     except (OSError, ValueError) as exc:
         return {"ok": False, "detail": f"could not write config: {exc}"}
     return {"ok": True, "detail": "saved" if value else "cleared", "configured": bool(value), "path": str(path)}

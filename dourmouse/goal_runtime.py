@@ -45,7 +45,7 @@ import threading
 from typing import Any
 
 from dourmouse.config import auto_approve_enabled, workspace_dir
-from dourmouse.goals import GOAL_TERMINAL_STATES, GoalStore, TASK_TERMINAL_STATES
+from dourmouse.goals import GOAL_TERMINAL_STATES, TASK_TERMINAL_STATES, GoalStore
 
 _DEFAULT_TICK_SECONDS = 5.0
 #: How many ready tasks (across all active goals combined isn't tracked

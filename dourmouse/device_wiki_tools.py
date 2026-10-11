@@ -32,6 +32,14 @@ from dourmouse.device_wiki.walker import configured_roots, scan
 from dourmouse.dispatch import Subagent, ToolSpec
 
 _DEFAULT_MAX_FILES_TO_SUMMARIZE = 20
+#: The most files one call may send to the model, whatever the caller asks for.
+_MAX_FILES_HARD_CAP = 200
+
+
+def _clamp_max_files(value: int) -> int:
+    """The cost bound as a non-negative count: a negative value would slice from the end of the list
+    (``[:-1]`` is all but one file) and defeat the bound."""
+    return max(0, min(int(value), _MAX_FILES_HARD_CAP))
 
 
 def _store() -> WikiStore:
@@ -50,6 +58,7 @@ def _device_wiki_scan_tool(arguments: dict[str, Any]) -> str:
         max_files = int(arguments.get("max_files_to_summarize", _DEFAULT_MAX_FILES_TO_SUMMARIZE))
     except (TypeError, ValueError):
         return "ERROR: max_files_to_summarize must be an integer."
+    max_files = _clamp_max_files(max_files)
 
     store = _store()
     now = time.time()

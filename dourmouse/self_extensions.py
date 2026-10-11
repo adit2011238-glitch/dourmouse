@@ -55,6 +55,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import types
@@ -63,6 +64,7 @@ from pathlib import Path
 from typing import Any
 
 from dourmouse.config import workspace_dir
+from dourmouse.state_file import atomic_write_text
 
 _DRAFTS_FILE = "self_extensions/drafts.jsonl"
 _APPROVED_DIR = "self_extensions/approved"
@@ -184,10 +186,15 @@ class SelfExtensions:
     def __init__(self, path: Path | None = None) -> None:
         self._path = Path(path) if path is not None else _drafts_path()
 
-    def _load(self) -> list[dict[str, Any]]:
+    def _load(self, *, for_update: bool = False) -> list[dict[str, Any]]:
+        """The drafts. A corrupt line never breaks the store (Rule 2.2). When
+        the caller is about to rewrite the file (``for_update``), unreadable
+        lines are first copied to ``drafts.jsonl.corrupt-<time>`` so the
+        rewrite cannot silently destroy them."""
         if not self._path.is_file():
             return []
         out = []
+        bad: list[str] = []
         for line in self._path.read_text(encoding="utf-8").splitlines():
             line = line.strip()
             if not line:
@@ -195,13 +202,16 @@ class SelfExtensions:
             try:
                 out.append(json.loads(line))
             except json.JSONDecodeError:
-                continue  # a corrupt line never breaks the store (Rule 2.2)
+                bad.append(line)
+        if bad and for_update:
+            stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+            aside = self._path.with_name(f"{self._path.name}.corrupt-{stamp}")
+            atomic_write_text(aside, "\n".join(bad) + "\n")
         return out
 
     def _save(self, entries: list[dict[str, Any]]) -> None:
-        self._path.parent.mkdir(parents=True, exist_ok=True)
         lines = [json.dumps(e) for e in entries]
-        self._path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+        atomic_write_text(self._path, "\n".join(lines) + ("\n" if lines else ""))
 
     def add_draft(
         self,
@@ -217,8 +227,11 @@ class SelfExtensions:
         description_error = validate_description(description)
         if description_error:
             raise ValueError(description_error)
-        entries = self._load()
-        entry_id = f"ext-{len(entries) + 1:03d}"
+        entries = self._load(for_update=True)
+        # max + 1, not len + 1: an entry lost to a bad line must not make the
+        # next draft reuse a live id.
+        used = [int(m.group(1)) for e in entries if (m := re.match(r"^ext-(\d+)$", str(e.get("id", ""))))]
+        entry_id = f"ext-{max(used, default=0) + 1:03d}"
         entry = {
             "id": entry_id,
             "status": "DRAFTED",
@@ -253,7 +266,7 @@ class SelfExtensions:
         return entries
 
     def _set_module_hash(self, entry_id: str, sha256: str) -> None:
-        entries = self._load()
+        entries = self._load(for_update=True)
         for e in entries:
             if e.get("id") == entry_id:
                 e["module_sha256"] = sha256
@@ -269,7 +282,7 @@ class SelfExtensions:
         return found
 
     def _set_decision(self, entry_id: str, status: str, reason: str) -> dict[str, Any] | None:
-        entries = self._load()
+        entries = self._load(for_update=True)
         updated = None
         for e in entries:
             if e.get("id") == entry_id:
@@ -304,7 +317,11 @@ def _expected_module_hash(tool_name: str, store: SelfExtensions | None) -> str |
 
 
 def load_approved(
-    tool_name: str, *, expected_sha256: str | None = None, store: SelfExtensions | None = None
+    tool_name: str,
+    *,
+    expected_sha256: str | None = None,
+    store: SelfExtensions | None = None,
+    approved_dir: Path | None = None,
 ) -> types.ModuleType:
     """Dynamically imports an approved self-extension's real module file
     from the workspace (NOT the git-tracked package -- see the module
@@ -316,7 +333,7 @@ def load_approved(
     The file's sha256 must equal the one recorded when a human approved it;
     a module edited (or planted) afterwards is refused, and the bytes that
     were hashed are the bytes that are executed (S20)."""
-    path = _approved_dir() / f"{tool_name}.py"
+    path = (approved_dir if approved_dir is not None else _approved_dir()) / f"{tool_name}.py"
     if not path.is_file():
         raise FileNotFoundError(f"no approved self-extension named {tool_name!r} at {path}")
     source_bytes = path.read_bytes()
@@ -372,10 +389,18 @@ def render_module_source(entry: dict[str, Any]) -> str:
     )
 
 
-def _write_approved_module(entry: dict[str, Any]) -> tuple[Path, str]:
-    """Writes the module text from ``render_module_source``; returns its
-    path and the sha256 of the bytes written."""
-    approved_dir = _approved_dir()
+def _staging_dir(entry: dict[str, Any]) -> Path:
+    """Where a draft's module is written and tested BEFORE it is approved.
+    A sibling of the approved folder (not inside it), so list_approved_names
+    and the start-up loader never see a module that has not passed."""
+    return _approved_dir().parent / "approving" / str(entry["id"])
+
+
+def _write_approved_module(entry: dict[str, Any], directory: Path | None = None) -> tuple[Path, str]:
+    """Writes the module text from ``render_module_source`` (into the approved
+    folder, or ``directory``); returns its path and the sha256 of the bytes
+    written."""
+    approved_dir = directory if directory is not None else _approved_dir()
     approved_dir.mkdir(parents=True, exist_ok=True)
     data = render_module_source(entry).encode("utf-8")
     module_path = approved_dir / f"{entry['tool_name']}.py"
@@ -400,7 +425,7 @@ def _write_and_run_test(entry: dict[str, Any], module_sha256: str) -> tuple[bool
     test_path.write_text(entry["test_source"], encoding="utf-8")
     subprocess_env = scrubbed_subprocess_env(
         {
-            _APPROVED_DIR_OVERRIDE_ENV: str(_approved_dir()),
+            _APPROVED_DIR_OVERRIDE_ENV: str(_staging_dir(entry)),
             _EXPECTED_SHA_ENV: f"{entry['tool_name']}={module_sha256}",
         }
     )
@@ -464,6 +489,20 @@ def approve(entry_id: str, *, store: SelfExtensions | None = None, changelog_pat
     if syntax_error:
         store._set_decision(entry_id, "APPROVAL_FAILED", f"handler source: {syntax_error}")
         return {"ok": False, "error": f"handler source no longer parses: {syntax_error}"}
+    # P5-55: a second draft of a tool name that is already APPROVED (the live
+    # registry does not hold it until a restart, so validate_tool_name cannot
+    # see it) must not overwrite the reviewed module, and a failing test of
+    # the second draft must not delete the first.
+    for other in store.list("APPROVED"):
+        if other.get("tool_name") == entry["tool_name"] and other.get("id") != entry_id:
+            return {
+                "ok": False,
+                "error": (
+                    f"a tool named {entry['tool_name']!r} is already approved as {other.get('id')}; "
+                    f"approving {entry_id} would replace code a human reviewed. Reject this draft or "
+                    "draft it under a different tool name."
+                ),
+            }
     from dourmouse.general_roster import build_general_registry
 
     existing = frozenset(build_general_registry().tool_names)
@@ -471,20 +510,36 @@ def approve(entry_id: str, *, store: SelfExtensions | None = None, changelog_pat
     if name_error:
         store._set_decision(entry_id, "APPROVAL_FAILED", name_error)
         return {"ok": False, "error": name_error}
+    staging = _staging_dir(entry)
+    shutil.rmtree(staging, ignore_errors=True)
     try:
-        _, module_sha256 = _write_approved_module(entry)
+        # The module is written and tested in a staging folder; the approved
+        # folder is only touched once the draft's own test has passed.
+        _, module_sha256 = _write_approved_module(entry, staging)
         store._set_module_hash(entry_id, module_sha256)
-        load_approved(entry["tool_name"], expected_sha256=module_sha256)  # sanity import of code a human just approved
+        load_approved(  # sanity import of code a human just approved
+            entry["tool_name"], expected_sha256=module_sha256, approved_dir=staging
+        )
     except Exception as exc:  # noqa: BLE001 -- a broken draft must report honestly, never crash the approval route
+        shutil.rmtree(staging, ignore_errors=True)
         reason = f"{type(exc).__name__}: {exc}"
         store._set_decision(entry_id, "APPROVAL_FAILED", reason)
         return {"ok": False, "error": reason}
-    passed, output = _write_and_run_test(entry, module_sha256)
-    if not passed:
-        reason = f"the draft's own test failed:\n{output}"
+    try:
+        passed, output = _write_and_run_test(entry, module_sha256)
+        if not passed:
+            reason = f"the draft's own test failed:\n{output}"
+            store._set_decision(entry_id, "APPROVAL_FAILED", reason)
+            return {"ok": False, "error": reason}
+        final_dir = _approved_dir()
+        final_dir.mkdir(parents=True, exist_ok=True)
+        os.replace(staging / f"{entry['tool_name']}.py", final_dir / f"{entry['tool_name']}.py")
+    except OSError as exc:
+        reason = f"could not move the tested module into place: {exc}"
         store._set_decision(entry_id, "APPROVAL_FAILED", reason)
-        (_approved_dir() / f"{entry['tool_name']}.py").unlink(missing_ok=True)
         return {"ok": False, "error": reason}
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
     updated = store._set_decision(entry_id, "APPROVED", "test passed, module written")
     _append_changelog(updated, changelog_path)
     return {

@@ -91,12 +91,18 @@ def _rag_lines() -> list[str]:
     try:
         from dourmouse import desktop_rag  # type: ignore[attr-defined]
 
-        status = desktop_rag.desktop_rag_status()
-        state = "reachable" if status.get("ok") else f"UNAVAILABLE — {status.get('detail')}"
-        lines.append(
-            f"  desktop vault — ~1,023,765 chunks of reference text on the "
-            f"Windows desktop over SSH. Currently {state}."
-        )
+        # Only describe (and probe over SSH) a desktop vault the owner has
+        # actually configured; with no host set there is nothing to report and
+        # no reason to pay the probe on the first turn. The host comes from
+        # the config and no chunk count is claimed (none is known here).
+        cfg = desktop_rag.desktop_rag_config()
+        if cfg is not None:
+            status = desktop_rag.desktop_rag_status()
+            state = "reachable" if status.get("ok") else f"UNAVAILABLE — {status.get('detail')}"
+            lines.append(
+                f"  desktop vault — reference text on {cfg['host']} over SSH. "
+                f"Currently {state}."
+            )
     except Exception:  # noqa: BLE001 - module may not exist yet
         pass
 

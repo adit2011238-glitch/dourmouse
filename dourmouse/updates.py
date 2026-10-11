@@ -44,6 +44,9 @@ from typing import Any
 
 _CHANNELS = frozenset({"stable", "beta"})
 _SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
+#: A release version becomes part of a file name, so it is held to a plain
+#: character set (no separators, spaces or control characters).
+_VERSION_RE = re.compile(r"^[0-9A-Za-z][0-9A-Za-z._-]{0,63}$")
 #: Re-check the feed at most once per 6h per URL (never a per-request fetch).
 _FEED_TTL_SECONDS = 6 * 3600
 _DOWNLOAD_TIMEOUT = 60.0
@@ -133,9 +136,17 @@ def _validate_feed(data: Any) -> dict[str, Any]:
     channel = str(data.get("channel") or update_channel()).strip().lower()
     if channel not in _CHANNELS:
         raise ValueError(f"feed channel {channel!r} not allowed (stable|beta)")
+    if channel != update_channel():
+        # DOURMOUSE_UPDATE_CHANNEL is a filter, not just a default: a stable
+        # install must not be offered a beta build (or the reverse).
+        raise ValueError(
+            f"feed channel {channel!r} does not match this install's channel {update_channel()!r}"
+        )
     latest = (data.get("version") or "").strip()
     if not latest:
         raise ValueError("feed is missing 'version'")
+    if not _VERSION_RE.match(latest):
+        raise ValueError(f"feed 'version' {latest[:40]!r} has characters not allowed in a release version")
     url = (data.get("url") or "").strip()
     if not url.startswith("https://"):
         raise ValueError("feed 'url' must be https:// (the artifact is fetched over TLS)")
@@ -222,7 +233,7 @@ def stage_artifact(
     version = (feed.get("version") or "").strip()
     url = (feed.get("url") or "").strip()
     sha = (feed.get("sha256") or "").strip().lower()
-    if not version or not url or not _SHA256_RE.match(sha):
+    if not version or not _VERSION_RE.match(version) or not url or not _SHA256_RE.match(sha):
         raise ValueError("stage_artifact requires a validated feed payload")
     root = _updates_root()
     root.mkdir(parents=True, exist_ok=True)
@@ -237,7 +248,9 @@ def stage_artifact(
             target = prev / old.name
             target.unlink(missing_ok=True)
             old.rename(target)
-    tmp = dest.with_suffix(".part")
+    # with_suffix would replace the last dotted part of the version, so
+    # 5.20.1 and 5.20.2 would share "dourmouse-5.20.part".
+    tmp = dest.with_name(dest.name + ".part")
     digest = hashlib.sha256()
     total = 0
     try:

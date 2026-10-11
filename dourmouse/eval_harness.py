@@ -6,8 +6,11 @@ Runs each question in eval_bench.QUESTIONS through the REAL production
 dispatch loop (run_dispatch — the exact code path /api/chat uses, not a
 mock), captures the real answer and real tool trace, then grades it with a
 SEPARATE critique-model call. Same discipline JARVIS's own grader already
-established: the model that answers must never be the model that grades
-(prevents self-grading bias), 0.0-1.0 scale, 0.7+ is good, below 0.5 is a
+established: the model that answers should not be the model that grades
+(self-grading bias). Pin a separate grader with DOURMOUSE_EVAL_GRADER_MODEL;
+without it the answering model grades itself, and every result says so
+(``self_graded``, ``answerer_model``, ``grader_model``) and the summary warns.
+0.0-1.0 scale, 0.7+ is good, below 0.5 is a
 real problem, strict JSON response with a regex fallback if the grader's
 own output doesn't parse cleanly.
 
@@ -95,15 +98,41 @@ class GradedResult:
     duration_s: float = 0.0
     error: str = ""
     ts: float = 0.0
+    answerer_model: str = ""
+    grader_model: str = ""
+    #: True when the answering and grading models are known and the same: the score is self-graded and
+    #: must not be compared with independently graded runs as if it were.
+    self_graded: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
+def _answerer_model() -> str:
+    """The model the production answering path uses ("" when it cannot be resolved)."""
+    try:
+        from dourmouse.backend_fallback import load_llm_config_with_fallback
+
+        return str(getattr(load_llm_config_with_fallback(), "model", "") or "")
+    except Exception:  # noqa: BLE001 - provenance is best effort, the run itself must not depend on it
+        return ""
+
+
+def independence_note(results: list["GradedResult"]) -> str:
+    """A one-line warning when any result was graded by the model that answered it ("" otherwise)."""
+    n = sum(1 for r in results if r.self_graded)
+    if not n:
+        return ""
+    return (
+        f"WARNING: {n} of {len(results)} result(s) were self-graded (the answering model also graded). "
+        "Set DOURMOUSE_EVAL_GRADER_MODEL to a different model before comparing scores across runs."
+    )
+
+
 def _grader_client_and_model() -> tuple[Any, str]:
-    """A real client + model for the CRITIQUE call, deliberately resolved
-    separately from whatever answered the question — same
-    grader-never-equals-answerer discipline as JARVIS's AdversarialGrader.
+    """A real client + model for the CRITIQUE call. The client comes from the same backend config as the
+    answering path; the model is DOURMOUSE_EVAL_GRADER_MODEL when set, otherwise the answering model, in
+    which case run_question records ``self_graded=True`` on the result rather than hiding it.
     """
     from dourmouse.backend_fallback import load_llm_config_with_fallback
     from dourmouse.orchestrator import _build_client
@@ -224,6 +253,8 @@ def run_question(
         error = f"{type(exc).__name__}: {exc}"
     duration = time.perf_counter() - start
 
+    answerer = _answerer_model() if answer_client is None else ""
+
     if error:
         graded = {
             "score": 0.0, "failure_type": "crashed",
@@ -231,6 +262,8 @@ def run_question(
             "strengths": [], "weaknesses": [],
         }
     else:
+        if grader_client is None:
+            grader_client, grader_model = _grader_client_and_model()
         graded = grade_answer(
             item["question"], item.get("ideal_answer", ""), answer, tool_trace,
             client=grader_client, model=grader_model,
@@ -242,6 +275,8 @@ def run_question(
         failure_type=graded["failure_type"], feedback=graded["feedback"],
         strengths=graded.get("strengths", []), weaknesses=graded.get("weaknesses", []),
         duration_s=round(duration, 2), error=error, ts=time.time(),
+        answerer_model=answerer, grader_model=grader_model,
+        self_graded=bool(answerer) and answerer == grader_model,
     )
 
 
@@ -290,6 +325,9 @@ def main(argv: list[str] | None = None) -> int:
     results = run_bench(questions, on_progress=lambda s: print(s, flush=True))
 
     mean = sum(r.score for r in results) / len(results) if results else 0.0
+    note = independence_note(results)
+    if note:
+        print(f"\n{note}")
     below = [r for r in results if r.score < 0.5]
     print(f"\nmean score: {mean:.2f}  ({len(results)} run, {len(below)} below 0.5)")
     if below:

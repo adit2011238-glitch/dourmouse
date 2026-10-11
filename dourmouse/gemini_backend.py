@@ -56,8 +56,10 @@ the network (Rule 2.1 hermetic). The real transport is the only place
 
 from __future__ import annotations
 
+import http.client
 import json
 import os
+import time
 import urllib.error
 import urllib.request
 from typing import Any, Callable, Iterable, Iterator
@@ -371,9 +373,28 @@ def _urllib_transport(
         raise RuntimeError(f"network error calling Gemini: {exc.reason}") from exc
     except TimeoutError as exc:
         raise RuntimeError(f"timeout calling Gemini after {timeout}s: {exc}") from exc
-    with resp:
-        for raw in resp:
-            yield raw.decode("utf-8", errors="replace").rstrip("\r\n")
+    # urlopen's `timeout` bounds each socket read (an idle gap), not the whole generation: a server that
+    # keeps sending a byte now and then would hold this call far past it. The deadline below is the real
+    # wall-clock budget, checked on every line. Any failure while reading the body (reset, read timeout,
+    # a truncated chunked body) is wrapped, so callers that only catch RuntimeError see it.
+    deadline = time.monotonic() + timeout
+    received = 0
+    try:
+        with resp:
+            for raw in resp:
+                received += 1
+                if time.monotonic() > deadline:
+                    raise RuntimeError(
+                        f"Gemini stream exceeded its {timeout:g}s wall-clock budget after {received} lines"
+                    )
+                yield raw.decode("utf-8", errors="replace").rstrip("\r\n")
+    except RuntimeError:
+        raise
+    except (OSError, http.client.HTTPException) as exc:
+        raise RuntimeError(
+            f"Gemini stream interrupted after {received} lines: {type(exc).__name__}: {exc}. "
+            "Text already delivered through on_delta is kept by the caller."
+        ) from exc
 
 
 # --------------------------------------------------------------------------- #

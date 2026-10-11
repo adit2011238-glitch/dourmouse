@@ -119,7 +119,7 @@ class TestDraft:
         status, data = call(server, "GET", f"/api/os/agentsmith/draft?id={e['id']}")
         d = data["draft"]
         assert status == 200 and d["module_preview"] == se.render_module_source(e)
-        assert d["preview_sha256"] == sha(d["module_preview"]) and d["module_lines"] == d["module_preview"].count("\n") + 1
+        assert d["module_preview_sha256"] == sha(d["module_preview"]) and d["module_lines"] == d["module_preview"].count("\n") + 1
         assert HANDLER.strip() in d["module_preview"] and "REQUIRES_CONFIRMATION" in d["module_preview"]
         assert d["test_source"] == TEST and d["too_large_to_review"] is False
 
@@ -229,7 +229,7 @@ class TestApprove:
         monkeypatch.setattr(se, "_write_and_run_test", lambda entry, digest: (True, "1 passed"))
         status, data = call(server, "POST", "/api/os/agentsmith/approve", {"id": e["id"], "sha256": det["draft"]["preview_sha256"]})
         assert status == 200 and data["entry"]["status"] == "APPROVED"
-        assert data["entry"]["module_sha256"] == det["draft"]["preview_sha256"], "the hash approved is the hash recorded"
+        assert data["entry"]["module_sha256"] == det["draft"]["module_preview_sha256"], "the module hash approved is the hash recorded"
         _, board = call(server, "GET", "/api/os/agentsmith/board")
         assert board["drafts"][0]["live"] is False and board["restart_needed"] == 1
         _, after = call(server, "GET", f"/api/os/agentsmith/draft?id={e['id']}")

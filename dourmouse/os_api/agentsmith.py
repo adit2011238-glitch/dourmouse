@@ -9,12 +9,14 @@ only the owner approves, and this module adds no path that lets a model do it.
   different facts and the screen shows both.
 * ``GET  /api/os/agentsmith/draft?id=``: one draft with everything the owner
   must read before approving: the exact module text that would be written and
-  executed (``module_preview``), its sha256, the draft's own test, the
+  executed (``module_preview``), the draft's own test, the
   parameters schema, and for an approved draft whether the file on disk still
   matches the hash recorded at approval.
 * ``POST /api/os/agentsmith/approve {id, sha256}``: approves only if ``sha256``
-  is the hash of the module text as it stands now, so the owner approves the
-  bytes they read and a draft edited after they opened it is refused. It calls
+  is the review hash (``preview_sha256``: module text, test source and schema
+  together) as it stands now, so the owner approves the bytes they read, test
+  included, and a draft edited after they opened it is refused.
+  ``module_preview_sha256`` is the hash of the module text alone. It calls
   the same ``self_extensions.approve`` as ``/api/self_extensions/approve``.
 
 Rejecting goes through the existing ``/api/self_extensions/reject``.
@@ -23,6 +25,7 @@ Rejecting goes through the existing ``/api/self_extensions/reject``.
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from typing import Any
 
@@ -49,6 +52,20 @@ def _store():
 
 def _sha(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _review_sha(entry: dict[str, Any], preview: str) -> str:
+    """The hash the owner approves: the module text, the draft's own test and
+    the parameters schema together. The test source is executed too on
+    approval, so a change to it after the owner opened the draft must break
+    the hash exactly like a change to the module (P4-42)."""
+    schema = entry.get("parameters_schema")
+    bundle = {
+        "module": preview,
+        "test": str(entry.get("test_source") or ""),
+        "schema": schema if isinstance(schema, dict) else {},
+    }
+    return _sha(json.dumps(bundle, sort_keys=True, ensure_ascii=False, separators=(",", ":")))
 
 
 def _live_names(server: Any) -> frozenset[str] | None:
@@ -109,7 +126,8 @@ def draft(req: Request):
     out["module_chars"] = len(preview)
     out["module_lines"] = preview.count("\n") + 1 if preview else 0
     out["test_chars"] = len(test)
-    out["preview_sha256"] = _sha(preview)
+    out["preview_sha256"] = _review_sha(entry, preview)
+    out["module_preview_sha256"] = _sha(preview)
     out["module_preview"] = "" if too_large else preview
     out["test_source"] = "" if too_large else test
     recorded = entry.get("module_sha256")
@@ -146,7 +164,7 @@ def approve(req: Request):
     preview = str(entry.get("module_preview") or "")
     if len(preview) > MAX_REVIEW_CHARS or len(str(entry.get("test_source") or "")) > MAX_REVIEW_CHARS:
         raise ApiError(409, "this draft is too large to review on this screen, so it cannot be approved here")
-    if _sha(preview) != sha:
+    if _review_sha(entry, preview) != sha:
         raise ApiError(409, "the draft changed after it was opened. Nothing was approved. Open it again and read the current code.")
     result = approve_extension(did)
     if not result.get("ok"):

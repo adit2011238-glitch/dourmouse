@@ -35,6 +35,30 @@ _SKIP_DIR_NAMES = frozenset({
 #: "honest skip over silent partial work" discipline.
 _MAX_FILE_SIZE_BYTES = 5_000_000
 
+#: File names that hold secrets, never indexed even inside an allowed root (the file text is later sent to a
+#: model for summarizing). Matched on the lower-cased name, exact or by stem/extension.
+_SECRET_EXTENSIONS = frozenset({
+    ".pem", ".key", ".p12", ".pfx", ".kdbx", ".keystore", ".jks", ".ppk", ".gpg", ".pgp", ".asc", ".env",
+})
+_SECRET_EXACT_NAMES = frozenset({
+    ".netrc", ".npmrc", ".pypirc", ".pgpass", ".git-credentials", ".htpasswd", "id_rsa", "id_dsa",
+    "id_ecdsa", "id_ed25519", "credentials", "credentials.json", "secrets", "secret", "passwords",
+    "password",
+})
+_SECRET_PREFIXES = (".env", "client_secret", "service-account", "service_account", "credentials.", "secrets.",
+                    "passwords.", "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519")
+
+
+def is_secret_name(name: str) -> bool:
+    """True for a file whose NAME says it holds secrets (keys, env files, credentials). A name-only check:
+    a secret in an ordinarily named file is not caught, and the module says so rather than pretending."""
+    low = name.lower()
+    if low.endswith(".pub"):
+        return False
+    if low in _SECRET_EXACT_NAMES or low.startswith(_SECRET_PREFIXES):
+        return True
+    return Path(low).suffix in _SECRET_EXTENSIONS
+
 
 def configured_roots() -> list[Path]:
     """The real, explicit allowlist from `DOURMOUSE_WIKI_ROOTS`. A
@@ -84,7 +108,13 @@ def walk_roots(roots: list[Path], max_file_size: int = _MAX_FILE_SIZE_BYTES) -> 
             ]
             for name in filenames:
                 fpath = Path(dirpath) / name
+                if is_secret_name(name):
+                    continue
                 try:
+                    # A symlink is never indexed: stat/open would follow it to a file outside the allowlist
+                    # (a link to ~/.ssh/id_rsa) and store it under its in-root name.
+                    if fpath.is_symlink():
+                        continue
                     size = fpath.stat().st_size
                 except OSError:
                     continue

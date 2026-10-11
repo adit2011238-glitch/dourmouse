@@ -379,6 +379,15 @@ def _urllib_transport(
         return exc.code, exc.read()
 
 
+def _default_outbox_path() -> Path:
+    """The queue lives in the per-user config folder, never in the current
+    directory: a Finder or Electron launch has cwd "/" (unwritable), and two
+    launch directories would otherwise keep two different queues."""
+    from dourmouse.config import user_config_dir
+
+    return user_config_dir() / _DEFAULT_OUTBOX_NAME
+
+
 class _Offline(Exception):
     """Internal: genuinely could not reach the server. Never escapes."""
 
@@ -414,7 +423,7 @@ class SupabaseSync:
         self.access_token = access_token or ""
         self.device_id = device_id or None
         self._transport = transport or _urllib_transport
-        self.outbox = SyncOutbox(outbox_path or Path.cwd() / _DEFAULT_OUTBOX_NAME)
+        self.outbox = SyncOutbox(outbox_path or _default_outbox_path())
 
     @property
     def configured(self) -> bool:
@@ -541,8 +550,15 @@ class SupabaseSync:
         # send -- and a row it dropped as malformed, which retrying cannot
         # fix. Keeping either queued would retry forever.
         self.outbox.clear(keys)
-        for r in batch:
-            self._safe_mark_synced(r["source"], r["title"], r["updated_at"], r["body"])
+        if skipped == 0:
+            for r in batch:
+                self._safe_mark_synced(r["source"], r["title"], r["updated_at"], r["body"])
+        # When the server skipped some rows the RPC reports only counts, not
+        # which ones, so no row is recorded as "in sync with the cloud" here:
+        # a skipped row may hold a body the cloud does not have (a tie on the
+        # second-resolution timestamp). pull() records a row as synced only
+        # when the cloud body actually equals the local one, and
+        # queue_all_local() re-queues anything not recorded.
 
         return SyncOutcome(pushed=synced, skipped=skipped, queued=self._safe_depth())
 

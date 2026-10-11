@@ -45,6 +45,7 @@ import mimetypes
 import os
 import re
 import secrets
+import select
 import sys
 import threading
 import time
@@ -548,6 +549,21 @@ class WebConfirmationGate:
         decide whether a short affirm phrase is unambiguous."""
         with self._lock:
             return [(p.confirm_id, p.prompt_text) for p in self._pending.values()]
+
+
+def _decline_confirmations(gate: "WebConfirmationGate") -> Callable[[dict[str, Any]], None]:
+    """An emit function for a turn with no window attached (hands-free voice).
+
+    A gated tool would otherwise emit ``confirmation_requested`` into nothing
+    and block for ``_CONFIRM_TIMEOUT_SECONDS`` while holding the session lock,
+    freezing typed chat too. Nobody can approve it, so decline at once; the
+    model then tells the user it could not do that without approval (FW A-23)."""
+
+    def emit(event: dict[str, Any]) -> None:
+        if event.get("type") == "confirmation_requested":
+            gate.resolve(str(event.get("id") or ""), False)
+
+    return emit
 
 
 # "Just say send": a short, exact imperative affirm phrase resolves a single
@@ -1112,11 +1128,28 @@ class _SSEStream:
                 self.client_gone = True  # client went away; loop continues harmlessly,
                 # but should_stop() can now see it and end the dispatch run early
 
+    def ping(self) -> bool:
+        """Write an SSE comment so the connection is never idle. False when
+        the client is gone (the write failed), True otherwise."""
+        with self._lock:
+            try:
+                self._wfile.write(b": ping\n\n")
+                self._wfile.flush()
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                self.client_gone = True
+                return False
+        return True
+
     def should_stop(self) -> bool:
         """The real cancellation predicate threaded into
         dispatch.run_dispatch_messages — see this class's own client_gone
         comment and that function's should_stop docstring paragraph."""
         return self.client_gone
+
+
+#: How often an idle /api/events stream is pinged. Must stay well under
+#: _Handler.timeout so the socket is never idle long enough to be dropped.
+_SSE_KEEPALIVE_SECONDS = 15.0
 
 
 class _SSEBroadcast:
@@ -1849,6 +1882,25 @@ _SAFE_HOST_RE = re.compile(r"^(?:[A-Za-z0-9._-]+|\[[0-9A-Fa-f:]+\])$")
 _OAUTH_PENDING_TTL_SECONDS = 600.0
 
 
+#: FW A-20: the server-minted secret that binds a system-browser sign-in to
+#: the browser that started it.
+_CLAIM_COOKIE = "dourmouse_claim"
+
+#: Binds an in-app (non-bridge) Google sign-in to the browser that started it,
+#: so a callback finished in a different browser cannot sign it in. Lax, not
+#: Strict: Google's redirect back is a cross-site top-level navigation.
+_OAUTH_BIND_COOKIE = "dourmouse_oauth_bind"
+
+
+def _cookie_from(header: str, name: str) -> str:
+    """The value of one cookie from a Cookie header, or ''."""
+    for part in (header or "").split(";"):
+        key, _, value = part.strip().partition("=")
+        if key == name:
+            return value.strip()
+    return ""
+
+
 def _pending_created_ts(pending: dict[str, Any] | None) -> float | None:
     """Unix timestamp of an OAuth pending entry's creation, or None when
     absent/unparseable (treated as stale by the pruner)."""
@@ -1975,7 +2027,7 @@ def _login_cookie_value(token: str, now: float | None = None) -> str:
 
 def _login_cookie_ok(token: str, value: str, now: float | None = None) -> bool:
     parts = (value or "").strip().split(".")
-    if not token or len(parts) != 4 or parts[0] != "v1" or not parts[1].isascii() and parts[1].isdigit():
+    if not token or len(parts) != 4 or parts[0] != "v1" or not (parts[1].isascii() and parts[1].isdigit()):
         return False
     if int(parts[1]) < (time.time() if now is None else now):
         return False
@@ -3662,15 +3714,13 @@ class _Handler(BaseHTTPRequestHandler):
 
             self._send_json(analyze())
         elif path == "/api/security/report":
-            # MS-7 (finding #105): the latest saved report; ?fresh=1 builds one now.
+            # MS-7 (finding #105): the latest saved report. Read-only: a GET
+            # can be fired by any web page, so building (host probes) and
+            # saving (a file write) lives behind the owner-only POST
+            # /api/security/action {"action": "report"} instead (FW A-19).
             from dourmouse.security import report as _report
 
-            qs = urllib.parse.parse_qs(parsed.query)
-            if (qs.get("fresh") or [""])[0] == "1":
-                r = _report.build_report()
-                self._send_json({"report": r, "saved_to": str(_report.save_report(r))})
-            else:
-                self._send_json({"report": _report.latest_saved()})
+            self._send_json({"report": _report.latest_saved()})
         elif path == "/api/security/analyst":
             # MS-9 (finding #107): the analyst's most recent explanation.
             from dourmouse.security import analyst as _analyst
@@ -5675,24 +5725,10 @@ class _Handler(BaseHTTPRequestHandler):
         # concurrent request can never steal this gate's emit or resolver
         # mid-flight.
         session, gate, session_lock = self._session_gate_lock_for_tab(tab_id)
-        previous_gate = session.confirmation_gate
-        # force_freellmapi: swap in a real client/config built against the
-        # user's own local FreeLLMAPI instance for THIS turn only, restored
-        # in the same finally block below that already restores
-        # confirmation_gate — same temporary-swap pattern, nothing new.
-        previous_client = session.client
-        previous_config = session.config
-        if force_freellmapi:
-            from openai import OpenAI
-
-            from dourmouse.config import load_freellmapi_config
-
-            freellmapi_cfg = load_freellmapi_config()
-            session.config = freellmapi_cfg
-            session.client = OpenAI(
-                api_key=freellmapi_cfg.api_key or "no-key-configured",
-                base_url=freellmapi_cfg.base_url,
-            )
+        # force_freellmapi: the client/config swap for THIS turn happens
+        # below, inside session_lock and only on the branch that calls
+        # session.ask, restored in the same try/finally (FW A-16: it used
+        # to happen before the lock and the early returns never restored it).
         report: dict[str, Any] | None = None
         error_msg: str | None = None
         # v5.8: during THIS request the artifact store streams live
@@ -5783,6 +5819,9 @@ class _Handler(BaseHTTPRequestHandler):
             # conversational reply), so fall through to the normal turn.
 
         with session_lock:
+            previous_gate = session.confirmation_gate
+            previous_client = session.client
+            previous_config = session.config
             gate.set_emit(stream.emit)
             gate.autonomous = autonomous
             session.confirmation_gate = gate
@@ -5812,6 +5851,19 @@ class _Handler(BaseHTTPRequestHandler):
             if attention is not None and attention.is_grounded_noise_acknowledged(screen):
                 session.messages.append({"role": "system", "content": "[GROUNDED MODE EXEMPT]"})
             try:
+                if force_freellmapi:
+                    # A real client/config built against the user's own local
+                    # FreeLLMAPI instance, for this turn only.
+                    from openai import OpenAI
+
+                    from dourmouse.config import load_freellmapi_config
+
+                    freellmapi_cfg = load_freellmapi_config()
+                    session.config = freellmapi_cfg
+                    session.client = OpenAI(
+                        api_key=freellmapi_cfg.api_key or "no-key-configured",
+                        base_url=freellmapi_cfg.base_url,
+                    )
                 report = session.ask(
                     prompt,
                     # Phase 5: an autonomous-mode turn gets a real, larger
@@ -5848,9 +5900,8 @@ class _Handler(BaseHTTPRequestHandler):
                 error_msg = str(exc)
             finally:
                 session.confirmation_gate = previous_gate
-                if force_freellmapi:
-                    session.client = previous_client
-                    session.config = previous_config
+                session.client = previous_client
+                session.config = previous_config
                 # Defensive: this gate instance is shared across every
                 # caller (including hands_free's own session.ask, which
                 # never touches .autonomous at all) — never leave a stale
@@ -6134,10 +6185,13 @@ class _Handler(BaseHTTPRequestHandler):
         try:
             while True:
                 try:
-                    chunk = self.rfile.read(1024)
-                except (ConnectionResetError, OSError):
-                    break
-                if not chunk:
+                    readable, _, _ = select.select([self.connection], [], [], _SSE_KEEPALIVE_SECONDS)
+                    if readable:
+                        if not self.connection.recv(1024):
+                            break
+                    elif not stream.ping():
+                        break
+                except (ConnectionResetError, OSError, ValueError):
                     break
         finally:
             hub.unregister(stream)
@@ -6282,7 +6336,8 @@ class _Handler(BaseHTTPRequestHandler):
         entry per attempt forever). Entries without a parseable ``created``
         (legacy/planted) are treated as stale too. Also prunes the
         system-browser claim slots (v5.22.11) — same TTL, same discipline.
-        Caller holds oauth_lock (and claim_lock when pruned)."""
+        Caller holds oauth_lock; the claim slots are pruned under claim_lock
+        (lock order: oauth_lock then claim_lock, never the reverse)."""
         cutoff = datetime.now().timestamp() - _OAUTH_PENDING_TTL_SECONDS
         stale = [
             state
@@ -6293,24 +6348,30 @@ class _Handler(BaseHTTPRequestHandler):
         for state in stale:
             self.server.oauth_pending.pop(state, None)
         claims = getattr(self.server, "claim_pending", {})
-        stale_claims = [
-            code
-            for code, claim in claims.items()
-            if _pending_created_ts(claim) is None
-            or _pending_created_ts(claim) < cutoff
-        ]
-        for code in stale_claims:
-            claims.pop(code, None)
+        with getattr(self.server, "claim_lock", threading.Lock()):
+            stale_claims = [
+                code
+                for code, claim in claims.items()
+                if _pending_created_ts(claim) is None
+                or _pending_created_ts(claim) < cutoff
+            ]
+            for code in stale_claims:
+                claims.pop(code, None)
 
     def _handle_google_start(self) -> None:
-        """GET /api/auth/google/start[?claim=CODE] — 302 to Google consent (PKCE).
+        """GET /api/auth/google/start[?claim=1] — 302 to Google consent (PKCE).
 
-        v5.22.11: ``?claim=CODE`` is the system-browser bridge. Google refuses
-        sign-in inside the desktop app's embedded WebKit webview, so the
-        login page passes a single-use claim code: the consent page opens in
-        the user's REAL browser, the callback parks the completed session
-        under that code, and the webview adopts it via GET /api/auth/claim.
-        Without ``claim`` the flow is unchanged (plain in-app redirect)."""
+        v5.22.11: a ``claim`` parameter asks for the system-browser bridge.
+        Google refuses sign-in inside the desktop app's embedded WebKit
+        webview, so the consent page opens in the user's REAL browser, the
+        callback parks the completed session, and the webview adopts it via
+        GET /api/auth/claim. Without ``claim`` the flow is unchanged (plain
+        in-app redirect).
+
+        FW A-20: the claim secret is minted HERE, never taken from the
+        request (the value of ``claim`` is ignored; only its presence counts).
+        It reaches only the requesting browser, as an HttpOnly cookie scoped
+        to /api/auth, so only that browser can redeem the parked session."""
         import secrets
 
         from dourmouse import google_auth
@@ -6352,7 +6413,10 @@ class _Handler(BaseHTTPRequestHandler):
 
         parsed = urllib.parse.urlparse(self.path)
         qs = urllib.parse.parse_qs(parsed.query)
-        claim = (qs.get("claim") or [""])[0].strip() or None
+        # The caller may ask for the bridge but never picks its code (A-20).
+        claim = secrets.token_urlsafe(32) if "claim" in qs else None
+        # The in-app flow finishes in the browser that started it; bind it.
+        bind = None if claim else secrets.token_urlsafe(32)
         state = secrets.token_urlsafe(24)
         verifier, challenge = google_auth.new_pkce()
         redirect_uri = self._google_redirect_uri()
@@ -6363,6 +6427,7 @@ class _Handler(BaseHTTPRequestHandler):
                 "redirect_uri": redirect_uri,
                 "redirect_to": "/",
                 "claim": claim,
+                "bind": bind,
                 "created": datetime.now().isoformat(),
             }
         # Real friction, live-caught (2026-09-13): authorization_url's own
@@ -6383,6 +6448,18 @@ class _Handler(BaseHTTPRequestHandler):
         url = google_auth.authorization_url(redirect_uri, state, challenge, prompt=prompt)
         self.send_response(302)
         self.send_header("Location", url)
+        if claim:
+            self.send_header(
+                "Set-Cookie",
+                f"{_CLAIM_COOKIE}={claim}; Path=/api/auth; HttpOnly; SameSite=Strict; "
+                f"Max-Age={int(_OAUTH_PENDING_TTL_SECONDS)}",
+            )
+        if bind:
+            self.send_header(
+                "Set-Cookie",
+                f"{_OAUTH_BIND_COOKIE}={bind}; Path=/api/auth; HttpOnly; SameSite=Lax; "
+                f"Max-Age={int(_OAUTH_PENDING_TTL_SECONDS)}",
+            )
         self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", "0")
         self.end_headers()
@@ -6402,6 +6479,18 @@ class _Handler(BaseHTTPRequestHandler):
         if pending is None:
             self._send_json(
                 {"ok": False, "error": "OAuth state missing/expired — start the login again"},
+                status=400,
+            )
+            return
+        bind = pending.get("bind")
+        if bind and not hmac.compare_digest(
+            _cookie_from(self.headers.get("Cookie", ""), _OAUTH_BIND_COOKIE).encode("utf-8", "replace"),
+            str(bind).encode("utf-8", "replace"),
+        ):
+            # Finished in a different browser than the one that started it:
+            # someone else's sign-in link. The state is already spent.
+            self._send_json(
+                {"ok": False, "error": "this sign-in was not started in this browser - start the login again"},
                 status=400,
             )
             return
@@ -6500,46 +6589,61 @@ class _Handler(BaseHTTPRequestHandler):
         self._send_json({"me": profile})
 
     def _handle_auth_claim(self) -> None:
-        """GET /api/auth/claim?code=CODE — adopt a system-browser session
-        (v5.22.11). The consent page runs in the user's REAL browser (Google
-        blocks embedded WebKit webviews); when the callback parks the session
-        under the claim code, the app's webview polls here and lands signed
-        in. Single-use + TTL-pruned — a code can be redeemed once, ever.
-        Pre-auth (like /api/auth/status): it only reveals a session the
-        caller's own claim code unlocked."""
+        """GET /api/auth/claim — adopt a system-browser session (v5.22.11).
+
+        The consent page runs in the user's REAL browser (Google blocks
+        embedded WebKit webviews); when the callback parks the session, the
+        app's webview polls here and lands signed in. FW A-20: the secret is
+        the server-minted ``dourmouse_claim`` cookie the start route set on
+        THIS browser, never a request parameter, so a party that merely
+        knows or chose a value cannot redeem. Single use, and expires with
+        the OAuth TTL. Pre-auth (like /api/auth/status) because the caller
+        has no session yet; the cookie is the proof, plus the owner proof
+        when the owner gate is enforced."""
         from dourmouse import google_auth
 
-        parsed = urllib.parse.urlparse(self.path)
-        qs = urllib.parse.parse_qs(parsed.query)
-        code = (qs.get("code") or [""])[0].strip()
+        # The poll comes from the app window, which holds the owner secret.
+        # Without this, whoever started a flow in their own browser could get
+        # the owner to consent and redeem the owner's session with their own
+        # claim cookie.
+        if not self._is_owner():
+            self._send_json({"ok": False, "error": "owner only"}, status=403)
+            return
+        code = _cookie_from(self.headers.get("Cookie", ""), _CLAIM_COOKIE)
         if not code:
-            self._send_json({"ok": False, "error": "claim code required"}, status=400)
+            self._send_json({"ok": False, "error": "claim cookie required"}, status=400)
             return
         with self.server.oauth_lock:
             self._prune_oauth_pending()
         with self.server.claim_lock:
+            # Spent whether or not it turns out to be stale: one redemption ever.
             claim = self.server.claim_pending.pop(code, None)
+        if claim is not None:
+            ts = _pending_created_ts(claim)
+            if ts is None or ts < datetime.now().timestamp() - _OAUTH_PENDING_TTL_SECONDS:
+                claim = None
         if claim is None:
             self._send_json(
-                {"ok": False, "error": "claim code unknown/expired — start the login again"},
+                {"ok": False, "error": "claim unknown/expired - start the login again"},
                 status=404,
             )
             return
         sid = claim["sid"]
-        self.send_response(200)
         # Same cookie contract as the in-app callback: HttpOnly, SameSite,
-        # same long lifetime (google_auth.session_ttl_seconds()). The
-        # webview gets this response and is signed in.
-        self.send_header(
-            "Set-Cookie",
-            f"dourmouse_user_session={sid}; Path=/; HttpOnly; SameSite=Strict; "
-            f"Max-Age={google_auth.session_ttl_seconds()}",
+        # same long lifetime. The claim cookie is spent, so clear it.
+        self._send_json(
+            {"ok": True, "me": {
+                "email": claim["email"],
+                "name": claim.get("name", ""),
+                "picture": claim.get("picture", ""),
+            }},
+            headers={
+                "Set-Cookie": (
+                    f"dourmouse_user_session={sid}; Path=/; HttpOnly; SameSite=Strict; "
+                    f"Max-Age={google_auth.session_ttl_seconds()}"
+                ),
+            },
         )
-        self._send_json({"ok": True, "me": {
-            "email": claim["email"],
-            "name": claim.get("name", ""),
-            "picture": claim.get("picture", ""),
-        }})
 
     def _handle_auth_logout(self) -> None:
         """POST /api/auth/logout — end the user session + clear the cookie.
@@ -6845,19 +6949,31 @@ class _Handler(BaseHTTPRequestHandler):
             current, source = env_override, "env_override"
         elif persisted_is_live:
             current, source = persisted, "persisted"
-        elif os.environ.get("NVIDIA_API_KEY", "").strip():
-            # The stated default: nothing chosen yet AND an NVIDIA key is
-            # configured -> default to that backend's model.
-            current = os.environ.get("NVIDIA_MODEL", "").strip() or cfg_mod.NVIDIA_DEFAULT_MODEL
-            source = "default_nvidia"
         else:
             cfg = self.server.config
-            current = (
+            active_model = (
                 cfg.model_for_agent("orchestrator")
-                if cfg is not None and hasattr(cfg, "model_for_agent")
+                if active_backend and cfg is not None and hasattr(cfg, "model_for_agent")
                 else None
             )
-            source = "default_active_backend"
+            if active_model:
+                # The orchestrator runs on the ACTIVE backend's model; a key
+                # for another backend that is not in use does not change it
+                # (FW A-22).
+                current = active_model
+                source = "default_nvidia" if active_backend == "nvidia" else "default_active_backend"
+            elif os.environ.get("NVIDIA_API_KEY", "").strip():
+                # No backend resolved yet AND an NVIDIA key is configured ->
+                # default to that backend's model.
+                current = os.environ.get("NVIDIA_MODEL", "").strip() or cfg_mod.NVIDIA_DEFAULT_MODEL
+                source = "default_nvidia"
+            else:
+                current = (
+                    cfg.model_for_agent("orchestrator")
+                    if cfg is not None and hasattr(cfg, "model_for_agent")
+                    else None
+                )
+                source = "default_active_backend"
         self._send_json({
             "current": current,
             "source": source,
@@ -8768,16 +8884,20 @@ def run_server(
                 # split — short, no markdown structure), screen="HANDS_FREE"
                 # so a session-restore can tell this thread apart from the
                 # typed HOME conversation.
+                gate = server.gate
                 with server.session_lock:
-                    server.gate.set_emit(lambda _e: None)
-                    server.session.confirmation_gate = server.gate
-                    server.confirm_resolver = server.gate.resolve
+                    # No window shows an approval card for a spoken turn, so
+                    # anything that needs one is declined at once (A-23).
+                    gate.set_emit(_decline_confirmations(gate))
+                    server.session.confirmation_gate = gate
+                    server.confirm_resolver = gate.resolve
                     try:
                         report = server.session.ask(
                             heard_text, max_turns=8, voice=True, screen="HANDS_FREE",
                         )
                     finally:
                         server.confirm_resolver = None
+                        gate.set_emit(lambda _e: None)
                 return report.get("final_text") or "I didn't get a reply for that."
 
             server.hands_free = HandsFreeController(dispatch_fn=_hands_free_dispatch)

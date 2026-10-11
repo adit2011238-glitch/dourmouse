@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import json
+import logging
 import os
 import re
 import threading as _threading
@@ -33,7 +34,10 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from dourmouse import path_identity
 from dourmouse.memory_store import MemoryStore
+
+_log = logging.getLogger(__name__)
 
 DEFAULT_SOURCE = "repo"
 
@@ -68,6 +72,17 @@ _EXCLUDED_DIRS = frozenset(
 
 _SKIP_FILES = frozenset(
     {".env", ".env.example", "desktop-v2.db", "desktop-v2.db-shm", "desktop-v2.db-wal"}
+)
+
+# Credential and secret material: never indexed (the digests are recalled into
+# later model prompts). Directory names are skipped during the walk; file names
+# are matched case-insensitively.
+_CREDENTIAL_DIRS = frozenset({".aws", ".ssh", ".gnupg", ".kube", ".docker", ".azure", ".gcloud"})
+_CREDENTIAL_NAME_RE = re.compile(
+    r"(credential|secret|token|passw(or)?d|passwd|api[_-]?key|private[_-]?key|service[_-]?account"
+    r"|^auth\.json$|^id_(rsa|dsa|ecdsa|ed25519)|\.(pem|key|p12|pfx|keystore|jks)$"
+    r"|^\.(netrc|npmrc|pgpass|pypirc|git-credentials)$)",
+    re.IGNORECASE,
 )
 
 _MAX_MD = 2500
@@ -115,9 +130,11 @@ def _collect_files(root: Path) -> list[Path]:
     """Every ingestible file under root, honoring the exclusion set."""
     out: list[Path] = []
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = sorted(d for d in dirnames if d not in _EXCLUDED_DIRS)
+        dirnames[:] = sorted(
+            d for d in dirnames if d not in _EXCLUDED_DIRS and d.lower() not in _CREDENTIAL_DIRS
+        )
         for fn in sorted(filenames):
-            if fn in _SKIP_FILES or fn.endswith(
+            if fn in _SKIP_FILES or _CREDENTIAL_NAME_RE.search(fn) or fn.endswith(
                 (".pyc", ".zip", ".gz", ".db", ".bi5", ".repo-meta.json")
             ):
                 continue
@@ -193,6 +210,7 @@ def _section_digest(text: str) -> list[tuple[str, str, str]]:
     capped at ``_MAX_MD``. The pre-first-section intro (usually just the doc
     title) is dropped — it carries no retrievable decision."""
     out: list[tuple[str, str, str]] = []
+    seen_titles: dict[str, int] = {}
     matches = list(_SECTION_RE.finditer(text))
     for i, m in enumerate(matches):
         heading = m.group(1).strip()
@@ -202,6 +220,12 @@ def _section_digest(text: str) -> list[tuple[str, str, str]]:
         if not body:
             continue
         title = f": {heading[:120]}"
+        # Repeated headings (several "## Fixed" blocks) must not share a
+        # (source, title) key or the later ones overwrite / are skipped as
+        # unchanged; the nth repeat gets " #n".
+        seen_titles[title] = seen_titles.get(title, 0) + 1
+        if seen_titles[title] > 1:
+            title = f"{title} #{seen_titles[title]}"
         full = f"{heading}\n{body}"
         out.append((title, full[:_MAX_MD] + ("…" if len(full) > _MAX_MD else ""), "markdown"))
     return out
@@ -233,6 +257,9 @@ def scan_repo(
 
     if root is None:
         root = get_atlas_repo_path()
+    from dourmouse.governance import DlpFilter
+
+    dlp = DlpFilter()
     stats: dict[str, Any] = {"scanned": 0, "added": 0, "updated": 0, "skipped": 0, "unchanged": 0}
     walked: set[str] = set()
     produced_by_rel: dict[str, set[str]] = {}
@@ -257,6 +284,9 @@ def scan_repo(
             if existing is not None and existing["body"].startswith(meta):
                 stats["unchanged"] += 1
                 continue
+            # Digests are recalled into later prompts that go to cloud models:
+            # credential-shaped content is redacted before it is stored.
+            body, _hits = dlp.redact(body)
             new_body = f"{meta}\nKIND={kind}\nPATH={rel}\n\n{body}"
             store.remember(source, title, new_body)
             stats["updated" if existing is not None else "added"] += 1
@@ -271,7 +301,16 @@ def scan_repo(
     # a skip) keeps its existing facts — Rule 2.2: never lose knowledge to a
     # transient failure.
     removed = 0
-    for fact in store.all_facts():
+    # Pruning needs a store whose all_facts() and delete() read and write the
+    # SAME backing data as remember(). A remote-backed fallback store reads
+    # its LOCAL copy and cannot delete, so pruning it would act on the wrong
+    # facts (or raise); skip it and say so.
+    prunable = isinstance(store, MemoryStore)
+    if not prunable:
+        stats["prune_skipped"] = (
+            "this store's reads and writes go to different backends; removed files were not pruned"
+        )
+    for fact in store.all_facts() if prunable else []:
         if fact["source"] != source:
             continue  # prune only this project's scope, never another's
         rel = _fact_rel(fact["body"])
@@ -412,8 +451,40 @@ def repo_status(
 # Tool handlers (same shape as every roster tool: dict in, str out)
 # --------------------------------------------------------------------------- #
 
+def _allowed_scan_roots() -> list[Path]:
+    """Folders a model-chosen ``path`` may live in: Dourmouse's own folder,
+    the workspace, the ATLAS repo, the projects on the owner's bookshelf, and
+    any extra folders the owner lists in ``DOURMOUSE_REPO_SCAN_ROOTS``
+    (``os.pathsep``-separated)."""
+    roots: list[Path] = [Path(__file__).resolve().parent.parent]
+    try:
+        from dourmouse.config import workspace_dir
+
+        roots.append(Path(workspace_dir()))
+    except Exception as exc:  # noqa: BLE001 -- no workspace means no extra root
+        _log.debug("workspace not added to the repo scan roots: %s", exc)
+    try:
+        from dourmouse.atlas.atlas_ops import get_atlas_repo_path
+
+        roots.append(Path(get_atlas_repo_path()))
+    except Exception as exc:  # noqa: BLE001 -- ATLAS not configured: not a root
+        _log.debug("ATLAS repo not added to the repo scan roots: %s", exc)
+    try:
+        from dourmouse.project_bookkeeper import _load_store, _public_view, _store_path
+
+        for rec in _public_view(_load_store(_store_path())).get("projects") or []:
+            if rec.get("path"):
+                roots.append(Path(str(rec["path"])).expanduser())
+    except Exception as exc:  # noqa: BLE001 -- an unreadable bookshelf means no extra roots
+        _log.debug("bookshelf not read for the repo scan roots: %s", exc)
+    for extra in os.environ.get("DOURMOUSE_REPO_SCAN_ROOTS", "").split(os.pathsep):
+        if extra.strip():
+            roots.append(Path(extra.strip()).expanduser())
+    return roots
+
+
 def _resolve_scan_arg(
-    arguments: dict[str, Any]
+    arguments: dict[str, Any], *, confine: bool = False
 ) -> tuple[Path, str] | str | None:
     """Resolve a tool call's optional ``path`` to (root, derived source); an
     honest error string when it isn't a real directory; or None when no path
@@ -424,6 +495,12 @@ def _resolve_scan_arg(
     root = Path(raw).expanduser().resolve()
     if not root.is_dir():
         return f"ERROR: path {raw!r} is not a directory."
+    if confine and not any(path_identity.is_within(root, r) for r in _allowed_scan_roots()):
+        return (
+            f"ERROR: path {raw!r} is outside the folders atlas_repo_scan may index "
+            "(Dourmouse's folder, the workspace, the ATLAS repo, projects on the "
+            "bookshelf, or a folder listed in DOURMOUSE_REPO_SCAN_ROOTS). Nothing was indexed."
+        )
     return root, source_for_root(root)
 
 
@@ -432,7 +509,7 @@ def _repo_scan_tool(arguments: dict[str, Any]) -> str:
     if isinstance(store, Exception):
         return f"REPO INDEX (honest): NOT CONFIGURED — {store}"
     try:
-        target = _resolve_scan_arg(arguments)
+        target = _resolve_scan_arg(arguments, confine=True)
         if isinstance(target, str):
             return f"REPO INDEX (honest): {target}"
         if target is None:

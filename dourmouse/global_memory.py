@@ -217,6 +217,21 @@ class GlobalMemory:
         with self._lock:
             self._conn.close()
 
+    #: How many stored rows the last search() skipped as unusable (wrong dimension or not a vector).
+    last_search_skipped: int = 0
+
+    def _stored_dimension(self) -> int | None:
+        """Dimension of the vectors already in the store (None when empty or unreadable)."""
+        with self._lock:
+            row = self._conn.execute("SELECT embedding FROM memory ORDER BY ts DESC LIMIT 1").fetchone()
+        if not row:
+            return None
+        try:
+            vec = json.loads(row[0])
+        except json.JSONDecodeError:
+            return None
+        return len(vec) if isinstance(vec, list) and vec else None
+
     def add(
         self, text: str, *, screen: str = "", session_id: str = "",
         metadata: dict[str, Any] | None = None, vector: list[float] | None = None,
@@ -228,6 +243,17 @@ class GlobalMemory:
         fails — the caller decides whether that's worth surfacing."""
         vec = vector if vector is not None else embed_text(text)
         if vec is None:
+            return False
+        if (
+            not isinstance(vec, list) or not vec
+            or not all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in vec)
+        ):
+            return False
+        # Every vector in one store must share a dimension, or cosine similarity cannot be taken; a vector
+        # of another size (a different embedding model, a mis-sized hand-off) is refused here, not stored
+        # to break every later search.
+        known = self._stored_dimension()
+        if known is not None and len(vec) != known:
             return False
         item_id = item_id or f"m{time.time_ns()}"
         with self._lock:
@@ -256,16 +282,32 @@ class GlobalMemory:
         with self._lock:
             rows = self._conn.execute(sql, params).fetchall()
         scored = []
+        skipped = 0
         for rid, text, scr, sess, meta, emb_json, ts in rows:
             try:
                 vec = json.loads(emb_json)
             except json.JSONDecodeError:
+                skipped += 1
+                continue
+            # One row of another dimension (an older embedding model) must not make every query raise.
+            if not isinstance(vec, list) or len(vec) != len(qvec):
+                skipped += 1
                 continue
             score = cosine_similarity(qvec, vec)
+            try:
+                metadata = json.loads(meta) if meta else {}
+            except json.JSONDecodeError:
+                metadata = {}  # a damaged metadata cell must not make every query raise
             scored.append({
                 "id": rid, "text": text, "screen": scr, "session_id": sess,
-                "metadata": json.loads(meta) if meta else {}, "score": score, "ts": ts,
+                "metadata": metadata, "score": score, "ts": ts,
             })
+        self.last_search_skipped = skipped
+        if skipped:
+            print(
+                f"[GLOBAL_MEMORY] search skipped {skipped} stored row(s) whose vector does not match the "
+                f"query's {len(qvec)} dimensions (embedding model changed?); re-ingest them to make them searchable"
+            )
         scored.sort(key=lambda r: r["score"], reverse=True)
         return scored[:top_k]
 
@@ -325,7 +367,8 @@ def ingest_corpus_file(path: str | Path, *, memory: GlobalMemory | None = None) 
     for entry in raw:
         problem = validate_corpus_entry(entry)
         if problem:
-            rejected.append({"id": str(entry.get("id", "?")), "reason": problem})
+            eid = entry.get("id", "?") if isinstance(entry, dict) else "?"
+            rejected.append({"id": str(eid), "reason": problem})
             continue
         ok = memory.add(
             entry["text"], screen=entry.get("source", "corpus"),

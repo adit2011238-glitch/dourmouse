@@ -18,6 +18,7 @@ from __future__ import annotations
 import importlib
 import logging
 import pkgutil
+import threading
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
@@ -54,6 +55,8 @@ Handler = Callable[[Request], tuple[int, dict[str, Any]]]
 _ROUTES: dict[tuple[str, str], Handler] = {}
 _FAILED: dict[str, str] = {}
 _loaded = False
+_load_lock = threading.RLock()
+_loading = False
 
 
 def route(method: str, path: str) -> Callable[[Handler], Handler]:
@@ -68,16 +71,27 @@ def _load() -> None:
     """Import every backend module once. One module that fails to import is
     recorded and reported (``failed()``, ``GET /api/os/ping``) and skipped: it
     must not take down the other screens' routes or every request behind them."""
-    global _loaded
+    global _loaded, _loading
     if _loaded:
         return
-    _loaded = True
-    for info in sorted(pkgutil.iter_modules(__path__), key=lambda i: i.name):
+    # One thread loads while any other waits (P3-45: a request that saw
+    # ``_loaded`` set early looked the route up in a half-filled table and got
+    # a 404). The lock is reentrant and ``_loading`` stops a backend module
+    # that calls ``find`` while it is being imported from recursing.
+    with _load_lock:
+        if _loaded or _loading:
+            return
+        _loading = True
         try:
-            importlib.import_module(f"{__name__}.{info.name}")
-        except Exception as exc:  # noqa: BLE001 -- recorded and surfaced below, never hidden
-            _FAILED[info.name] = f"{type(exc).__name__}: {exc}"
-            logging.getLogger(__name__).error("os_api module %s failed to import: %s", info.name, exc)
+            for info in sorted(pkgutil.iter_modules(__path__), key=lambda i: i.name):
+                try:
+                    importlib.import_module(f"{__name__}.{info.name}")
+                except Exception as exc:  # noqa: BLE001 -- recorded and surfaced below, never hidden
+                    _FAILED[info.name] = f"{type(exc).__name__}: {exc}"
+                    logging.getLogger(__name__).error("os_api module %s failed to import: %s", info.name, exc)
+        finally:
+            _loading = False
+        _loaded = True
 
 
 def failed() -> dict[str, str]:

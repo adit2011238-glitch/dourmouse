@@ -238,6 +238,14 @@ class GoalStore:
         held = False
         with self._lock, self._connect() as connection:
             row = connection.execute("SELECT status FROM goals WHERE id=?", (goal_id,)).fetchone()
+            if row is not None and row["status"] in GOAL_TERMINAL_STATES:
+                # A writer holding a stale snapshot (the tick resolves a goal's shape from tasks read before
+                # its loop) must not resurrect a goal the owner cancelled, or overwrite a verdict. Only
+                # COMPLETED/FAILED may move, and only back to a live state: that is add_tasks reopening a
+                # goal, which is deliberate. CANCELLED and EXPIRED are final.
+                reopening = row["status"] in ("COMPLETED", "FAILED") and status not in GOAL_TERMINAL_STATES
+                if not reopening:
+                    return False
             if row is not None and row["status"] == "PAUSED" and status not in GOAL_TERMINAL_STATES and status != "PAUSED":
                 # The worker (or an approval) wrote a status while the owner has
                 # the goal paused. Keep the goal paused and remember the write,
@@ -524,8 +532,10 @@ class GoalStore:
     def goal_events(self, goal_id: str, limit: int = 200) -> list[dict[str, Any]]:
         limit = max(1, min(2000, int(limit)))
         with self._lock, self._connect() as connection:
+            # The NEWEST `limit` events, returned oldest first: ASC LIMIT kept the first N, so a long goal's
+            # snapshot and audit export never showed what it was doing now.
             rows = connection.execute(
-                "SELECT * FROM goal_events WHERE goal_id=? ORDER BY id ASC LIMIT ?",
+                "SELECT * FROM (SELECT * FROM goal_events WHERE goal_id=? ORDER BY id DESC LIMIT ?) ORDER BY id ASC",
                 (goal_id, limit),
             ).fetchall()
         return [

@@ -19,6 +19,7 @@ import re
 from pathlib import Path
 
 from .core import WikiEntry, with_failed_summary, with_summary
+from .walker import is_secret_name
 
 #: A real, named cost bound -- the same reasoning research_pipeline's own
 #: `max_sources_per_sub_question` cap uses: summarizing an unbounded file
@@ -61,13 +62,17 @@ def read_file_for_summary(path: str) -> str | None:
     attempt to summarize an unbounded file in full."""
     p = Path(path)
     try:
-        if not p.is_file():
+        # Same rule as the walker: never read a symlink or a secret-named file, even for an entry an older
+        # scan stored, because this text is posted to a model.
+        if p.is_symlink() or is_secret_name(p.name) or not p.is_file():
             return None
         with p.open("rb") as fh:
-            sniff = fh.read(_BINARY_SNIFF_BYTES)
-        if b"\x00" in sniff:
+            # One bounded read serves both the binary sniff and the content: a multi-GB log is never loaded
+            # whole just to be cut to _MAX_CONTENT_CHARS. 4 bytes per char is the UTF-8 maximum.
+            head = fh.read(max(_BINARY_SNIFF_BYTES, _MAX_CONTENT_CHARS * 4))
+        if b"\x00" in head[:_BINARY_SNIFF_BYTES]:
             return None
-        text = p.read_text(encoding="utf-8", errors="replace")
+        text = head.decode("utf-8", errors="replace")
     except OSError:
         return None
     text = text.strip()

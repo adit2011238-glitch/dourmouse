@@ -70,14 +70,25 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
+import re
 import sqlite3
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from dourmouse import project_import
 from dourmouse.history_import import _flatten_content
+from dourmouse.state_file import atomic_write_text, load_json_or_aside, set_aside
+
+_log = logging.getLogger(__name__)
+
+# One lock around every load-modify-save of the store (the HTTP server is
+# threaded and get_bookkeeper can trigger a refresh). Re-entrant because
+# get_bookkeeper calls refresh while it holds it.
+_STORE_LOCK = threading.RLock()
 
 # project_import is imported as a MODULE (not "from ... import
 # get_imported_projects, _claude_projects_root, ..." directly) so that its
@@ -133,14 +144,29 @@ def _empty_store() -> dict[str, Any]:
 
 
 def _load_store(path: Path) -> dict[str, Any]:
-    if not path.exists():
-        return _empty_store()
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return _empty_store()
-    if not isinstance(data, dict) or not isinstance(data.get("projects"), dict):
-        return _empty_store()
+    """The persisted record. A store that exists but cannot be read (or has
+    the wrong shape) is NEVER treated as empty-and-overwritable: it is kept
+    aside as ``<name>.corrupt-<time>`` (state_file.set_aside) and a fresh
+    store is returned carrying ``_load_note`` so the failure is reported.
+    If it cannot even be moved aside, the returned store is marked
+    ``_unwritable`` and _save_store refuses to write over the real file."""
+    data, note = load_json_or_aside(path, dict)
+    if data is not None and not isinstance(data.get("projects"), dict):
+        # A dict without a projects map is not a store this module wrote.
+        try:
+            aside = set_aside(path)
+            note = f"{path.name} has no projects map; it was kept as {aside.name} and not overwritten."
+        except OSError as exc:
+            note = f"{path.name} has no projects map and could not be moved aside ({exc}); left untouched."
+        data = None
+    if data is None:
+        store = _empty_store()
+        if note:
+            _log.error("project_bookkeeper: %s", note)
+            store["_load_note"] = note
+            if "left untouched" in note:
+                store["_unwritable"] = True
+        return store
     defaults = _empty_store()
     for key, value in defaults.items():
         data.setdefault(key, value)
@@ -148,8 +174,10 @@ def _load_store(path: Path) -> dict[str, Any]:
 
 
 def _save_store(data: dict[str, Any], path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    if data.get("_unwritable"):
+        raise OSError(data.get("_load_note") or f"{path.name} is unreadable; refusing to overwrite it")
+    out = {k: v for k, v in data.items() if not k.startswith("_")}
+    atomic_write_text(path, json.dumps(out, indent=2, ensure_ascii=False) + "\n")
 
 
 def _now_iso() -> str:
@@ -182,8 +210,9 @@ def _truncate(text: str, limit: int) -> str:
 
 
 def _sanitized_dirname(path: str) -> str:
-    """Claude Code's OWN directory-naming convention for a cwd (path
-    separators -> '-' — see project_import.py's module docstring). NOT
+    """Claude Code's OWN directory-naming convention for a cwd (every
+    non-alphanumeric character -> '-': a space, dot or underscore too, not
+    just path separators — see project_import.py's module docstring). NOT
     reliably invertible in general (a literal '-' in a real path is
     indistinguishable from a separator), so this is only used here as a
     fast, common-case lookup: project_import.py's own majority-vote cwd
@@ -193,7 +222,7 @@ def _sanitized_dirname(path: str) -> str:
     Claude-sourced context this pass — honest (nothing invented), not a
     crash or a guess at some other directory.
     """
-    return path.replace("/", "-").replace("\\", "-")
+    return re.sub(r"[^A-Za-z0-9]", "-", path)
 
 
 def _claude_recent_items(project_dir: Path, cap: int) -> list[dict[str, Any]]:
@@ -334,7 +363,8 @@ def refresh(
     """
     imported = project_import.get_imported_projects(claude_root=claude_root, codex_db=codex_db)
     sp = Path(store_path) if store_path is not None else _store_path()
-    store = _load_store(sp)
+    with _STORE_LOCK:
+        store = _load_store(sp)
     existing_projects: dict[str, Any] = store.get("projects", {})
 
     real_claude_root = (
@@ -395,26 +425,29 @@ def refresh(
             "_checkpoint_last_active_epoch": last_active_epoch,
         }
 
-    new_store = {
-        "version": 1,
-        "last_refreshed": _now_iso(),
-        "context_method": _CONTEXT_METHOD,
-        "claude_code": imported["claude_code"],
-        "codex_cli": imported["codex_cli"],
-        "projects": updated,
-        # Real bug caught by test_manual_project_survives_a_refresh_call /
-        # test_delete_of_an_auto_discovered_project_hides_it_...: this dict
-        # used to be built from scratch with no reference to `store` (the
-        # PRIOR persisted record, loaded above) at all, silently dropping
-        # any manually created project and un-hiding any deleted
-        # auto-discovered one on every single refresh. Both are carried
-        # forward explicitly here — refresh() only ever rebuilds "projects"
-        # (the auto-discovered set); manual_projects/hidden_paths are this
-        # module's own state, never re-derived from project_import.
-        "manual_projects": store.get("manual_projects", {}),
-        "hidden_paths": store.get("hidden_paths", []),
-    }
-    _save_store(new_store, sp)
+    # The scan above can take a while; create_project / delete_project /
+    # open_project may have changed the store meanwhile. Reload under the
+    # lock and carry THEIR state forward (manual_projects / hidden_paths
+    # are this module's own, never re-derived from project_import), so the
+    # write below cannot erase a project made or hidden during the scan.
+    with _STORE_LOCK:
+        latest = _load_store(sp)
+        new_store = {
+            "version": 1,
+            "last_refreshed": _now_iso(),
+            "context_method": _CONTEXT_METHOD,
+            "claude_code": imported["claude_code"],
+            "codex_cli": imported["codex_cli"],
+            "projects": updated,
+            "manual_projects": latest.get("manual_projects", {}),
+            "hidden_paths": latest.get("hidden_paths", []),
+        }
+        note = store.get("_load_note") or latest.get("_load_note")
+        if note:
+            new_store["_load_note"] = note
+        if store.get("_unwritable") or latest.get("_unwritable"):
+            new_store["_unwritable"] = True
+        _save_store(new_store, sp)
     return _public_view(new_store)
 
 
@@ -436,13 +469,16 @@ def _public_view(store: dict[str, Any]) -> dict[str, Any]:
             continue
         projects.append(dict(rec))
     projects.sort(key=lambda p: (p["last_active"] is None, p["last_active"] or ""), reverse=True)
-    return {
+    view = {
         "last_refreshed": store.get("last_refreshed"),
         "context_method": store.get("context_method", _CONTEXT_METHOD),
         "claude_code": store.get("claude_code", {"configured": False}),
         "codex_cli": store.get("codex_cli", {"configured": False}),
         "projects": projects,
     }
+    if store.get("_load_note"):
+        view["store_warning"] = store["_load_note"]
+    return view
 
 
 #: v13.x (backlog #10, the user's own explicit ask): "remove the
@@ -518,6 +554,11 @@ def create_project(
         path = str(default_path)
     resolved = str(Path(path).expanduser())
     sp = Path(store_path) if store_path is not None else _store_path()
+    with _STORE_LOCK:
+        return _create_project_locked(name, resolved, description, sp)
+
+
+def _create_project_locked(name: str, resolved: str, description: str, sp: Path) -> dict[str, Any]:
     store = _load_store(sp)
     if resolved in store.get("projects", {}) or resolved in store.get("manual_projects", {}):
         raise ValueError(f"a project at {resolved!r} is already on the bookshelf.")
@@ -573,7 +614,8 @@ def find_project_by_tab_id(tab_id: str, store_path: Path | str | None = None) ->
     never a crash or a guessed project.
     """
     sp = Path(store_path) if store_path is not None else _store_path()
-    store = _load_store(sp)
+    with _STORE_LOCK:
+        store = _load_store(sp)
     for path, record in {**store.get("projects", {}), **store.get("manual_projects", {})}.items():
         if project_tab_id(path) == tab_id:
             return dict(record, path=path)
@@ -598,24 +640,25 @@ def open_project(path: str, store_path: Path | str | None = None) -> dict[str, A
     """
     resolved = str(Path(path).expanduser())
     sp = Path(store_path) if store_path is not None else _store_path()
-    store = _load_store(sp)
-    projects = store.get("projects", {})
-    manual = store.get("manual_projects", {})
-    record = projects.get(resolved) or manual.get(resolved)
-    if record is None:
-        raise ValueError(f"no project tracked at {resolved!r} — create it first.")
-    exists = Path(resolved).exists()
-    record = dict(record)
-    record["exists"] = exists
-    if not exists:
-        # Honest, not silently "opened" — Rule 2.2.
-        raise ValueError(f"project directory no longer exists on disk: {resolved!r}")
-    record["last_active"] = _now_iso()
-    if resolved in projects:
-        store["projects"][resolved] = record
-    else:
-        store["manual_projects"][resolved] = record
-    _save_store(store, sp)
+    with _STORE_LOCK:
+        store = _load_store(sp)
+        projects = store.get("projects", {})
+        manual = store.get("manual_projects", {})
+        record = projects.get(resolved) or manual.get(resolved)
+        if record is None:
+            raise ValueError(f"no project tracked at {resolved!r} — create it first.")
+        exists = Path(resolved).exists()
+        record = dict(record)
+        record["exists"] = exists
+        if not exists:
+            # Honest, not silently "opened" — Rule 2.2.
+            raise ValueError(f"project directory no longer exists on disk: {resolved!r}")
+        record["last_active"] = _now_iso()
+        if resolved in projects:
+            store["projects"][resolved] = record
+        else:
+            store["manual_projects"][resolved] = record
+        _save_store(store, sp)
     record["tab_id"] = project_tab_id(resolved)
     return record
 
@@ -635,19 +678,20 @@ def delete_project(path: str, store_path: Path | str | None = None) -> bool:
     ``path`` wasn't tracked at all (nothing to do, not an error)."""
     resolved = str(Path(path).expanduser())
     sp = Path(store_path) if store_path is not None else _store_path()
-    store = _load_store(sp)
-    changed = False
-    if resolved in store.get("manual_projects", {}):
-        del store["manual_projects"][resolved]
-        changed = True
-    if resolved in store.get("projects", {}):
-        hidden = set(store.get("hidden_paths", []))
-        hidden.add(resolved)
-        store["hidden_paths"] = sorted(hidden)
-        changed = True
-    if changed:
-        _save_store(store, sp)
-    return changed
+    with _STORE_LOCK:
+        store = _load_store(sp)
+        changed = False
+        if resolved in store.get("manual_projects", {}):
+            del store["manual_projects"][resolved]
+            changed = True
+        if resolved in store.get("projects", {}):
+            hidden = set(store.get("hidden_paths", []))
+            hidden.add(resolved)
+            store["hidden_paths"] = sorted(hidden)
+            changed = True
+        if changed:
+            _save_store(store, sp)
+        return changed
 
 
 def get_bookkeeper(
@@ -663,7 +707,8 @@ def get_bookkeeper(
     come back honestly-but-uselessly empty.
     """
     sp = Path(store_path) if store_path is not None else _store_path()
-    store = _load_store(sp)
+    with _STORE_LOCK:
+        store = _load_store(sp)
     if store.get("last_refreshed") is None:
         return refresh(claude_root=claude_root, codex_db=codex_db, store_path=sp)
     return _public_view(store)

@@ -481,8 +481,8 @@ def _run_backend_slash(backend: str, text: str) -> dict[str, Any]:
         return {"ok": False, "text": f"/{backend} requires a task after the command"}
     try:
         out = _default_brain(text, force_backend=backend)
-    except RuntimeError as exc:
-        return {"ok": False, "text": str(exc)}
+    except Exception as exc:  # noqa: BLE001 - same contract as _run_brain: an honest error card, never a 500
+        return {"ok": False, "text": str(exc) or type(exc).__name__}
     return {"ok": True, "text": out}
 
 

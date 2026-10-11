@@ -287,10 +287,14 @@ def import_codex_history(
         return {"scanned": 0, "imported": 0, "skipped": 0, "db": str(path), "configured": False}
 
     try:
-        con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        # as_uri() percent-encodes the path: a bare f"file:{path}" is misread by SQLite when the path holds
+        # a "?", "#" or "%"
+        con = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)
         con.row_factory = sqlite3.Row
-    except sqlite3.OperationalError:
-        return {"scanned": 0, "imported": 0, "skipped": 0, "db": str(path), "configured": False}
+    except sqlite3.OperationalError as exc:
+        # The file exists but cannot be opened: that is a failure to report, not "Codex is not installed".
+        return {"scanned": 0, "imported": 0, "skipped": 0, "db": str(path), "configured": True,
+                "error": f"could not open the Codex state database: {exc}"}
 
     scanned = 0
     imported = 0
@@ -302,9 +306,11 @@ def import_codex_history(
             "git_branch, created_at, updated_at, archived FROM threads"
         )
         rows = cur.fetchall()
-    except sqlite3.OperationalError:
-        con.close()
-        return {"scanned": 0, "imported": 0, "skipped": 0, "db": str(path), "configured": False}
+    except sqlite3.DatabaseError as exc:
+        # "no such column" / "no such table" after Codex changes its schema (the file is version-named,
+        # state_5.sqlite): reported with the reason, so a real break is not read as a machine without Codex.
+        return {"scanned": 0, "imported": 0, "skipped": 0, "db": str(path), "configured": True,
+                "error": f"could not read Codex threads: {exc}"}
     finally:
         con.close()
 

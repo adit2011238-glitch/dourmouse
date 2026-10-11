@@ -180,19 +180,25 @@ def generate_profile(
     except Exception as exc:  # honest failure surface (Rule 2.2)
         return {"ok": False, "reason": f"llm_call_failed: {exc}"}
 
-    raw = (response.choices[0].message.content or "").strip()
-    parsed = _extract_json(raw)
-    if parsed is None or not all(k in parsed for k in _PROFILE_SCHEMA["required"]):
-        # Honest degrade: store the raw prose rather than fabricate
-        # structure that was never actually returned.
-        body = raw or "(model returned no content)"
-    else:
-        body = (
-            f"Working style: {parsed['working_style']}\n\n"
-            f"Preferences: {parsed['preferences']}\n\n"
-            f"Communication preferences: {parsed['communication_preferences']}\n\n"
-            f"General interests: {parsed['general_interests']}"
-        )
+    choice = response.choices[0]
+    raw = (choice.message.content or "").strip()
+    # A reply cut at max_tokens, a refusal, or a reasoning scratchpad must
+    # never become the once-only profile: nothing is stored, so the slot
+    # stays free for a later run, and unstructured prose (which can carry
+    # names the structured shape cannot) never reaches memory.
+    truncated = getattr(choice, "finish_reason", None) == "length"
+    parsed = None if truncated else _extract_json(raw)
+    if parsed is None or not all(
+        isinstance(parsed.get(k), str) and parsed[k].strip()
+        for k in _PROFILE_SCHEMA["required"]
+    ):
+        return {"ok": False, "reason": "unparseable_output"}
+    body = (
+        f"Working style: {parsed['working_style']}\n\n"
+        f"Preferences: {parsed['preferences']}\n\n"
+        f"Communication preferences: {parsed['communication_preferences']}\n\n"
+        f"General interests: {parsed['general_interests']}"
+    )
 
     store.remember(PROFILE_SOURCE, PROFILE_TITLE, body)
     return {"ok": True, "profile": body}

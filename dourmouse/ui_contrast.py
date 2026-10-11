@@ -57,9 +57,16 @@ def parse_color(value: str) -> tuple[float, float, float, float] | None:
     if m:
         parts = [p.strip() for p in m.group(1).replace("/", " ").split(",")]
         if len(parts) == 1:
-            parts = m.group(1).split()
+            parts = m.group(1).replace("/", " ").split()
         try:
-            nums = [float(p.rstrip("%")) for p in parts[:4]]
+            nums = []
+            for i, p in enumerate(parts[:4]):
+                num = float(p.rstrip("%"))
+                if p.endswith("%"):
+                    # A percentage is a fraction: alpha 50% is 0.5 (not 50,
+                    # which clamps to opaque) and a channel 100% is 255.
+                    num = num / 100.0 if i == 3 else num * 255.0 / 100.0
+                nums.append(num)
         except ValueError:
             return None
         if len(nums) < 3:
@@ -183,15 +190,29 @@ def audit_tokens(
     palette.
     """
     tokens = extract_tokens(source)
+    rows: list[dict[str, object]] = []
+
+    def _unparsed(name: str, threshold: float, why: str) -> dict[str, object]:
+        # A configured token that is missing or cannot be parsed is a FAILING
+        # row, never a silent skip: a CSS change that renames or restyles
+        # `--text` (hsl(), color-mix(), an unresolved var()) must break the
+        # check, not make it vacuously pass with no rows.
+        return {"token": name, "ground": "(unchecked)", "ratio": None,
+                "threshold": threshold, "passes": False, "unparsed": why}
+
     grounds: list[tuple[str, tuple[float, float, float]]] = []
     for g in (ground_tokens if ground_tokens is not None else GROUND_TOKENS):
-        parsed = parse_color(resolve_var_refs(tokens.get(g, ""), tokens))
+        raw = tokens.get(g)
+        parsed = parse_color(resolve_var_refs(raw, tokens)) if raw is not None else None
         if parsed:
             grounds.append((g, parsed[:3]))
-    rows: list[dict[str, object]] = []
+        else:
+            rows.append(_unparsed(g, AA_NORMAL, "ground token is missing" if raw is None else f"ground token {raw!r} cannot be parsed"))
     for token, threshold in (text_tokens if text_tokens is not None else TEXT_TOKENS).items():
-        fg = parse_color(resolve_var_refs(tokens.get(token, ""), tokens))
+        raw = tokens.get(token)
+        fg = parse_color(resolve_var_refs(raw, tokens)) if raw is not None else None
         if not fg:
+            rows.append(_unparsed(token, threshold, "token is missing" if raw is None else f"value {raw!r} cannot be parsed"))
             continue
         for gname, gcolor in grounds:
             ratio = contrast_ratio(fg, gcolor)

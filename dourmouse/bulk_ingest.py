@@ -42,6 +42,7 @@ discipline project_bookkeeper.py already established for this codebase.
 from __future__ import annotations
 
 import json
+import sys
 import time
 import urllib.parse
 from pathlib import Path
@@ -49,6 +50,7 @@ from typing import Any, Callable, Iterator
 
 from dourmouse.memory_store import is_duplicate_result
 from dourmouse.rag_common import content_hash
+from dourmouse.state_file import atomic_write_text, load_json_or_aside
 
 # -- what actually has extractable text ------------------------------------ #
 
@@ -82,19 +84,21 @@ def _write_status(checkpoint_path: Path, status: dict[str, Any]) -> None:
         pass  # status reporting is best-effort — never abort a real run over it
 
 
-def _load_checkpoint(checkpoint_path: Path) -> set[str]:
-    if not checkpoint_path.is_file():
-        return set()
-    try:
-        return set(json.loads(checkpoint_path.read_text(encoding="utf-8")))
-    except (OSError, ValueError):
-        return set()
+def _load_checkpoint(checkpoint_path: Path, log: Callable[[str], None] | None = None) -> set[str]:
+    """The set of already-done keys. A checkpoint that cannot be read is kept aside (never overwritten by
+    the next save) and the failure is reported through ``log``; the run then starts from nothing."""
+    value, note = load_json_or_aside(checkpoint_path, list)
+    if note:
+        if log:
+            log(f"WARNING checkpoint: {note} Starting this run without it.")
+        else:
+            print(f"dourmouse: bulk ingest checkpoint: {note}", file=sys.stderr)
+    return {str(k) for k in value} if value else set()
 
 
 def _save_checkpoint(checkpoint_path: Path, done: set[str]) -> None:
-    checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
     try:
-        checkpoint_path.write_text(json.dumps(sorted(done)), encoding="utf-8")
+        atomic_write_text(checkpoint_path, json.dumps(sorted(done)))
     except OSError:
         pass
 
@@ -105,7 +109,12 @@ def _extract_local_text(path: Path) -> str | None:
     ext = path.suffix.lower()
     if ext in _PLAIN_TEXT_EXTS or not ext:
         try:
-            return path.read_text(encoding="utf-8", errors="replace")
+            # A bounded prefix, never the whole file: an extension-less multi-GB log or binary must not be
+            # allocated just to be cut to _MAX_TEXT_CHARS afterwards. 4 bytes per char is the UTF-8 maximum,
+            # and one more char than the cap is kept so the caller can tell the file was longer.
+            with path.open("rb") as fh:
+                raw = fh.read(_MAX_TEXT_CHARS * 4 + 4)
+            return raw.decode("utf-8", errors="replace")
         except OSError:
             return None
     if ext in _PDF_EXTS:
@@ -157,11 +166,12 @@ def ingest_local_tree(
     (a JSON set of already-done absolute paths)."""
     root = Path(root).expanduser().resolve()
     checkpoint_path = Path(checkpoint_path)
-    done = _load_checkpoint(checkpoint_path)
+    done = _load_checkpoint(checkpoint_path, log)
     stats = {
         "scanned": 0, "indexed": 0, "skipped_no_text": 0, "skipped_done": 0,
         "skipped_duplicate": 0, "errors": 0,
     }
+    last_saved = 0
     # In-run content-hash dedup (rag_common.content_hash — the same
     # primitive store.remember() uses for its own persisted dedup). Two
     # different paths under this walk with byte-identical text (a copy, a
@@ -175,13 +185,21 @@ def ingest_local_tree(
             stats["skipped_done"] += 1
             continue
         stats["scanned"] += 1
+        # Save from the top of the loop so the cadence does not depend on a file reaching the bottom (the
+        # no-text, duplicate and error branches all `continue`).
+        if stats["scanned"] - last_saved >= status_every:
+            last_saved = stats["scanned"]
+            _save_checkpoint(checkpoint_path, done)
+            _write_status(checkpoint_path, {"root": str(root), "phase": "local", **stats})
+            if log:
+                log(f"local: {stats}")
         try:
             text = _extract_local_text(path)
         except Exception as exc:  # noqa: BLE001 — one bad file must never kill the run
+            # Not added to `done`: a transient failure must be retried on the next run, not dropped for good.
             stats["errors"] += 1
             if log:
                 log(f"ERROR reading {path}: {type(exc).__name__}: {exc}")
-            done.add(key)
             continue
         if text is None or not text.strip():
             stats["skipped_no_text"] += 1
@@ -189,7 +207,7 @@ def ingest_local_tree(
             continue
         body = text[:_MAX_TEXT_CHARS]
         if len(text) > _MAX_TEXT_CHARS:
-            body += f"\n\n[TRUNCATED — {len(text):,} real chars, indexed first {_MAX_TEXT_CHARS:,}]"
+            body += f"\n\n[TRUNCATED: the file is longer than the {_MAX_TEXT_CHARS:,} chars indexed here]"
         digest = content_hash(body)
         if digest in seen_hashes:
             # Same content already remembered earlier in THIS run (caught
@@ -209,15 +227,12 @@ def ingest_local_tree(
                 stats["indexed"] += 1
                 seen_hashes.add(digest)
         except Exception as exc:  # noqa: BLE001
+            # Not added to `done`: a locked database must not drop this file from the index permanently.
             stats["errors"] += 1
             if log:
                 log(f"ERROR storing {path}: {type(exc).__name__}: {exc}")
+            continue
         done.add(key)
-        if stats["scanned"] % status_every == 0:
-            _save_checkpoint(checkpoint_path, done)
-            _write_status(checkpoint_path, {"root": str(root), "phase": "local", **stats})
-            if log:
-                log(f"local: {stats}")
     _save_checkpoint(checkpoint_path, done)
     _write_status(checkpoint_path, {"root": str(root), "phase": "local", "done": True, **stats})
     return stats
@@ -276,7 +291,7 @@ def _read_drive_file_text(token: str, file_meta: dict[str, Any]) -> str | None:
             return None  # folders, forms, sites, ... — no exportable text form
         else:
             size_raw = file_meta.get("size")
-            if size_raw and int(size_raw) > _MAX_DRIVE_BYTES:
+            if size_raw and str(size_raw).isdigit() and int(size_raw) > _MAX_DRIVE_BYTES:
                 return None
             raw = _http_raw(
                 "GET", f"{_DRIVE_API}/files/{fid}?alt=media", token,
@@ -293,8 +308,13 @@ def _read_drive_file_text(token: str, file_meta: dict[str, Any]) -> str | None:
                     text = extract_pdf_text(tmp.name)
                 return None if ("no extractable text" in text or text.startswith("ERROR")) else text
             body = raw.decode("utf-8", errors="replace")
-    except Exception:  # noqa: BLE001 — one bad Drive file must never kill the run
-        return None
+    except RuntimeError as exc:
+        # _http_raw wraps every failure in RuntimeError. A file past the byte cap is a genuine "no text we
+        # can index" (a skip); anything else (401 after token expiry, 403 rate limit, 5xx, network) is a
+        # failure that must reach the caller so it is counted in `errors` and retried, not checkpointed.
+        if "exceeds the" in str(exc) and "B cap" in str(exc):
+            return None
+        raise
     return body if body.strip() else None
 
 
@@ -310,11 +330,12 @@ def ingest_drive(
     with extractable text into ``store`` under source "gdrive_file".
     Checkpointed by Drive file id (stable across runs, unlike a path)."""
     checkpoint_path = Path(checkpoint_path)
-    done = _load_checkpoint(checkpoint_path)
+    done = _load_checkpoint(checkpoint_path, log)
     stats = {
         "scanned": 0, "indexed": 0, "skipped_no_text": 0, "skipped_done": 0,
         "skipped_duplicate": 0, "errors": 0,
     }
+    last_saved = 0
     seen_hashes: set[str] = set()  # see ingest_local_tree's in-run dedup note
     for f in list_all_drive_files(token):
         fid = f.get("id")
@@ -325,13 +346,19 @@ def ingest_drive(
             continue
         stats["scanned"] += 1
         name = str(f.get("name") or fid)
+        if stats["scanned"] - last_saved >= status_every:
+            last_saved = stats["scanned"]
+            _save_checkpoint(checkpoint_path, done)
+            _write_status(checkpoint_path, {"phase": "gdrive", **stats})
+            if log:
+                log(f"gdrive: {stats}")
         try:
             text = _read_drive_file_text(token, f)
         except Exception as exc:  # noqa: BLE001
+            # Not added to `done`: an expired token, a rate limit or a 5xx is retried on the next run.
             stats["errors"] += 1
             if log:
                 log(f"ERROR reading drive file {name!r} ({fid}): {type(exc).__name__}: {exc}")
-            done.add(fid)
             continue
         if text is None or not text.strip():
             stats["skipped_no_text"] += 1
@@ -360,12 +387,8 @@ def ingest_drive(
             stats["errors"] += 1
             if log:
                 log(f"ERROR storing drive file {name!r}: {type(exc).__name__}: {exc}")
+            continue
         done.add(fid)
-        if stats["scanned"] % status_every == 0:
-            _save_checkpoint(checkpoint_path, done)
-            _write_status(checkpoint_path, {"phase": "gdrive", **stats})
-            if log:
-                log(f"gdrive: {stats}")
     _save_checkpoint(checkpoint_path, done)
     _write_status(checkpoint_path, {"phase": "gdrive", "done": True, **stats})
     return stats

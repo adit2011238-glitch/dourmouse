@@ -31,7 +31,9 @@ def test_percentile_picks_a_real_observation():
 
 def test_p95_tracks_the_tail_that_a_mean_would_hide():
     """The reason p95 is the headline and mean is not."""
-    values = [10.0] * 19 + [5000.0]
+    # two slow samples of twenty: nearest-rank p95 is rank 19, which is a slow one (one slow sample of
+    # twenty is rank 20 and is, correctly, above p95)
+    values = [10.0] * 18 + [5000.0] * 2
     assert percentile(values, 50) == 10.0
     assert percentile(values, 95) >= 5000.0
     mean = sum(values) / len(values)

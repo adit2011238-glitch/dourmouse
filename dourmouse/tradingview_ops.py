@@ -27,6 +27,7 @@ Secrets:
 
 from __future__ import annotations
 
+import hmac
 import json
 import os
 from datetime import datetime, timezone
@@ -143,7 +144,8 @@ def validate_signal(signal: dict[str, Any]) -> tuple[bool, str]:
     secret = webhook_secret()
     if secret:
         got = str(signal.get("secret") or "")
-        if got != secret:
+        # Constant-time compare (bytes, so a non-ASCII value cannot raise).
+        if not hmac.compare_digest(got.encode("utf-8"), secret.encode("utf-8")):
             return False, "secret mismatch"
     ticker = str(signal.get("ticker") or signal.get("symbol") or "").strip()
     if not ticker:

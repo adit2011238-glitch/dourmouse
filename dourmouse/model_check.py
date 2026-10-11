@@ -80,7 +80,8 @@ def _matches(wanted: str, available: list[str]) -> bool:
     if wanted in available:
         return True
     if ":" not in wanted:
-        return any(a.split(":", 1)[0] == wanted for a in available)
+        # Ollama resolves a tagless name to ":latest", so only that tag counts.
+        return f"{wanted}:latest" in available
     return False
 
 

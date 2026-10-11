@@ -80,7 +80,12 @@ def allow(req: Request) -> tuple[int, dict[str, Any]]:
         running_apps = []
         note = f"running apps could not be listed ({exc}); stored by the name given, without a bundle id"
     for running in running_apps:
-        if name.casefold() in (str(running.get("name") or "").casefold(), str(running.get("bundle_id") or "").casefold()):
+        running_name = str(running.get("name") or "").casefold()
+        running_bundle = str(running.get("bundle_id") or "").casefold()
+        # Match only on non-empty values: an empty name or an empty bundle id
+        # must never equal the empty field of an unrelated running app (P5-37).
+        wanted = {v.casefold() for v in (name, bundle_id or "") if v}
+        if wanted & {v for v in (running_name, running_bundle) if v}:
             name, bundle_id = str(running.get("name") or name), str(running.get("bundle_id") or "") or bundle_id
             break
     entry = _call(app_driver.allow, name, bundle_id, by=_actor(req))

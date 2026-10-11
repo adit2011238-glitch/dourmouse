@@ -36,6 +36,7 @@ from pathlib import Path
 from typing import Any
 
 from dourmouse.config import workspace_dir
+from dourmouse.path_identity import is_under_folded
 
 ROOTS_ENV = "DOURMOUSE_LIBRARIAN_ROOTS"
 SKIP_DIRS = frozenset({"node_modules", "__pycache__", "venv", ".venv", "dist", "build", "target", "Library",
@@ -100,6 +101,19 @@ def archive_root() -> Path:
     return Path.home() / "Documents" / "Dourmouse Archive"
 
 
+def _in_archive(path: str | Path) -> bool:
+    """True for the archive folder itself or anything inside it (the librarian's own output is not input)."""
+    return is_under_folded(path, archive_root())
+
+
+def _sha256_file(path: str | Path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
 class Librarian:
     name = "librarian"
     capabilities = frozenset({"read", "propose"})
@@ -140,9 +154,14 @@ class Librarian:
                     "> Files and Folders)" if isinstance(exc, PermissionError) else str(exc))
                 continue
             self._root_errors.pop(str(root), None)
+            if _in_archive(root):
+                continue
             for dirpath, dirnames, filenames in os.walk(root):
+                # The archive sits under ~/Documents, a default root: walking it re-indexes archived copies as
+                # duplicates of their keepers and the same proposal comes back after every apply.
                 dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS and not d.startswith(".")
-                               and not d.endswith((".app", ".photoslibrary", ".bundle"))]
+                               and not d.endswith((".app", ".photoslibrary", ".bundle"))
+                               and not _in_archive(Path(dirpath) / d)]
                 for name in filenames:
                     if not name.startswith("."):
                         yield root, Path(dirpath) / name
@@ -261,6 +280,8 @@ class Librarian:
                 "SELECT sha256, path, size, mtime FROM files WHERE missing=0 AND sha256 IN (SELECT sha256 FROM files "
                 "WHERE missing=0 AND sha256 IS NOT NULL GROUP BY sha256 HAVING COUNT(*) > 1) ORDER BY size DESC"
             ).fetchall()
+            # rows indexed before the archive was excluded must not be proposed again
+            dup_rows = [r for r in dup_rows if not _in_archive(r[1])]
             downloads = str(Path.home() / "Downloads")
             in_downloads = "missing=0 AND path LIKE ? AND instr(substr(path, ?), ?) = 0"
             where = (downloads + os.sep + "%", len(downloads) + 2, os.sep)  # top level of Downloads only
@@ -269,6 +290,8 @@ class Librarian:
                              "AND mtime < ? ORDER BY mtime", (*where, now - INSTALLER_DAYS * 86400)).fetchall()
             rest = c.execute(f"SELECT path, kind, mtime FROM files WHERE {in_downloads} AND kind!='installer' "  # noqa: S608
                              "AND mtime < ? ORDER BY mtime", (*where, now - OLD_DOWNLOAD_DAYS * 86400)).fetchall()
+            inst = [r for r in inst if not _in_archive(r[0])]
+            rest = [r for r in rest if not _in_archive(r[0])]
         groups: dict[str, list[tuple[str, int, float]]] = {}
         for sha, path, size, mtime in dup_rows:
             groups.setdefault(sha, []).append((path, size, mtime))
@@ -279,7 +302,8 @@ class Librarian:
             size = members[0][1]
             for extra in ps[1:]:
                 dup_moves.append({"src": extra, "dst": str(archive_root() / "Duplicates" / sha[:12] / Path(extra).name),
-                                  "why": f"same content as {ps[0]}", "bytes": size})
+                                  "why": f"same content as {ps[0]}", "bytes": size,
+                                  "keeper": ps[0], "sha256": sha})
         if dup_moves:
             out.append({"id": "duplicates", "title": f"Move {len(dup_moves)} duplicate file(s) to the archive",
                         "detail": "Each is byte-for-byte identical to a file that stays where it is.",
@@ -310,8 +334,30 @@ class Librarian:
                 if not src.exists():
                     skipped.append(f"{src}: gone")
                     continue
+                if m.get("keeper"):
+                    # The index can be a full pass old: confirm the file that "stays where it is" still exists
+                    # and that both files still hold the content the proposal was built on.
+                    keeper = Path(m["keeper"])
+                    if not keeper.is_file():
+                        skipped.append(f"{src}: its keeper {keeper} is gone, so this is no longer a duplicate")
+                        continue
+                    try:
+                        if _sha256_file(src) != m["sha256"] or _sha256_file(keeper) != m["sha256"]:
+                            skipped.append(f"{src}: changed since the last scan, left in place")
+                            continue
+                    except OSError as exc:
+                        skipped.append(f"{src}: could not be re-checked ({exc})")
+                        continue
                 if dst.exists():
-                    dst = dst.with_name(f"{dst.stem} ({int(time.time())}){dst.suffix}")
+                    # never overwrite: find a free name, not just one timestamped candidate
+                    stamp, n = int(time.time()), 0
+                    while True:
+                        tag = f"({stamp})" if n == 0 else f"({stamp}-{n})"
+                        candidate = dst.with_name(f"{dst.stem} {tag}{dst.suffix}")
+                        if not candidate.exists():
+                            dst = candidate
+                            break
+                        n += 1
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 c.execute("INSERT INTO moves(proposal, src, dst, at) VALUES(?,?,?,?)", (proposal_id, str(src), str(dst), time.time()))
                 c.commit()
@@ -337,10 +383,15 @@ class Librarian:
                 if not Path(dst).exists():
                     skipped.append(f"{dst}: no longer in the archive")
                     continue
-                Path(src).parent.mkdir(parents=True, exist_ok=True)
-                shutil.move(dst, src)
+                try:
+                    Path(src).parent.mkdir(parents=True, exist_ok=True)
+                    shutil.move(dst, src)
+                except OSError as exc:
+                    skipped.append(f"{src}: could not be put back ({exc})")
+                    continue
                 c.execute("UPDATE moves SET undone=1 WHERE id=?", (mid,))
                 c.execute("UPDATE files SET missing=0 WHERE path=?", (src,))
+                c.commit()  # the file is back on disk, so its record is saved now, not at the end of the loop
                 restored += 1
         return {"ok": True, "restored": restored, "skipped": skipped}
 

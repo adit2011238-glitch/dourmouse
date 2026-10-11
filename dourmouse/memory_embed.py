@@ -25,7 +25,7 @@ import urllib.request
 from typing import Any
 
 from dourmouse.learn import distill_query
-from dourmouse.memory_store import MemoryStore
+from dourmouse.memory_store import MemoryStore, RemoteMemoryStoreUnavailable
 
 _EMBED_ENV = "DOURMOUSE_EMBED"
 _EMBED_MODEL_ENV = "DOURMOUSE_EMBED_MODEL"
@@ -78,12 +78,13 @@ def embed_texts(texts: list[str], timeout: float = 10.0) -> list[list[float]] | 
             )
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 data = json.loads(resp.read().decode())
-        except (urllib.error.URLError, OSError, TimeoutError, ValueError, json.JSONDecodeError):
+            vec = data.get("embedding") if isinstance(data, dict) else None
+            if not isinstance(vec, list) or not vec:
+                return None
+            # inside the try: a non-numeric element raises TypeError/ValueError, and this function never raises
+            out.append([float(x) for x in vec])
+        except (urllib.error.URLError, OSError, TimeoutError, ValueError, TypeError, json.JSONDecodeError):
             return None
-        vec = data.get("embedding") if isinstance(data, dict) else None
-        if not isinstance(vec, list) or not vec:
-            return None
-        out.append([float(x) for x in vec])
     return out
 
 
@@ -129,17 +130,20 @@ def ensure_embeddings(
     fabricated result — if the embed endpoint fails for any batch of
     missing facts.
     """
-    vectors = store.get_embeddings()
+    model = embed_model()
+    # only vectors made by the ACTIVE model: after DOURMOUSE_EMBED_MODEL changes, old vectors are in another
+    # space (a different length scores 0.0, the same length gives meaningless scores) and are re-embedded
+    vectors = store.get_embeddings(model)
     missing = [f for f in facts if f["id"] not in vectors]
-    if missing:
-        batch = embed_texts([f["body"] for f in missing])
-        if batch is None or len(batch) != len(missing):
+    for fact in missing:
+        # One request at a time and saved as soon as it is produced: if a later one fails, the earlier
+        # vectors are already cached, so repeated searches make progress instead of redoing the whole
+        # sequential pass (and caching nothing) every time.
+        batch = embed_texts([fact["body"]])
+        if batch is None or len(batch) != 1:
             return None
-        # strict=True: the guard above already returned on a length mismatch, so a
-        # failure here would mean embeddings silently paired to the wrong facts.
-        for fact, vec in zip(missing, batch, strict=True):
-            store.save_embedding(fact["id"], embed_model(), vec)
-            vectors[fact["id"]] = vec
+        store.save_embedding(fact["id"], model, batch[0])
+        vectors[fact["id"]] = batch[0]
     return vectors
 
 
@@ -165,11 +169,14 @@ def semantic_search(
     if not embed_enabled():
         return {"method": "fts5", "hits": _fts_hits(store, query, limit)}
 
-    facts = store.all_facts()
-    if not facts:
-        return {"method": "fts5", "hits": []}
-
-    vectors = ensure_embeddings(store, facts)
+    try:
+        facts = store.all_facts()
+        if not facts:
+            return {"method": "fts5", "hits": []}
+        vectors = ensure_embeddings(store, facts)
+    except RemoteMemoryStoreUnavailable:
+        # A remote store cannot dump its facts or cache vectors: the documented behaviour is the FTS5 path.
+        return {"method": "fts5", "hits": _fts_hits(store, query, limit)}
     if vectors is None:
         return {"method": "fts5", "hits": _fts_hits(store, query, limit)}
 

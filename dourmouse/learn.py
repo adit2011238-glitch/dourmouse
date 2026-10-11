@@ -222,14 +222,18 @@ def _last_session_record(session_file: Path | str) -> dict[str, Any] | None:
         return None
     last: dict[str, Any] | None = None
     try:
-        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
-            if not line.strip():
-                continue
-            rec = json.loads(line)
-            if rec.get("user") is not None:
-                last = rec
-    except (json.JSONDecodeError, OSError):
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
         return None
+    for line in lines:
+        if not line.strip():
+            continue
+        try:
+            rec = json.loads(line)
+        except json.JSONDecodeError:
+            continue  # a truncated line (a crash mid-append) must not hide the intact turns around it
+        if isinstance(rec, dict) and rec.get("user") is not None:
+            last = rec
     return last
 
 

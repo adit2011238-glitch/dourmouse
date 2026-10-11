@@ -97,11 +97,15 @@ def test_no_missing_when_everything_is_present(backend):
     assert "all configured models present" in result["detail"]
 
 
-def test_untagged_name_matches_a_tagged_install(backend):
-    """'qwen3' should match an installed 'qwen3:8b' rather than false-alarm."""
-    backend(_tags("qwen3:8b"))
+def test_untagged_name_matches_only_the_latest_tag(backend):
+    """'qwen3' resolves to 'qwen3:latest' in Ollama, so a lone 'qwen3:8b' is
+    NOT a match (the old assertion pinned the false-present bug, P3-38)."""
+    backend(_tags("qwen3:latest"))
     result = model_check.check_configured_models({"primary": "qwen3"})
     assert result["missing"] == {}
+    backend(_tags("qwen3:8b"))
+    result = model_check.check_configured_models({"primary": "qwen3"})
+    assert result["missing"] == {"primary": "qwen3"}
 
 
 def test_unreachable_backend_reports_unverified_not_missing(backend):

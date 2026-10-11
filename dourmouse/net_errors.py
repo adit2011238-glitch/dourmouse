@@ -61,6 +61,8 @@ def _kind_for_status(status: int) -> ErrorKind:
         return ErrorKind.AUTH
     if status in (404, 410):
         return ErrorKind.NOT_FOUND
+    if status == 408:
+        return ErrorKind.TIMEOUT
     if status == 429:
         return ErrorKind.RATE_LIMITED
     if 500 <= status <= 599:
@@ -89,6 +91,11 @@ def classify(exc: BaseException | str) -> ErrorKind:
             return ErrorKind.TLS
         if isinstance(exc, (json.JSONDecodeError, ValueError)):
             return ErrorKind.PARSE
+        if isinstance(exc, urllib.error.HTTPError):
+            # An HTTP status was received, so the network is up. HTTPError is
+            # a URLError subclass; handle it first so an unlisted status
+            # (400, 405, 409 ...) is not reported as offline.
+            return ErrorKind.UNKNOWN
         if isinstance(exc, urllib.error.URLError):
             reason = getattr(exc, "reason", None)
             if isinstance(reason, ssl.SSLError):
@@ -97,9 +104,9 @@ def classify(exc: BaseException | str) -> ErrorKind:
                 return ErrorKind.TIMEOUT
             if isinstance(reason, socket.gaierror):
                 return ErrorKind.OFFLINE
-            if isinstance(reason, ConnectionError):
+            if isinstance(reason, (ConnectionError, OSError, str)):
                 return ErrorKind.OFFLINE
-            return ErrorKind.OFFLINE
+            return ErrorKind.UNKNOWN
         if isinstance(exc, ConnectionError):
             return ErrorKind.OFFLINE
         if isinstance(exc, socket.gaierror):

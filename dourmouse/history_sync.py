@@ -81,6 +81,7 @@ from typing import Any, Callable
 
 from dourmouse.history_import import import_all_history
 from dourmouse.memory_store import MemoryStore
+from dourmouse.state_file import atomic_write_text
 
 _SSH_TIMEOUT = 30  # seconds per remote command; a hung network call must
 # never wedge a scheduled sync forever.
@@ -177,7 +178,7 @@ def _read_marker(mirror_root: Path) -> int:
 
 
 def _write_marker(mirror_root: Path, epoch: int) -> None:
-    _marker_path(mirror_root).write_text(str(epoch))
+    atomic_write_text(_marker_path(mirror_root), str(epoch))
 
 
 def _ssh_base(key: str, user: str, host: str) -> list[str]:
@@ -240,7 +241,9 @@ def list_remote_changed_files(
     touch_ts = dt.strftime("%Y%m%d%H%M.%S")  # BSD touch -t: CCYYMMDDhhmm.SS
     remote_cmd = (
         f'cd "{remote_dir}" 2>/dev/null && '
-        f"touch -t {touch_ts} /tmp/dourmouse_sync_marker && "
+        # touch -t reads the stamp in the REMOTE's local zone; the stamp is built from a UTC datetime, so the
+        # zone is pinned or the reference file lands N hours off and `find -newer` skips (or re-lists) sessions.
+        f"TZ=UTC touch -t {touch_ts} /tmp/dourmouse_sync_marker && "
         f"find . -name '*.jsonl' -newer /tmp/dourmouse_sync_marker 2>/dev/null"
     )
     try:
@@ -253,7 +256,9 @@ def list_remote_changed_files(
         return None
     if result is None or result.returncode != 0:
         return None
-    return [line.strip().lstrip("./") for line in result.stdout.splitlines() if line.strip()]
+    # removeprefix, not lstrip("./"): lstrip drops any run of dots and slashes and turned
+    # "./.archive/s.jsonl" into "archive/s.jsonl", which then failed to scp.
+    return [line.strip().removeprefix("./") for line in result.stdout.splitlines() if line.strip()]
 
 
 def pull_files(
@@ -325,7 +330,16 @@ def sync_and_import(
         cfg["key"], cfg["user"], cfg["host"], cfg["remote_root"], changed, mirror_root
     )
     import_result = import_all_history(store, claude_root=mirror_root, codex_db=None)
-    _write_marker(mirror_root, now)  # reached the remote cleanly this round
+    if pulled < len(changed):
+        # Some scp pulls failed (a sleeping laptop, a Wi-Fi blip, a locked file). Moving the marker past
+        # them would drop those sessions for good, because `find -newer` never lists them again. Keep it
+        # where it is; the next run re-lists the same window (already-pulled files are just re-copied).
+        return {
+            "ok": False, "reason": "partial_pull", "since": since,
+            "changed_remote_files": len(changed), "pulled": pulled,
+            "claude": import_result["claude"], "codex": import_result["codex"],
+        }
+    _write_marker(mirror_root, now)  # reached the remote cleanly and pulled everything this round
 
     return {
         "ok": True,

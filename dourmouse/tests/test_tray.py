@@ -67,19 +67,21 @@ class TestLoadSaveState:
         loaded = tray.load_state(path)
         assert loaded == original
 
-    def test_corrupt_json_falls_back_to_defaults(self, tmp_path):
+    # P3-68: these two used to assert that a corrupt or non-dict state file
+    # re-arms the mic and camera (fail open); they now pin the fail-closed rule.
+    def test_corrupt_json_fails_closed(self, tmp_path):
         path = tmp_path / "state.json"
         path.write_text("{not valid json", encoding="utf-8")
         state = tray.load_state(path)
-        assert state.mic_enabled is True
-        assert state.camera_enabled is True
+        assert state.mic_enabled is False
+        assert state.camera_enabled is False
 
-    def test_non_dict_json_falls_back_to_defaults(self, tmp_path):
+    def test_non_dict_json_fails_closed(self, tmp_path):
         path = tmp_path / "state.json"
         path.write_text("[1, 2, 3]", encoding="utf-8")
         state = tray.load_state(path)
-        assert state.mic_enabled is True
-        assert state.camera_enabled is True
+        assert state.mic_enabled is False
+        assert state.camera_enabled is False
 
     def test_save_creates_parent_dirs(self, tmp_path):
         path = tmp_path / "nested" / "dir" / "state.json"

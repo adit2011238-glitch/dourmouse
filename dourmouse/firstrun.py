@@ -31,11 +31,13 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import urllib.error
 import urllib.request
 from typing import Any
 
 from dourmouse.config import env_lines, user_config_dir, user_env_path
+from dourmouse.state_file import atomic_write_text
 
 _OLLAMA_URL = "http://127.0.0.1:11434/api/tags"
 # Validation MUST hit an endpoint that actually checks the key. Measured:
@@ -183,6 +185,41 @@ _ALLOWED = {
 }
 
 
+_ENV_LINE_KEY = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=")
+
+_ENV_HEADER = [
+    "# Dourmouse configuration, written by first-run setup.",
+    "# This file holds credentials. Keep it to yourself; it is never",
+    "# bundled into a build or uploaded anywhere.",
+    "",
+]
+
+
+def _merge_env_text(old_text: str | None, updates: dict[str, str]) -> str:
+    """The .env text with ``updates`` applied line by line. A line that sets one of the keys (also the
+    ``export NAME=value`` form python-dotenv accepts) is replaced by one properly quoted line; every other
+    line, comments and blank lines included, is kept as the user wrote it; keys not present are appended.
+    A value spanning several lines (a quoted multi-line value) is not recognised as one unit."""
+    new_lines = {k: env_lines({k: v})[0] for k, v in updates.items()}  # validates keys and values
+    out: list[str] = []
+    written: set[str] = set()
+    for line in (old_text or "").splitlines():
+        m = _ENV_LINE_KEY.match(line)
+        if m and m.group(1) in new_lines:
+            key = m.group(1)
+            if key not in written:  # a duplicate of the same key is dropped: dotenv would take the last one
+                out.append(new_lines[key])
+                written.add(key)
+            continue
+        out.append(line)
+    if old_text is None or not old_text.strip():
+        out = list(_ENV_HEADER) + out
+    for key in sorted(new_lines):
+        if key not in written:
+            out.append(new_lines[key])
+    return "\n".join(out) + "\n"
+
+
 def save_config(values: dict[str, str]) -> dict[str, Any]:
     """Write the chosen configuration to the user's config file.
 
@@ -199,31 +236,14 @@ def save_config(values: dict[str, str]) -> dict[str, Any]:
 
     path = user_env_path()
     try:
-        user_config_dir().mkdir(parents=True, exist_ok=True)
-        existing: dict[str, str] = {}
-        if path.exists():
-            for line in path.read_text(encoding="utf-8").splitlines():
-                line = line.strip()
-                if not line or line.startswith("#") or "=" not in line:
-                    continue
-                k, _, v = line.partition("=")
-                existing[k.strip()] = v.strip()
-        existing.update(clean)
-        existing["DOURMOUSE_SETUP_DONE"] = "1"
-
-        body = [
-            "# Dourmouse configuration — written by first-run setup.",
-            "# This file holds credentials. Keep it to yourself; it is never",
-            "# bundled into a build or uploaded anywhere.",
-            "",
-        ]
-        body += env_lines(existing)
-        path.write_text("\n".join(body) + "\n", encoding="utf-8")
-        # Best-effort: make it user-only. Windows inherits profile ACLs.
-        try:
-            os.chmod(path, 0o600)
-        except OSError:
-            pass
+        user_config_dir().mkdir(parents=True, exist_ok=True, mode=0o700)
+        old_text = path.read_text(encoding="utf-8") if path.exists() else None
+        updates = dict(clean)
+        updates["DOURMOUSE_SETUP_DONE"] = "1"
+        text = _merge_env_text(old_text, updates)
+        # Atomic and 0600 from the first byte: a crash mid-write used to truncate a file that holds every
+        # API key, and the default umask made a new file world-readable until the chmod after it.
+        atomic_write_text(path, text, mode=0o600)
     except (OSError, ValueError) as exc:
         return {"ok": False, "detail": f"could not write config: {exc}"}
 

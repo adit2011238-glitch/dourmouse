@@ -198,6 +198,16 @@ class MemoryStore:
         content_hash = _content_hash(body)
         with self._lock:
             cur = self._conn.cursor()
+            # Unchanged: the same (source, title) already holds this exact content. Nothing to write, and
+            # above all the cached embedding must survive: ChatSession re-ingests the whole session ledger
+            # after every turn, which used to rewrite every old fact, rerun the FTS triggers and wipe every
+            # session vector each time.
+            same = cur.execute(
+                "SELECT 1 FROM facts WHERE source = ? AND title = ? AND content_hash = ?",
+                (source, title, content_hash),
+            ).fetchone()
+            if same is not None:
+                return f"MEMORY STORED: [{source}] {title}"
             # Content-hash dedup (Cycle 1 RAG audit fix): the (source, title)
             # UNIQUE constraint below only catches a literal re-remember of
             # the SAME key (an upsert, handled by ON CONFLICT). It never
@@ -366,12 +376,18 @@ class MemoryStore:
             )
             self._conn.commit()
 
-    def get_embeddings(self) -> dict[int, list[float]]:
-        """fact_id -> vector for every cached embedding."""
+    def get_embeddings(self, model: str | None = None) -> dict[int, list[float]]:
+        """fact_id -> vector for every cached embedding, or only those made by ``model`` when given
+        (vectors from another embedding model are in a different space and must not be mixed in)."""
         with self._lock:
-            rows = self._conn.execute(
-                "SELECT fact_id, vector FROM fact_embeddings"
-            ).fetchall()
+            if model is None:
+                rows = self._conn.execute(
+                    "SELECT fact_id, vector FROM fact_embeddings"
+                ).fetchall()
+            else:
+                rows = self._conn.execute(
+                    "SELECT fact_id, vector FROM fact_embeddings WHERE model = ?", (model,)
+                ).fetchall()
         out: dict[int, list[float]] = {}
         for r in rows:
             try:
@@ -392,6 +408,15 @@ class MemoryStore:
             lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
         except OSError:
             return 0
+        source = f"session:{path.stem}"
+        # What is already stored for this session, by title and content hash: a turn whose stored hash
+        # matches is skipped without touching the database, so a long conversation costs one SELECT per
+        # call instead of a write per old turn.
+        with self._lock:
+            stored = {
+                r["title"]: r["content_hash"]
+                for r in self._conn.execute("SELECT title, content_hash FROM facts WHERE source = ?", (source,))
+            }
         for line in lines:
             if not line.strip():
                 continue
@@ -405,8 +430,10 @@ class MemoryStore:
                 continue
             body = f"USER: {user}\nANSWER: {answer}"
             title = f"turn {rec.get('turn', '?')}"
+            if stored.get(title) == _content_hash(body.strip()):
+                continue
             try:
-                self.remember(f"session:{path.stem}", title, body)
+                self.remember(source, title, body)
                 added += 1
             except ValueError:
                 continue
@@ -451,7 +478,9 @@ def _fts_query(query: str) -> str:
     to co-occur in ONE fact, so most natural-language recall queries
     ("what do you remember about X") returned zero hits.
     """
-    terms = [t for t in re.split(r"[^A-Za-z0-9_]+", query) if t]
+    # \w+ is the unicode word class, close to what the unicode61 tokenizer indexes: the old ASCII-only split
+    # turned "café" into "caf" and a Japanese query into nothing.
+    terms = re.findall(r"\w+", query, re.UNICODE)
     if not terms:
         return ""
     quoted = ["\"" + t.replace('"', '""') + "\"" for t in terms]
@@ -514,7 +543,10 @@ class RemoteMemoryStore:
             req.add_header("Authorization", f"Bearer {self.token}")
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-                return json.loads(resp.read().decode())
+                data = json.loads(resp.read().decode())
+            if not isinstance(data, dict):
+                raise ValueError(f"expected a JSON object, got {type(data).__name__}")
+            return data
         except urllib.error.HTTPError as exc:
             # The remote server DID respond -- a real 400/409/500 with its
             # own honest {"ok": false, "error": "..."} JSON body (see
@@ -524,17 +556,31 @@ class RemoteMemoryStore:
             # not the same thing as the remote being unreachable, and
             # must not be reported as one.
             try:
-                return json.loads(exc.read().decode())
+                body = json.loads(exc.read().decode())
             except (ValueError, OSError):
                 raise RemoteMemoryStoreUnavailable(
                     f"remote memory store at {self.base_url} returned "
                     f"HTTP {exc.code} with no parseable body"
                 ) from exc
+            if not (isinstance(body, dict) and "ok" in body):
+                # An error status whose body is not the store's own {"ok": ...} answer (a 401 from a wrong
+                # token, a proxy's 500 page): not a result. count() used to turn it into 0.
+                raise RemoteMemoryStoreUnavailable(
+                    f"remote memory store at {self.base_url} returned HTTP {exc.code}: {str(body)[:200]}"
+                ) from exc
+            return body
         except urllib.error.URLError as exc:
             # No response at all — genuinely unreachable (network down,
             # wrong host/port, remote process not running).
             raise RemoteMemoryStoreUnavailable(
                 f"remote memory store unreachable at {self.base_url}: {exc}"
+            ) from exc
+        except (OSError, ValueError) as exc:
+            # A read timeout or reset after the connection was made (TimeoutError, ConnectionResetError are
+            # OSError, not URLError), or a 200 whose body is not JSON: the remote did not give a usable
+            # answer, so LocalFallbackMemoryStore must be able to fall back.
+            raise RemoteMemoryStoreUnavailable(
+                f"remote memory store at {self.base_url} gave no usable answer: {type(exc).__name__}: {exc}"
             ) from exc
 
     def _get(self, path: str) -> dict[str, Any]:
@@ -647,7 +693,7 @@ class RemoteMemoryStore:
     def delete(self, source: str, title: str) -> bool:
         raise self._unsupported("delete", "a remote delete endpoint")
 
-    def get_embeddings(self) -> list[dict[str, Any]]:
+    def get_embeddings(self, model: str | None = None) -> dict[int, list[float]]:
         raise self._unsupported("get_embeddings", "direct SQLite access")
 
     def save_embedding(self, fact_id: int, model: str, vector: Any) -> None:
@@ -771,6 +817,26 @@ class LocalFallbackMemoryStore:
         except RemoteMemoryStoreUnavailable as exc:
             self._note_fallback(exc)
             return self._local_store().all_facts()
+
+    # The operations the remote API does not expose (RemoteMemoryStore raises its typed "unsupported" error
+    # for each). They are served by the local store, the same way all_facts() is, so the post-turn session
+    # ingest, vault ingest, deletes and the embedding cache work on a machine with a remote URL configured
+    # instead of raising AttributeError. What they write lives only on this machine.
+
+    def ingest_session_file(self, path: Any) -> int:
+        return self._local_store().ingest_session_file(path)
+
+    def ingest_vault(self, root: Any) -> int:
+        return self._local_store().ingest_vault(root)
+
+    def delete(self, source: str, title: str) -> bool:
+        return self._local_store().delete(source, title)
+
+    def save_embedding(self, fact_id: int, model: str, vector: list[float]) -> None:
+        self._local_store().save_embedding(fact_id, model, vector)
+
+    def get_embeddings(self, model: str | None = None) -> dict[int, list[float]]:
+        return self._local_store().get_embeddings(model)
 
     def close(self) -> None:
         self._remote.close()

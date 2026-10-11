@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from dourmouse.agent_prompts import AGENT_SYSTEM_PROMPTS
-from dourmouse.general_roster import build_general_registry
 from dourmouse.dispatch import Permission
+from dourmouse.general_roster import build_general_registry
 
 
 def _admin() -> str:

@@ -319,6 +319,10 @@ class TestToolsMultiProject:
     def tool_store(self, tmp_path, monkeypatch):
         monkeypatch.setenv("DOURMOUSE_MEMORY_DB", str(tmp_path / "mem.db"))
         monkeypatch.setenv("DOURMOUSE_LEARN", "1")
+        # P4-48: atlas_repo_scan is confined to configured roots; these tests
+        # scan folders under tmp_path, so register it (the old fixture pinned
+        # the unconfined behaviour).
+        monkeypatch.setenv("DOURMOUSE_REPO_SCAN_ROOTS", str(tmp_path))
         yield
 
     def test_scan_tool_path_derives_source(self, tool_store, tmp_path):

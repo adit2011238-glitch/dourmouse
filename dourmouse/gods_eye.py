@@ -78,6 +78,23 @@ def run_globe_action(name: str, args: dict[str, Any] | None = None) -> dict[str,
     try:
         with urllib.request.urlopen(req, timeout=_HTTP_TIMEOUT) as resp:  # noqa: S310 - localhost dev server
             raw = resp.read()
+    except urllib.error.HTTPError as exc:
+        # HTTPError is a URLError: caught first, because the bridge DID answer. Its own message (a 503
+        # "action queue full", a 400 naming the missing field) is the useful part, so it is relayed rather
+        # than reported as "dev server not reachable".
+        try:
+            detail = (exc.read() or b"").decode("utf-8", errors="replace").strip()
+        except Exception:  # noqa: BLE001 - the status code is still real news
+            detail = ""
+        try:
+            parsed = json.loads(detail)
+            if isinstance(parsed, dict) and parsed.get("error"):
+                detail = str(parsed["error"])
+        except ValueError:
+            pass
+        raise RuntimeError(
+            f"God's Eye View's bridge answered HTTP {exc.code}: {detail[:300] or exc.reason}"
+        ) from exc
     except urllib.error.URLError as exc:
         raise RuntimeError(
             "NOT CONFIGURED: God's Eye View's dev server is not reachable at "

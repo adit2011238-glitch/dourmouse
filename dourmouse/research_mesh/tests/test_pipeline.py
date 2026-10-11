@@ -6,8 +6,8 @@ import pytest
 
 from ..brain import Brain, BrainNotConfigured, MockBrain, NotConfiguredBrain
 from ..core import AgentRecord, Status
-from ..store import AgentStore
 from ..pipeline import QualificationPipeline
+from ..store import AgentStore
 
 
 def _run(store, brain, corpus, open_book=False) -> tuple[AgentRecord, QualificationPipeline]:

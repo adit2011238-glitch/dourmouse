@@ -21,7 +21,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import sys
 from http.server import BaseHTTPRequestHandler
+from pathlib import Path
 from typing import Any
 
 from dourmouse.http_server import DourmouseHTTPServer
@@ -30,10 +33,17 @@ from dourmouse.tradingview_ops import handle_tv_webhook
 
 _DEFAULT_PORT = 8766
 _MAX_BODY = 256 * 1024
+#: Seconds a client may stall on any socket read. Without it a slow or silent
+#: client (declaring a Content-Length it never sends) holds a handler thread forever.
+_REQUEST_TIMEOUT = 15.0
 
 
 class _Handler(BaseHTTPRequestHandler):
     server_version = "DourmouseTvWebhook/1.0"
+
+    def setup(self) -> None:
+        self.timeout = _REQUEST_TIMEOUT
+        super().setup()
 
     def log_message(self, fmt, *args):  # quieter
         pass
@@ -57,7 +67,12 @@ class _Handler(BaseHTTPRequestHandler):
         if length < 0 or length > _MAX_BODY:
             self._send_json({"ok": False, "error": "webhook body too large"}, 400)
             return
-        body = self.rfile.read(length) if length else b""
+        try:
+            body = self.rfile.read(length) if length else b""
+        except (TimeoutError, OSError):
+            self._send_json({"ok": False, "error": "request timed out"}, 408)
+            self.close_connection = True
+            return
         ctype = self.headers.get("Content-Type", "") or ""
         result = handle_tv_webhook(body, ctype, bus=get_message_bus())
         self._send_json(result, status=200 if result.get("ok") else 400)
@@ -69,31 +84,49 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json({"ok": False, "error": "not found"}, 404)
 
 
-def _load_env() -> None:
+def _load_env(env_path: Path | None = None) -> None:
     """Load .env into os.environ (setdefault — real env wins) so the
     standalone listener sees TV_WEBHOOK_SECRET + FOREX_DATA_PATH exactly
-    like the webui does at startup."""
-    import os
-    from pathlib import Path
+    like the webui does at startup. Parsed with python-dotenv, the parser the
+    main server uses, so a quoted value means the same thing in both
+    (TV_WEBHOOK_SECRET="abc" is abc, not "abc" with the quotes)."""
+    from dotenv import dotenv_values
 
-    env_path = Path(__file__).resolve().parent.parent / ".env"
+    path = env_path or Path(__file__).resolve().parent.parent / ".env"
     try:
-        for line in env_path.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, _, value = line.partition("=")
-            os.environ.setdefault(key.strip(), value.strip())
-    except OSError:
-        pass
+        values = dotenv_values(path, interpolate=False)
+    except (OSError, UnicodeDecodeError):
+        return
+    for key, value in values.items():
+        if value is not None:
+            os.environ.setdefault(key, value)
 
 
 def main(argv: list[str] | None = None) -> int:
     _load_env()
-    args = list(argv if argv is not None else __import__("sys").argv[1:])
+    args = list(argv if argv is not None else sys.argv[1:])
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, default=_DEFAULT_PORT)
+    parser.add_argument(
+        "--allow-open-webhook", action="store_true",
+        help="start WITHOUT a TV_WEBHOOK_SECRET (anyone who can reach the port can inject signals)",
+    )
     parsed, _ = parser.parse_known_args(args)
+    if not os.environ.get("TV_WEBHOOK_SECRET", "").strip():
+        if not parsed.allow_open_webhook:
+            print(
+                "REFUSING TO START: TV_WEBHOOK_SECRET is not set. This listener exists to be put behind a "
+                "public tunnel; without a secret anyone on the internet could inject signals into the paper "
+                "log and the agent bus. Set TV_WEBHOOK_SECRET in .env (or pass --allow-open-webhook for a "
+                "loopback-only test).",
+                file=sys.stderr,
+            )
+            return 2
+        print(
+            "WARNING: running with NO TV_WEBHOOK_SECRET (--allow-open-webhook). Do not expose this port "
+            "through a tunnel.",
+            file=sys.stderr,
+        )
     server = DourmouseHTTPServer(("127.0.0.1", parsed.port), _Handler)
     print(f"tv-webhook listening on 127.0.0.1:{parsed.port}", flush=True)
     try:

@@ -35,6 +35,41 @@ class ApplyResult:
     diff: str = ""
 
 
+def _read_exact(path: Path) -> tuple[str, str] | ApplyResult:
+    """Read ``path`` strictly as UTF-8 and report its newline style.
+
+    Returns ``(text, newline)`` where ``text`` uses "\\n" only and
+    ``newline`` is "\\n" or "\\r\\n", so a CRLF file is patched as CRLF and
+    written back as CRLF. Bytes that are not valid UTF-8, and files that
+    mix line-ending styles, are refused (never silently rewritten: a lossy
+    decode followed by a rewrite would change bytes the patch never touched).
+    """
+    raw = path.read_bytes()
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        return ApplyResult(
+            False,
+            f"PATCH REFUSED: {path.name} is not valid UTF-8 ({exc.reason} at "
+            f"byte {exc.start}); rewriting it would corrupt the bytes the "
+            "patch does not touch. Nothing was changed.",
+        )
+    crlf = text.count("\r\n")
+    if crlf == 0:
+        return text, "\n"
+    if crlf != text.count("\n"):
+        return ApplyResult(
+            False,
+            f"PATCH REFUSED: {path.name} mixes CRLF and LF line endings, so a "
+            "patch cannot preserve them. Nothing was changed.",
+        )
+    return text.replace("\r\n", "\n"), "\r\n"
+
+
+def _write_exact(path: Path, text: str, newline: str) -> None:
+    path.write_bytes(text.replace("\n", newline).encode("utf-8"))
+
+
 # --------------------------------------------------------------------------- #
 # SEARCH/REPLACE blocks (Aider's own primary format)
 # --------------------------------------------------------------------------- #
@@ -84,7 +119,10 @@ def apply_search_replace(path: Path, blocks_text: str) -> ApplyResult:
         return ApplyResult(
             False, f"PATCH REFUSED: no such file: {path}. Nothing was changed."
         )
-    original = path.read_text(encoding="utf-8", errors="replace")
+    read = _read_exact(path)
+    if isinstance(read, ApplyResult):
+        return read
+    original, newline = read
     working = original
     for i, block in enumerate(blocks, 1):
         if not block.search.strip():
@@ -118,7 +156,7 @@ def apply_search_replace(path: Path, blocks_text: str) -> ApplyResult:
             f"syntax error — {check}. Nothing was changed (the file was "
             "never written). Fix the SEARCH/REPLACE content and retry.",
         )
-    path.write_text(working, encoding="utf-8")
+    _write_exact(path, working, newline)
     return ApplyResult(
         True,
         f"PATCHED {path.name} ({len(blocks)} block(s) applied).",
@@ -170,6 +208,9 @@ def _parse_unified_diff(diff_text: str) -> list[_Hunk]:
     return hunks
 
 
+_AMBIGUOUS = -1
+
+
 def _find_hunk_position(file_lines: list[str], hunk: _Hunk) -> int | None:
     """Where ``hunk.old_lines`` actually sits in ``file_lines``.
 
@@ -177,18 +218,24 @@ def _find_hunk_position(file_lines: list[str], hunk: _Hunk) -> int | None:
     whenever the file hasn't drifted); falls back to scanning the whole
     file for an exact match — the same tolerance real `patch` and Aider's
     own applier have for a model that got the line numbers slightly wrong
-    but the CONTEXT right.
+    but the CONTEXT right. That fallback must be unambiguous: a context that
+    occurs more than once returns ``_AMBIGUOUS`` instead of guessing.
     """
     n = len(hunk.old_lines)
     if n == 0:
-        return hunk.old_start - 1 if hunk.old_start >= 1 else 0
+        # `@@ -N,0 +M,K @@`: the text goes AFTER line N (index N); N == 0
+        # means the top of the file.
+        return min(hunk.old_start, len(file_lines)) if hunk.old_start >= 1 else 0
     claimed = hunk.old_start - 1
     if 0 <= claimed <= len(file_lines) - n and file_lines[claimed:claimed + n] == hunk.old_lines:
         return claimed
-    for i in range(0, len(file_lines) - n + 1):
-        if file_lines[i:i + n] == hunk.old_lines:
-            return i
-    return None
+    matches = [
+        i for i in range(0, len(file_lines) - n + 1)
+        if file_lines[i:i + n] == hunk.old_lines
+    ]
+    if len(matches) > 1:
+        return _AMBIGUOUS
+    return matches[0] if matches else None
 
 
 def apply_unified_diff(path: Path, diff_text: str) -> ApplyResult:
@@ -206,14 +253,30 @@ def apply_unified_diff(path: Path, diff_text: str) -> ApplyResult:
         return ApplyResult(
             False, f"PATCH REFUSED: no such file: {path}. Nothing was changed."
         )
-    original = path.read_text(encoding="utf-8", errors="replace")
-    lines = original.splitlines()
-    had_trailing_newline = original.endswith("\n")
+    read = _read_exact(path)
+    if isinstance(read, ApplyResult):
+        return read
+    original, newline = read
+    # split on "\n" only: str.splitlines() would also break on form feeds and
+    # other separators and the rejoin below would silently turn them into "\n".
+    lines = original.split("\n")
+    had_trailing_newline = original == "" or original.endswith("\n")
+    if lines and lines[-1] == "":
+        lines.pop()
     # Apply hunks back-to-front by position so earlier positions in the
     # file stay valid as later ones shift line counts.
     positioned: list[tuple[int, _Hunk]] = []
     for i, hunk in enumerate(hunks, 1):
         pos = _find_hunk_position(lines, hunk)
+        if pos == _AMBIGUOUS:
+            return ApplyResult(
+                False,
+                f"PATCH FAILED at hunk {i}/{len(hunks)}: its stated line "
+                f"number does not match and its context matches several "
+                f"places in {path.name} -- refusing an ambiguous edit. "
+                "Nothing was changed. Fix the hunk's line number or include "
+                "more unique context.",
+            )
         if pos is None:
             return ApplyResult(
                 False,
@@ -223,9 +286,18 @@ def apply_unified_diff(path: Path, diff_text: str) -> ApplyResult:
                 "file and regenerate the diff against its actual content.",
             )
         positioned.append((pos, hunk))
-    for pos, hunk in sorted(positioned, key=lambda ph: ph[0], reverse=True):
+    ordered = sorted(positioned, key=lambda ph: ph[0])
+    for (prev_pos, prev), (next_pos, _nxt) in zip(ordered, ordered[1:], strict=False):
+        if next_pos < prev_pos + len(prev.old_lines) or next_pos == prev_pos:
+            return ApplyResult(
+                False,
+                f"PATCH FAILED: two hunks overlap in {path.name} (around "
+                f"line {next_pos + 1}). Nothing was changed. Merge them into "
+                "one hunk or fix their line numbers.",
+            )
+    for pos, hunk in reversed(ordered):
         lines[pos:pos + len(hunk.old_lines)] = hunk.new_lines
-    new_text = "\n".join(lines) + ("\n" if had_trailing_newline or lines else "")
+    new_text = "\n".join(lines) + ("\n" if had_trailing_newline and lines else "")
     check = _syntax_error_note(path, new_text)
     if check:
         return ApplyResult(
@@ -235,7 +307,7 @@ def apply_unified_diff(path: Path, diff_text: str) -> ApplyResult:
             "and retry.",
         )
     diff = _unified_diff_text(original, new_text, path.name)
-    path.write_text(new_text, encoding="utf-8")
+    _write_exact(path, new_text, newline)
     return ApplyResult(True, f"PATCHED {path.name} ({len(hunks)} hunk(s) applied).", diff)
 
 

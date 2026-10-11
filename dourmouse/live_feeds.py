@@ -19,17 +19,27 @@ string — a transient outage never masquerades as a data result.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import re
 import ssl
+import threading
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Iterator
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 import defusedxml.ElementTree as ET  # real external RSS bodies -- never the stdlib parser on untrusted XML
+
+from dourmouse.state_file import atomic_write_text, load_json_or_aside
+
+try:
+    import fcntl
+except ImportError:  # Windows
+    fcntl = None  # type: ignore[assignment]
 
 _UA = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -441,24 +451,67 @@ def _tasks_path() -> Path:
     return root / "tasks.json"
 
 
+_TASKS_LOCK = threading.RLock()
+
+
+@contextlib.contextmanager
+def _tasks_locked(path: Path) -> Iterator[None]:
+    """Serialise a read-modify-write of the task list: a process-wide lock (the HTTP server runs one thread
+    per request) plus an advisory flock on a sidecar file so a second process cannot interleave either."""
+    with _TASKS_LOCK:
+        lock_fh = None
+        try:
+            if fcntl is not None:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                lock_fh = open(path.with_name(path.name + ".lock"), "a")  # noqa: SIM115
+                fcntl.flock(lock_fh, fcntl.LOCK_EX)
+        except OSError:
+            lock_fh = None  # the in-process lock still holds; an unlockable directory fails at write time
+        try:
+            yield
+        finally:
+            if lock_fh is not None:
+                lock_fh.close()
+
+
 def _load_tasks(path: Path) -> list[dict[str, Any]]:
+    """The stored tasks. A missing file is an empty list. A file that exists but cannot be read (truncated by
+    a crash, not a list) raises RuntimeError and is LEFT ALONE: returning [] here let the next add_task write
+    that empty list over every task."""
     if not path.exists():
         return []
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return []
+    except (ValueError, OSError) as exc:
+        raise RuntimeError(f"{path.name} could not be read ({type(exc).__name__}: {exc}); it was not changed.") from exc
     if not isinstance(data, list):
-        return []
+        raise RuntimeError(f"{path.name} could not be read (it holds a {type(data).__name__}, not a list); it was not changed.")
     return [t for t in data if isinstance(t, dict)]
 
 
+def _load_tasks_for_update(path: Path) -> list[dict[str, Any]]:
+    """Like _load_tasks, for a caller that is about to write. An unreadable file is kept aside (never
+    overwritten) and the change is refused with a message saying where it went; the next call starts a new list."""
+    try:
+        return _load_tasks(path)
+    except RuntimeError as exc:
+        _value, note = load_json_or_aside(path, list)
+        raise RuntimeError(f"{note or exc} The task was not saved; try again to start a new list.") from exc
+
+
 def _save_tasks(path: Path, tasks: list[dict[str, Any]]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(tasks, indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
+    atomic_write_text(path, json.dumps(tasks, indent=2, ensure_ascii=False) + "\n")
+
+
+def _next_task_id(tasks: list[dict[str, Any]]) -> str:
+    """task-<max numeric suffix + 1>: len(tasks)+1 collides as soon as one task has been removed or
+    two adds raced."""
+    highest = 0
+    for t in tasks:
+        m = re.fullmatch(r"task-(\d+)", str(t.get("id", "")))
+        if m:
+            highest = max(highest, int(m.group(1)))
+    return f"task-{highest + 1}"
 
 
 def _tasks_file() -> Path:
@@ -480,28 +533,30 @@ def add_task(title: str) -> dict[str, Any]:
     if not title:
         raise RuntimeError("add_task requires a non-empty title")
     path = _tasks_file()
-    tasks = _load_tasks(path)
-    task = {
-        "id": f"task-{len(tasks) + 1}",
-        "title": title[:300],
-        "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "done": False,
-    }
-    tasks.append(task)
-    _save_tasks(path, tasks)
+    with _tasks_locked(path):
+        tasks = _load_tasks_for_update(path)
+        task = {
+            "id": _next_task_id(tasks),
+            "title": title[:300],
+            "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "done": False,
+        }
+        tasks.append(task)
+        _save_tasks(path, tasks)
     return task
 
 
 def complete_task(task_id: str) -> bool:
     """Mark a task done; returns whether it existed and was changed."""
     path = _tasks_file()
-    tasks = _load_tasks(path)
-    changed = False
-    for t in tasks:
-        if t.get("id") == task_id and not t.get("done"):
-            t["done"] = True
-            t["completed_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
-            changed = True
-    if changed:
-        _save_tasks(path, tasks)
+    with _tasks_locked(path):
+        tasks = _load_tasks_for_update(path)
+        changed = False
+        for t in tasks:
+            if t.get("id") == task_id and not t.get("done"):
+                t["done"] = True
+                t["completed_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+                changed = True
+        if changed:
+            _save_tasks(path, tasks)
     return changed

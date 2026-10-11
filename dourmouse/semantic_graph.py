@@ -154,7 +154,9 @@ def build_semantic_graph(
     if not usable:
         return {"ok": True, "nodes": [], "edges": [], "error": None}
 
-    dim = len(next(iter(vectors.values())))
+    # Take the dimension from a vector that is actually used: the first dict
+    # value can be None or empty for a fact whose embedding failed.
+    dim = len(vectors[usable[0]["id"]])
     try:
         client = _open_client(_qdrant_index_dir(workspace_root))
     except Exception as exc:  # noqa: BLE001 - a broken local index dir must not crash the app
@@ -183,6 +185,8 @@ def build_semantic_graph(
                     continue
                 seen_pairs.add(pair)
                 edges.append({"a": pair[0], "b": pair[1], "score": round(float(h.score), 4)})
+    except Exception as exc:  # noqa: BLE001 - never raises: a Qdrant lock/collection error is reported, not a 500
+        return {"ok": False, "nodes": [], "edges": [], "error": f"semantic index failed: {exc}"}
     finally:
         client.close()
 
