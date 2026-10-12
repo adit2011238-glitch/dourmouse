@@ -340,6 +340,16 @@ class ChatSession:
         if self.memory is not None and learn_enabled():
             block = recall_block(self.memory, prompt)
             if block:
+                # PRIV (H-PRIV-4): past turns are T1 (the owner's own
+                # conversation), but the replies the store learned from show
+                # real values, so identifiers are swapped for this chat's
+                # placeholders before the block reaches a cloud model.
+                from dourmouse import privacy
+                from dourmouse.governance import PiiRedactor
+
+                block, _ = PiiRedactor(privacy.owner_emails()).redact(
+                    block, privacy.placeholder_map(privacy.current_chat() or self.session_file.stem)
+                )
                 # KV-cache stability (v4.2 speed): messages[0] stays the
                 # immutable base prompt, so the stable prefix (system +
                 # history) is reused between turns instead of re-prefilling

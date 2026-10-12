@@ -610,6 +610,10 @@ def stream_gemini(
     send = transport or _urllib_transport
     timeout = max(_MIN_TIMEOUT, min(float(timeout), _MAX_TIMEOUT))
     body = _build_body(prompt, system=system, max_tokens=None)
+    # PRIV-4: one egress ledger line per request, metadata only.
+    from dourmouse import privacy
+
+    privacy.record_egress(backend="gemini", model=resolved_model, messages=[body], origin="gemini")
 
     lines = send(
         _endpoint(resolved_model, base_url),
@@ -707,6 +711,10 @@ def call_gemini(
     send = transport or _urllib_transport
     timeout = max(_MIN_TIMEOUT, min(float(timeout), _MAX_TIMEOUT))
     body = _build_body(prompt, system=system, max_tokens=max_tokens)
+    # PRIV-4: one egress ledger line per request, metadata only.
+    from dourmouse import privacy
+
+    privacy.record_egress(backend="gemini", model=resolved_model, messages=[body], origin="gemini")
 
     lines = send(
         _endpoint(resolved_model, base_url),

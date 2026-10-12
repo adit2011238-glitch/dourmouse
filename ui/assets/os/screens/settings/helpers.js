@@ -139,3 +139,38 @@ export function osReducedMotion(win) {
     return null;
   }
 }
+
+/* ---------------- PRIV-5: privacy ---------------- */
+export const CONSENT_CHOICES = [
+  { id: 'ask', label: 'ASK', spec: 'Ask once, the first time a chat needs it, and remember your answer.' },
+  { id: 'allow', label: 'ALLOW', spec: 'Send it to the cloud model when a chat needs it, with identifiers swapped for placeholders.' },
+  { id: 'deny', label: 'NEVER', spec: 'Never send it. A chat that needs it is told it was not allowed.' },
+];
+
+export function consentPrompt(source, next) {
+  const what = source.label + ' (' + source.what + ')';
+  if (next === 'allow') {
+    return 'Let Dourmouse send your ' + what + ' to the cloud model when a chat needs it? Card and bank numbers, ID numbers, phone numbers, street addresses and other people\'s email addresses are swapped for placeholders first; names and other text are not. You can change this here at any time.';
+  }
+  if (next === 'deny') {
+    return 'Never send your ' + what + ' to a cloud model? A chat that needs it is told it was not allowed, and the agent says so.';
+  }
+  return 'Forget the saved answer for ' + source.label + '? The next chat that needs it asks you once.';
+}
+
+export function privateModePrompt(next) {
+  return next
+    ? 'Turn Private mode ON for every chat? Mail, memory, documents, finance, contacts, files outside the workspace and screen content are then never sent to a cloud model, and the tools that read them are hidden. Web search and everything public still work.'
+    : 'Turn Private mode OFF for every chat? Sensitive sources are then sent only where you allowed them below. A chat you made private in its own toolbar stays private.';
+}
+
+export function providerPrompt(p, next) {
+  return next
+    ? 'Mark ' + p.label + ' (' + p.company + ') as checked? Tick this only after you looked at that account\'s data retention and model training settings yourself. Dourmouse cannot check them; this records that you did, with the date.'
+    : 'Clear the check mark for ' + p.label + '?';
+}
+
+export function providerTag(p) {
+  if (!p.configured) return { tone: '', word: 'not set up' };
+  return p.verified ? { tone: 'ok', word: 'checked' } : { tone: 'warn', word: 'not checked' };
+}

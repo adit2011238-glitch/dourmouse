@@ -40,3 +40,10 @@
 [data-screen="SECURITY"] .sec-how > summary { cursor: pointer; margin-bottom: 0; }
 [data-screen="SECURITY"] .sec-how[open] > summary { margin-bottom: 8px; }
 [data-screen="SECURITY"] .sec-how > summary:focus-visible { outline: 2px solid var(--dm-active); outline-offset: 2px; }
+
+/* PRIV-4: the egress ledger section */
+[data-screen="SECURITY"] .sec-help { margin: 2px 0 8px; font-size: var(--dm-text-xs); overflow-wrap: anywhere; }
+[data-screen="SECURITY"] .sec-block { display: block; font-size: var(--dm-text-xs); overflow-wrap: anywhere; }
+[data-screen="SECURITY"] .sec-egress { align-items: flex-start; gap: 6px; border-bottom: 1px solid var(--os-edge-lo); }
+[data-screen="SECURITY"] .sec-egress:last-child { border-bottom: 0; }
+[data-screen="SECURITY"] #secEgress { max-height: 420px; overflow: auto; }

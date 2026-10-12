@@ -147,18 +147,17 @@ class TestReachableEverywhereItNeedsToBe:
         """The whole point: any model can prompt this agent by name."""
         from dourmouse.model_delegation import route_for
 
-        # Whatever the route (local, given it touches real private data --
-        # see the next test), it must not be silently unroutable.
-        assert route_for("google_workspace") in ("ollama", "gemini")
+        # Whatever the route (the roster, given it touches real private
+        # data -- see the next test), it must not be silently unroutable.
+        assert route_for("google_workspace") in ("roster", "gemini")
 
-    def test_never_routes_to_the_cloud_model(self):
-        """Textbook private data -- Gmail/Drive/Calendar leaving the
-        machine to answer a question the user thought was local is exactly
-        what the delegation policy's privacy-first split exists to
-        prevent."""
-        from dourmouse.model_delegation import route_for
+    def test_never_routes_to_tool_less_gemini(self):
+        """PRIV (2026-10-12): every model is a cloud model; Gmail/Drive/
+        Calendar work runs with its tools through the roster, behind the
+        privacy gate, never as a tool-less Gemini call."""
+        from dourmouse.model_delegation import ROSTER, route_for
 
-        assert route_for("google_workspace", allow_cloud=True) == "ollama"
+        assert route_for("google_workspace", allow_gemini=True) == ROSTER
 
 
 class TestPlannerDoesNotAutoRouteToTheRollup:

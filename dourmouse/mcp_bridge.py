@@ -179,12 +179,19 @@ class McpBridgeServer:
         stdout: Any = None,
         stderr: Any = None,
     ) -> None:
+        # PRIV: which agent owns each tool, for the privacy tier of a tool
+        # the tier map does not name.
+        self._owner: dict[str, str] = {}
         if tools is not None:
             self._tools = list(tools)
         else:
             from dourmouse.general_roster import build_general_registry
 
-            self._tools = exposed_tools(registry or build_general_registry())
+            registry = registry or build_general_registry()
+            self._tools = exposed_tools(registry)
+            for sub in registry.all_subagents():
+                for tool in sub.tools:
+                    self._owner.setdefault(tool.name, sub.name)
         self._by_name = {t.name: t for t in self._tools}
         # Phase H, R2B-11: one run policy per connection (the bridge process
         # lives as long as the CLI session that launched it), so the caps on
@@ -288,7 +295,13 @@ class McpBridgeServer:
         }
 
     def _handle_tools_list(self) -> dict[str, Any]:
-        return {"tools": [_tool_to_mcp_schema(t) for t in self._tools]}
+        # PRIV: in Private mode the chat's T2 tools are not offered at all.
+        from dourmouse import privacy
+
+        tools = self._tools
+        if privacy.bridge_turn().private:
+            tools = [t for t in tools if not privacy.hidden_in_private_mode(t.name, self._owner.get(t.name))]
+        return {"tools": [_tool_to_mcp_schema(t) for t in tools]}
 
     def _handle_tools_call(self, params: dict[str, Any]) -> dict[str, Any]:
         name = params.get("name") or ""
@@ -299,6 +312,9 @@ class McpBridgeServer:
                 "content": [{"type": "text", "text": f"ERROR: unknown tool '{name}'"}],
                 "isError": True,
             }
+        from dourmouse import privacy
+
+        privacy_turn = privacy.bridge_turn()
         try:
             # confirmation_gate=None is the load-bearing part for the
             # default case: for a REGULAR tool this is a plain pass-through
@@ -325,6 +341,9 @@ class McpBridgeServer:
             gate = (lambda _prompt: True) if auto_approve_enabled() else None
             if not isinstance(arguments, dict):
                 raise TypeError("arguments must be a JSON object")
+            # PRIV-2: placeholders Claude wrote become the real values here,
+            # on this Mac, before the tool runs (never cards or IBANs).
+            arguments = privacy_turn.placeholders.restore_arguments(arguments)
             result_text = _execute_tool(tool, arguments, confirmation_gate=gate,
                                         policy=self._policy, actor="mcp_bridge")
         except Exception as exc:  # noqa: BLE001 - Rule 2.2: a real failure is reported, never fabricated
@@ -335,6 +354,12 @@ class McpBridgeServer:
                 "isError": True,
             }
         result_text = self._scrub(str(result_text))
+        # PRIV-1: the same gate as a chat run. Nobody can be asked from this
+        # process, so an undecided T2 source is refused with the SETTINGS note.
+        result_text = privacy.gate_tool_result(
+            name, arguments, result_text, turn=privacy_turn, agent=self._owner.get(name), ask=None,
+        )
+        privacy.bridge_save(privacy_turn)
         self._log_toolcall(name, arguments, result_text)
         return {"content": [{"type": "text", "text": str(result_text)}], "isError": False}
 

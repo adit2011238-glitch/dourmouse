@@ -162,6 +162,13 @@ OWNER_ONLY_POST: frozenset[str] = frozenset({
     # Destructive housekeeping.
     "/api/projects/delete",
     "/api/artifacts/clear",
+    # PRIV: what may be shared with a cloud model. Also covered by the
+    # /api/os/settings/ prefix below; named here so the rule cannot be lost
+    # if that prefix is ever narrowed.
+    "/api/os/settings/privacy/consent",
+    "/api/os/settings/privacy/private_mode",
+    "/api/os/settings/privacy/chat",
+    "/api/os/settings/privacy/provider",
 })
 
 #: POST path prefixes that only the owner may call.

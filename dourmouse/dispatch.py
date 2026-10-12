@@ -33,6 +33,7 @@ crashes and not fabricated success.
 from __future__ import annotations
 
 import concurrent.futures
+import contextvars
 import difflib
 import hashlib
 import json
@@ -710,7 +711,12 @@ def _call_with_retry(
     # and a call abandoned while queued never runs (finding P2-11).
     admitted = threading.Event()
     try:
+        # The worker runs in the caller's context (contextvars.copy_context):
+        # the privacy turn (PRIV-4's ledger row metadata, the bridge's chat
+        # and map) and the project scope are context variables, and a bare
+        # submit started the call with none of them.
         future = executor.submit(
+            contextvars.copy_context().run,
             _call_with_retry_inner,
             client,
             model=model,
@@ -929,6 +935,7 @@ def _call_with_retry_inner_impl(
         try:
             if call_log is not None:
                 call_log.append({"model": model, "attempt": attempt + 1})
+            _record_openai_egress(client, model, messages)
             if stream_on_delta is not None:
                 return _stream_completion(
                     client, model, messages, tools, extra_body, stream_on_delta, stream_on_thinking
@@ -962,6 +969,7 @@ def _call_with_retry_inner_impl(
     if fallback and fallback != model:
         if call_log is not None:
             call_log.append({"model": fallback, "attempt": "fallback"})
+        _record_openai_egress(client, fallback, messages)
         return client.chat.completions.create(
             model=fallback,
             messages=messages,
@@ -1102,6 +1110,20 @@ def _stream_completion(
 _NOT_AN_ANSWER_PREFIXES = (
     "ERROR", "REFUSED", "NOT CONFIGURED", "DECLINED", "CONFIRMATION REQUIRED", "BLOCKED BY HOOK",
 )
+
+
+def _record_openai_egress(client: Any, model: str, messages: list[dict[str, Any]]) -> None:
+    """PRIV-4 for a plain OpenAI-compatible client (NVIDIA, FreeLLMAPI,
+    OmniRoute). The Ollama, Gemini and Claude CLI adapters record where they
+    build their own request, so they are not recorded twice here."""
+    if not isinstance(client, OpenAI):
+        return
+    from dourmouse import privacy
+
+    privacy.record_egress(
+        backend=privacy.backend_for_base_url(str(getattr(client, "base_url", "") or "")),
+        model=model, messages=messages, origin="openai_compatible",
+    )
 
 
 def _redact_tool_arguments(dlp: Any, raw: str) -> str:
@@ -2267,6 +2289,21 @@ class OllamaNativeClient:
                 payload["messages"] = _append_no_think(sent)
         if tools:
             payload["tools"] = tools
+        # PRIV-4: one egress ledger line per request, metadata only.
+        from dourmouse import privacy
+
+        backend = privacy.backend_for_base_url(self._root)
+        if backend == "ollama_cloud" and "Authorization" not in self._headers:
+            # H-PRIV-3: with no key, the request used to go to ollama.com
+            # anyway, content and all, only to come back 401 ("honest
+            # degrade"). Nothing is sent without a key.
+            raise RuntimeError(
+                "NOT CONFIGURED: Ollama Cloud needs OLLAMA_API_KEY (SETTINGS, keys). Nothing was sent."
+            )
+        privacy.record_egress(
+            backend=backend, model=str(payload.get("model") or ""),
+            messages=payload.get("messages") or [], origin="ollama",
+        )
         if stream:
             return self._stream(payload)
         return self._complete(payload)
@@ -2428,13 +2465,9 @@ def _nvidia_rotation_factory(
     accounts at the same time as fallbacks"): extended from NVIDIA-only to
     also cover Ollama Cloud (OLLAMA_API_KEY/OLLAMA_API_KEY_2/...), the
     exact same real, already-battle-tested mechanism rather than a second
-    parallel system. Deliberately gated on ``config.is_cloud`` — a plain
-    local OllamaConfig (is_cloud=False, e.g. the force_local=True privacy
-    pin _build_client's own docstring documents) must NEVER be rotated
-    into a cloud account regardless of how many OLLAMA_API_KEY_* entries
-    happen to be configured elsewhere in the environment; that would be
-    the exact same privacy leak class this codebase already found and
-    fixed once this session, reintroduced here instead.
+    parallel system. Gated on ``config.is_cloud``: a config pointed at an
+    explicit OLLAMA_BASE_URL (is_cloud=False) is the operator's own chosen
+    endpoint and is never rotated onto Ollama Cloud accounts.
     """
     if isinstance(config, NvidiaConfig):
         pool = _get_nvidia_account_pool()
@@ -2506,38 +2539,21 @@ def _nvidia_rotation_factory(
     return factory
 
 
-def _config_for_agent_model(
-    config: NvidiaConfig | OllamaConfig | OmniRouteConfig | None, agent_name: str | None
-) -> Any:
-    """The config a specific agent's MODEL NAME should be resolved from.
+def _backend_of_client(client: Any) -> str:
+    """The privacy ledger's backend id for a chat client (PRIV-4): which
+    company a request through this client reaches."""
+    from dourmouse import privacy
 
-    A genuinely local OllamaConfig when ``agent_name`` is privacy-pinned
-    (model_delegation._LOCAL_ONLY_AGENTS) and ``config`` would otherwise
-    route to real Ollama Cloud -- otherwise ``config`` unchanged. This
-    mirrors _build_client's own force_local swap for the CLIENT exactly,
-    on purpose: real, live-caught bug (2026-09-14), found in THREE
-    separate places that each independently decided whether a
-    privacy-pinned agent's turn was local or cloud, using different
-    inputs each time -- webui.py's focus_agent model_override, this
-    function's own top-level ``model`` resolution, and the per-agent
-    routing refinement further down _run_dispatch_loop. All three called
-    ``config.model_for_agent(agent)`` on the ORIGINAL ambient (cloud)
-    config while a real Ollama Cloud key was set, even on a turn whose
-    CLIENT had already been correctly swapped local by _build_client's
-    own privacy check -- handing that local client a real cloud-only
-    model name it had never pulled, and a genuine local-daemon 404 on
-    every such turn (STUDY tab, and any plain conversational query that
-    happened to route to mail/docs/study/etc). One shared helper here so
-    all three call sites can never independently disagree again.
-    """
-    if isinstance(config, OllamaConfig) and agent_name:
-        from dourmouse.model_delegation import _LOCAL_ONLY_AGENTS
-
-        if agent_name.strip().lower() in _LOCAL_ONLY_AGENTS:
-            from dourmouse.config import load_ollama_config
-
-            return load_ollama_config(force_local=True)
-    return config
+    if isinstance(client, ClaudeCliClient):
+        return "claude_cli"
+    if isinstance(client, GeminiClient):
+        return "gemini"
+    if isinstance(client, OllamaNativeClient):
+        return privacy.backend_for_base_url(client._root)
+    base_url = getattr(client, "base_url", None)
+    if base_url:
+        return privacy.backend_for_base_url(str(base_url))
+    return "unknown"
 
 
 def _build_client(
@@ -2581,32 +2597,13 @@ def _build_client(
         return OllamaNativeClient(_ollama_cloud_config())
     if mode == "gemini":
         return GeminiClient()
-    # mode == "local" (from _agent_split_backend's verdict) covers TWO
-    # real cases that used to be conflated here, with a real privacy bug
-    # in the gap between them (live-caught 2026-09-13, see
-    # config.load_ollama_config's own docstring on force_local for the
-    # full incident): (a) forced_agent is genuinely privacy-pinned
-    # (model_delegation._LOCAL_ONLY_AGENTS — mail/docs/google_workspace/
-    # etc.), where "local" must mean ACTUALLY LOCAL regardless of
-    # anything else configured on this machine; (b) forced_agent simply
-    # isn't cloud-eligible either (model_delegation's own "unnamed agents
-    # default to LOCAL" catch-all), where "local" means "whatever this
-    # machine's normal default backend is" — which, now that a real
-    # Ollama Cloud key can be configured for general speed, may
-    # correctly BE cloud. Reusing the same already-resolved `config` for
-    # both cases silently sent case (a)'s private data to Ollama Cloud
-    # the instant a key was set, with no code path ever re-checking WHY
-    # "local" was returned. Case (a) now forces a genuinely local
-    # OllamaConfig of its own, ignoring the ambient key entirely; case
-    # (b) is unchanged — it keeps using whatever `config` was already
-    # resolved to (correctly cloud, once a key exists).
+    # mode == "default" (from _agent_split_backend's verdict): this
+    # machine's configured backend, which with a key is Ollama Cloud. PRIV
+    # (2026-10-12): there is no per-agent local swap any more. The old one
+    # promised mail/docs/study never left the machine, which a cloud-only
+    # app cannot keep; their content is protected by the privacy gate
+    # (privacy.py: tiers, consent, Private mode, placeholders) instead.
     if isinstance(config, OllamaConfig):
-        from dourmouse.model_delegation import _LOCAL_ONLY_AGENTS
-
-        if forced_agent and forced_agent.strip().lower() in _LOCAL_ONLY_AGENTS:
-            from dourmouse.config import load_ollama_config
-
-            config = load_ollama_config(force_local=True)
         return OllamaNativeClient(config)
     # 2026-09-14, user-directed: "a different api key for each agent since
     # claude code is supposed to be orchestrating not doing the work" --
@@ -3451,36 +3448,30 @@ def _is_heavy_workflow_agent(agent_name: str | None) -> bool:
 
 
 def _agent_split_map() -> dict[str, str]:
-    """The non-heavy roster's ollama-vs-gemini split, delegated to
-    dourmouse.model_delegation.route_for() — a real, pre-existing,
-    privacy-first classification (mail/docs/study/money/the user's own
-    repos stay LOCAL; research/news/public-input work may go to Gemini),
-    built to the same user instruction this split was, and more mature
-    than an arbitrary even alternation. Merged deliberately rather than
-    keeping two competing routing philosophies: this module still owns
-    the heavy-workflow-escalates-to-real-Claude decision (something
-    model_delegation.py doesn't have at all, since that module assumes
-    Claude already always orchestrates); model_delegation.py owns the
-    ollama-vs-gemini choice for everything else, since privacy-based
-    classification is real, considered, and tested (17 cases) where an
-    even split was arbitrary.
+    """The non-heavy roster's default-vs-gemini split, delegated to
+    dourmouse.model_delegation.route_for(): agents whose input is public
+    (research, news, world monitor) may use Gemini; every other agent,
+    including the sensitive ones (privacy.SENSITIVE_AGENTS), runs on this
+    machine's configured backend with its real tools. This module owns the
+    heavy-workflow-escalates-to-Claude decision; model_delegation.py owns
+    the rest.
 
-    "local" here is a deliberate sentinel, NOT "ollama_cloud" — a hosted
-    Ollama Cloud call is not privacy-equivalent to routing that stays on
-    this machine (see _build_client's own "local" branch): a LOCAL
-    verdict means "don't override the backend at all", falling through
-    to whatever this machine's own configured default already is.
+    "default" is a sentinel: "don't override the backend", falling through
+    to the configured default (Ollama Cloud with a key). PRIV (2026-10-12):
+    it used to be called "local" and was documented as staying on this
+    machine, which a cloud-only app cannot do; the privacy gate protects
+    sensitive content on every backend instead.
     """
     global _agent_split_cache
     if _agent_split_cache is not None:
         return _agent_split_cache
     from dourmouse.general_roster import build_general_registry
-    from dourmouse.model_delegation import CLOUD, route_for
+    from dourmouse.model_delegation import GEMINI, route_for
 
     names = sorted(s.name for s in build_general_registry().all_subagents())
     non_heavy = [n for n in names if not _is_heavy_workflow_agent(n)]
     _agent_split_cache = {
-        name: ("gemini" if route_for(name) == CLOUD else "local") for name in non_heavy
+        name: ("gemini" if route_for(name) == GEMINI else "default") for name in non_heavy
     }
     return _agent_split_cache
 
@@ -3516,15 +3507,11 @@ def _effective_split_agent(
 
 
 def _agent_split_backend(agent_name: str | None) -> str:
-    """Privacy-first ollama-vs-gemini split (delegated to
-    model_delegation.route_for — see _agent_split_map's own docstring for
-    why), with a heavy-workflow escalation to real Claude layered on top
-    (_is_heavy_workflow_agent) — the user's own explicit ask, and
-    something model_delegation.py doesn't itself decide. An agent name
-    outside the current registry (a stale reference, a test double) still
-    gets a real answer: route_for() itself defaults unknown agents to
-    LOCAL (its own documented, deliberate default), so falling through to
-    it directly here is correct, not a guess."""
+    """The default-vs-gemini split (delegated to model_delegation.route_for,
+    see _agent_split_map's own docstring), with a heavy-workflow escalation
+    to real Claude layered on top (_is_heavy_workflow_agent). An agent name
+    outside the current registry still gets a real answer: route_for()
+    sends unknown agents to the configured default backend."""
     if not agent_name:
         return "claude"  # no single agent resolved (a free top-level chat) — Claude by default
     if _is_heavy_workflow_agent(agent_name):
@@ -3532,9 +3519,9 @@ def _agent_split_backend(agent_name: str | None) -> str:
     mapped = _agent_split_map().get(agent_name)
     if mapped is not None:
         return mapped
-    from dourmouse.model_delegation import CLOUD, route_for
+    from dourmouse.model_delegation import GEMINI, route_for
 
-    return "gemini" if route_for(agent_name) == CLOUD else "local"
+    return "gemini" if route_for(agent_name) == GEMINI else "default"
 
 
 def _split_backend(agent_name: str | None) -> str:
@@ -4290,27 +4277,10 @@ def run_dispatch_messages(
             session_stem=session_stem,
             force_plain_dispatch=force_plain_dispatch,
         )
-        # 2026-09-14, real live-caught bug (a plain, non-focus_agent HOME
-        # turn 404'd on "HTTP Error 404: Not Found" -- traced live: the
-        # real HTTP call went to http://127.0.0.1:11434/api/chat, the
-        # LOCAL daemon, carrying "gpt-oss:20b", a real Ollama CLOUD-only
-        # model name never pulled there). Root cause: _build_client()
-        # above independently decides to swap the CLIENT to a genuinely
-        # local OllamaConfig whenever the PEEKED effective agent
-        # (_effective_split_agent, used purely for backend-mode routing)
-        # happens to be privacy-pinned -- deterministic keyword routing
-        # can match one even for an ordinary conversational prompt with
-        # no real focus_agent set. The MODEL resolved right below,
-        # though, was still read from the ORIGINAL ambient `config`
-        # (real Ollama Cloud) -- the two resolutions independently
-        # decided "local" and "cloud" for the same turn. Mirror
-        # _build_client's own force_local check here so the model name
-        # always agrees with the client that will actually receive it,
-        # the same fix already applied where webui.py resolves a
-        # focus_agent turn's model_override -- both now go through the
-        # one shared _config_for_agent_model helper (see its own
-        # docstring for the full three-places-disagreed diagnosis).
-        _model_config = _config_for_agent_model(config, _effective_agent)
+        # The model name comes from the same config the client was built
+        # from (PRIV, 2026-10-12: no per-agent local swap any more, so the
+        # two can no longer disagree).
+        _model_config: Any = config
         # v5.0 fast dispatch: the orchestrator (looping dispatch brain)
         # defaults to its per-agent model (qwen3:4b on the local backend) so
         # every turn is fast; explicit ``model`` overrides still win.
@@ -4488,7 +4458,15 @@ def run_dispatch_messages(
         ctx.compact_system = True
     stack.append(ctx)
     try:
-        report = _run_dispatch_loop(messages, registry, max_turns, ctx)
+        # PRIV: one privacy state per request tree (a nested run joins the
+        # active one). The chat is the UI's tab id when webui set it, else
+        # this session's own stem.
+        from dourmouse import privacy
+
+        with privacy.turn_scope(privacy.current_chat() or session_stem or "", query=str(last_user)) as _turn:
+            if depth == 0 or _turn.provider == "the cloud model":
+                _turn.provider = privacy.provider_label(_backend_of_client(client))
+            report = _run_dispatch_loop(messages, registry, max_turns, ctx)
     finally:
         stack.pop()
         # Note: unlike the old shared-list version, there is no
@@ -5140,6 +5118,22 @@ def _run_dispatch_loop(
     )
     if ctx.fanout_branch:  # finding #134: a branch never fans out again
         scoped_tools = [t for t in scoped_tools if t.get("function", {}).get("name") not in FANOUT_TOOLS]
+    # PRIV: the privacy state of this request tree (run_dispatch_messages
+    # opened it). Private mode removes every tool that can return T2 content.
+    from dourmouse import privacy
+
+    turn = privacy.current_turn() or privacy.TurnPrivacy(
+        chat="default", private=False, placeholders=privacy.PlaceholderMap()
+    )
+    privacy_ask = privacy.asker_for(confirmation_gate)
+    if turn.private:
+        scoped_tools = [
+            t for t in scoped_tools
+            if not privacy.hidden_in_private_mode(
+                t.get("function", {}).get("name", ""), tool_owner.get(t.get("function", {}).get("name", ""))
+            )
+        ]
+    shown = turn.placeholders.restore_text  # the owner's view of model text
 
     # v8.30: per-agent model routing for the ONE case it was never wired
     # for. An explicit focus_agent route and a delegate_task nested run
@@ -5157,22 +5151,8 @@ def _run_dispatch_loop(
         and len(plan_agents) == 1
         and hasattr(ctx.config, "model_for_agent")
     ):
-        # 2026-09-14, real live-caught bug: this used to call
-        # ctx.config.model_for_agent(...) on the ORIGINAL ambient config
-        # regardless of which agent matched -- for a privacy-pinned
-        # match (mail/docs/study/etc) with a real Ollama Cloud key
-        # configured, that resolved a real cloud-only model name
-        # ("gpt-oss:20b") and clobbered it onto THIS turn's `model`, even
-        # though _build_client already put a genuinely LOCAL client
-        # behind this exact turn earlier in the call -- a real,
-        # live-traced local-daemon 404 on an ordinary conversational
-        # query that happened to keyword-route to a privacy-pinned
-        # agent. See _config_for_agent_model's own docstring for the
-        # full three-places-disagreed diagnosis; this is the third.
         _routed_agent = next(iter(plan_agents))
-        routed_model = _config_for_agent_model(ctx.config, _routed_agent).model_for_agent(
-            _routed_agent
-        )
+        routed_model = ctx.config.model_for_agent(_routed_agent)
         if routed_model and routed_model != model:
             model = routed_model
             if event_sink is not None and ctx.depth == 0:
@@ -5278,7 +5258,9 @@ def _run_dispatch_loop(
     if ctx.depth == 0:
         from dourmouse.global_memory import global_memory_enabled
 
-        if global_memory_enabled():
+        # PRIV: memory added without a tool call goes only where the owner
+        # allowed Memory and Private mode is off; it never asks.
+        if global_memory_enabled() and privacy.auto_injection_allowed("memory"):
             try:
                 from dourmouse.global_memory import get_default_memory
 
@@ -5476,17 +5458,23 @@ def _run_dispatch_loop(
         # three can stack on the same turn without clobbering each other.
         if memory_context and bounded:
             bounded = _append_memory_context(bounded, memory_context)
-        response = _call_with_retry(
-            client,
-            model=model,
-            messages=bounded,
-            tools=scoped_tools,
-            config=ctx.config,
-            on_delta=on_delta,
-            on_thinking=on_thinking,
-            event_sink=event_sink,
-            client_factory=client_factory,
-        )
+        # PRIV-2: the live stream shows the real values behind placeholders.
+        restorer = privacy.StreamRestorer(turn.placeholders, on_delta) if on_delta is not None else None
+        try:
+            response = _call_with_retry(
+                client,
+                model=model,
+                messages=bounded,
+                tools=scoped_tools,
+                config=ctx.config,
+                on_delta=restorer.feed if restorer is not None else None,
+                on_thinking=on_thinking,
+                event_sink=event_sink,
+                client_factory=client_factory,
+            )
+        finally:
+            if restorer is not None:
+                restorer.finish()
         message = response.choices[0].message
 
         # Real fix for a live-reproduced Grounded Mode false positive:
@@ -5542,7 +5530,9 @@ def _run_dispatch_loop(
                 text, hits = dlp.redact(text)
                 if hits:
                     text += f"\n[DLP: {len(hits)} secret pattern(s) redacted from model text]"
-            entry = {"type": "assistant_text", "text": text}
+            # PRIV-2: the owner sees real values; the history the model gets
+            # back next turn keeps the placeholders.
+            entry = {"type": "assistant_text", "text": shown(text)}
             transcript.append(entry)
             _emit_event(event_sink, entry, ctx=ctx)
             messages.append({"role": "assistant", "content": text})
@@ -5633,7 +5623,7 @@ def _run_dispatch_loop(
                         for s in missing
                     ) + "]"
                     if transcript and transcript[-1].get("type") == "assistant_text":
-                        transcript[-1]["text"] = text
+                        transcript[-1]["text"] = shown(text)
                     if messages and messages[-1].get("role") == "assistant":
                         messages[-1]["content"] = text
             # v13 Grounded Mode: the nudge budget above is spent and the
@@ -5679,11 +5669,11 @@ def _run_dispatch_loop(
                     "treat it as unverified, not as a live lookup result]"
                 )
                 if transcript and transcript[-1].get("type") == "assistant_text":
-                    transcript[-1]["text"] = text
+                    transcript[-1]["text"] = shown(text)
                 if messages and messages[-1].get("role") == "assistant":
                     messages[-1]["content"] = text
-            _maybe_ingest_memory(ctx.depth, str(last_user), text, plan_agents)
-            return {"final_text": text, "transcript": transcript, "messages": messages}
+            _maybe_ingest_memory(ctx.depth, str(last_user), shown(text), plan_agents)
+            return {"final_text": shown(text), "transcript": transcript, "messages": messages}
 
         assistant_msg: dict[str, Any] = {
             "role": "assistant",
@@ -5737,6 +5727,7 @@ def _run_dispatch_loop(
             transcript.append(use_entry)
             _emit_event(event_sink, use_entry, ctx=ctx)
             spec = registry.lookup(name)
+            gate_arguments: Any = {}
             if spec is None:
                 # v8.11 capability-denial guard: rule 10 of the system
                 # prompt names AGENTS ("system", "dev_coding", ...) in the
@@ -5814,6 +5805,11 @@ def _run_dispatch_loop(
                             f"ERROR: invalid arguments for '{name}': {validation_error}"
                         )
                     else:
+                        # PRIV-2: placeholders the model wrote ("reply to
+                        # [EMAIL_1]") become the real values on this Mac
+                        # before the tool runs; cards and IBANs never do.
+                        arguments = turn.placeholders.restore_arguments(arguments)
+                        gate_arguments = arguments
                         dedup_key = (
                             (name, json.dumps(arguments, sort_keys=True, default=str))
                             if name in _DEDUP_GUARDED_TOOLS
@@ -5860,6 +5856,14 @@ def _run_dispatch_loop(
                 result_text, hits = dlp.redact(result_text)
                 if hits:
                     result_text += f"\n[DLP: {len(hits)} secret pattern(s) redacted from tool result]"
+            # PRIV-1: the privacy gate. T3 never goes; T2 needs the owner's
+            # consent for its source and is refused in Private mode;
+            # identifiers become placeholders. Applies whatever the provider.
+            if result_text:
+                result_text = privacy.gate_tool_result(
+                    name, gate_arguments, result_text, turn=turn,
+                    agent=tool_owner.get(name), ask=privacy_ask,
+                )
 
             result_entry = {"type": "tool_result", "name": name, "text": result_text}
             transcript.append(result_entry)
@@ -5890,8 +5894,8 @@ def _run_dispatch_loop(
             and name in _COMPLETE_ANSWER_TOOLS
             and not result_text.startswith(_NOT_AN_ANSWER_PREFIXES)
         ):
-            _maybe_ingest_memory(ctx.depth, str(last_user), result_text, plan_agents)
-            return {"final_text": result_text, "transcript": transcript, "messages": messages}
+            _maybe_ingest_memory(ctx.depth, str(last_user), shown(result_text), plan_agents)
+            return {"final_text": shown(result_text), "transcript": transcript, "messages": messages}
 
     # v8.28: the loop ran out of tool-call turns (max_turns) while the model
     # was still mid-research — observed live on a completely reasonable
@@ -5963,15 +5967,15 @@ def _run_dispatch_loop(
         if hits:
             forced_text += f"\n[DLP: {len(hits)} secret pattern(s) redacted from model text]"
 
-    entry = {"type": "assistant_text", "text": forced_text}
+    entry = {"type": "assistant_text", "text": shown(forced_text)}
     transcript.append(entry)
     _emit_event(event_sink, entry, ctx=ctx)
     # Keep the history well-formed for multi-turn chat: after a tool exchange
     # the next turn must NOT begin with a "user" message (OpenAI-compatible
     # APIs reject "tool" then "user" without an intervening assistant).
     messages.append({"role": "assistant", "content": forced_text})
-    _maybe_ingest_memory(ctx.depth, str(last_user), forced_text, plan_agents)
-    return {"final_text": forced_text, "transcript": transcript, "messages": messages}
+    _maybe_ingest_memory(ctx.depth, str(last_user), shown(forced_text), plan_agents)
+    return {"final_text": shown(forced_text), "transcript": transcript, "messages": messages}
 
 
 def run_dispatch(

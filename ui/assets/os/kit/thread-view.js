@@ -40,6 +40,7 @@ export function mountThreadView(region, ctx, opts = {}) {
     emptyHint: 'Type a directive below. Enter sends, Shift+Enter starts a new line.',
     newThread: true,
     autonomous: true,
+    private: true,
     actions: [],
     onSent: null,
     onScope: null,
@@ -72,6 +73,33 @@ export function mountThreadView(region, ctx, opts = {}) {
     announcer.textContent = cur && cur.status === 'error' ? 'The run failed.' : cur && cur.status === 'stopped' ? 'Stopped.' : 'Answer ready.';
   }
 
+  /* ---------------- Private mode for this chat (PRIV-5) ---------------- */
+  /* The server keeps it per tab (owner-only route); a chat in Private mode
+     never sends mail, memory, documents, finance, contacts, outside files or
+     screen content to a cloud model, and those tools are hidden from it. */
+  let priv = { known: false, on: false, global: false };
+  async function loadPrivate() {
+    try {
+      const d = await ctx.api.get('/api/os/settings/privacy?tab_id=' + encodeURIComponent(ctx.scope.tabId()));
+      priv = { known: true, on: Boolean(d.chat && d.chat.private), global: Boolean(d.private_mode) };
+    } catch (err) {
+      if (isAbort(err)) return;
+      priv = { known: false, on: false, global: false };
+    }
+    paintChrome();
+  }
+  async function togglePrivate() {
+    const next = !priv.on;
+    try {
+      const d = await ctx.api.post('/api/os/settings/privacy/chat', { tab_id: ctx.scope.tabId(), enabled: next });
+      priv.on = Boolean(d.private);
+      ctx.notify({ level: 'ok', title: next ? 'Private mode on' : 'Private mode off', detail: next ? 'This chat sends no sensitive source to a cloud model.' : 'Sensitive sources go only where you allowed them in SETTINGS, PRIVACY.', ttl: 3000 });
+    } catch (err) {
+      if (!isAbort(err)) ctx.notify({ level: 'error', title: 'Could not change Private mode', detail: err && err.message });
+    }
+    paintChrome();
+  }
+
   /* ---------------- stage bar and composer ---------------- */
   function paintChrome() {
     const busy = thread.busy();
@@ -95,6 +123,15 @@ export function mountThreadView(region, ctx, opts = {}) {
           ctx.autonomous.set(!ctx.autonomous.get());
           paintChrome();
         },
+      });
+    }
+    if (o.private) {
+      actions.push({
+        id: 'thread-private', label: 'Private', pressed: priv.on || priv.global,
+        disabled: !priv.known || priv.global || busy,
+        title: !priv.known ? 'Private mode state could not be read' : priv.global ? 'Private mode is on for every chat in SETTINGS' : busy ? 'Stop the run first' : '',
+        spec: 'Private mode for this chat: mail, memory, documents, finance, contacts, files outside the workspace and screen content are never sent to a cloud model, and the tools that read them are hidden. Public web search still works.',
+        onClick: () => togglePrivate(),
       });
     }
     ctx.chrome.setActions(actions);
@@ -363,6 +400,7 @@ export function mountThreadView(region, ctx, opts = {}) {
   ctx.scope.onChange(() => {
     if (o.onScope) o.onScope();
     reload();
+    if (o.private) loadPrivate();
   });
   /* the elapsed time of a running turn ticks once a second */
   ctx.every(1000, () => {
@@ -379,6 +417,7 @@ export function mountThreadView(region, ctx, opts = {}) {
     /* first paint: the chrome, then the thread as it stands or from the ledger */
     async start() {
       paintChrome();
+      if (o.private) loadPrivate();
       if (thread.turns().length || restored.has(thread.key)) paintAll();
       else await restore();
     },

@@ -1067,7 +1067,18 @@ class TestSharedContextInjection:
     the ToolSpec protocol, so ``_inject_shared_context`` prepends real
     retrieved shared-memory context onto the task string BEFORE the CLI
     subprocess runs, mirroring ``dispatch._append_memory_context``'s own
-    prepend pattern. See ``code_backends._inject_shared_context``."""
+    prepend pattern. See ``code_backends._inject_shared_context``.
+
+    PRIV: shared memory is the owner's Memory source and the CLI sends it to
+    Anthropic or OpenAI, so it is added only with the owner's Memory consent
+    (the no-consent case is test_fix_PRIV_gate.py). These wiring tests run
+    with that consent given."""
+
+    @pytest.fixture(autouse=True)
+    def _memory_allowed(self):
+        from dourmouse import privacy
+
+        privacy.PrivacyStore().set_consent("memory", "allow")
 
     def test_not_configured_injects_nothing_for_claude(self, monkeypatch):
         monkeypatch.delenv("DOURMOUSE_GLOBAL_MEMORY", raising=False)

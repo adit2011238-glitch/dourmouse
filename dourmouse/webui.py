@@ -447,16 +447,20 @@ _AUTONOMOUS_MAX_TURNS = 24
 
 
 class _PendingConfirmation:
-    __slots__ = ("confirm_id", "prompt_text", "_event", "_approved")
+    __slots__ = ("confirm_id", "prompt_text", "_event", "_approved", "answered")
 
     def __init__(self, confirm_id: str, prompt_text: str) -> None:
         self.confirm_id = confirm_id
         self.prompt_text = prompt_text
         self._event = threading.Event()
         self._approved = False
+        # PRIV: False when the card closed without the owner answering (no
+        # window to show it in, a timeout): a consent question then stores nothing.
+        self.answered = False
 
-    def resolve(self, approved: bool) -> None:
+    def resolve(self, approved: bool, answered: bool = True) -> None:
         self._approved = approved
+        self.answered = answered
         self._event.set()
 
     def wait(self) -> bool:
@@ -535,12 +539,38 @@ class WebConfirmationGate:
             self._pending.pop(confirm_id, None)
         return approved
 
-    def resolve(self, confirm_id: str, approved: bool) -> bool:
+    def ask_owner(self, prompt_text: str) -> bool | None:
+        """PRIV: a privacy consent card. Unlike ``__call__`` it is never
+        answered by auto approve (that switch skips action cards; sharing a
+        source with a cloud model is the owner's own choice). Returns None
+        when nobody answered (no window, hands-free voice, a timeout), so the
+        caller stores nothing."""
+        with self._lock:
+            self._next_id += 1
+            confirm_id = f"confirm-{self._next_id}"
+            pending = _PendingConfirmation(confirm_id, prompt_text)
+            self._pending[confirm_id] = pending
+        event = {
+            "type": "confirmation_requested",
+            "id": confirm_id,
+            "prompt": prompt_text,
+            "kind": "privacy_consent",
+            "autonomous": self.autonomous,
+        }
+        try:
+            self._emit(event)
+            approved = pending.wait()
+        finally:
+            with self._lock:
+                self._pending.pop(confirm_id, None)
+        return approved if pending.answered else None
+
+    def resolve(self, confirm_id: str, approved: bool, answered: bool = True) -> bool:
         with self._lock:
             pending = self._pending.get(confirm_id)
         if pending is None:
             return False
-        pending.resolve(approved)
+        pending.resolve(approved, answered=answered)
         return True
 
     def pending_items(self) -> list[tuple[str, str]]:
@@ -561,7 +591,9 @@ def _decline_confirmations(gate: "WebConfirmationGate") -> Callable[[dict[str, A
 
     def emit(event: dict[str, Any]) -> None:
         if event.get("type") == "confirmation_requested":
-            gate.resolve(str(event.get("id") or ""), False)
+            # A consent card nobody saw is not a "no" (PRIV): nothing is stored.
+            gate.resolve(str(event.get("id") or ""), False,
+                         answered=event.get("kind") != "privacy_consent")
 
     return emit
 
@@ -2129,6 +2161,11 @@ def _configure_owner_gate(server: Any, owner_secret: str | None) -> None:
         problem = "the owner secret is not 32 to 256 URL-safe characters"
         secret = None
     server.owner_secret = secret or ""
+    if secret:
+        # PRIV T3: the owner secret is never sent to a model, whatever reads it.
+        from dourmouse import privacy
+
+        privacy.register_never_send(secret)
     server.owner_gate_enforced = secret is not None
     if secret is not None:
         server.owner_gate_state = "enforced: owner-only routes need the app window's per-launch secret"
@@ -5597,6 +5634,9 @@ class _Handler(BaseHTTPRequestHandler):
         finally:
             google_auth.set_current_user(None)
             project_scope.leave()  # finding #118: never leak a project into the next request
+            from dourmouse import privacy
+
+            privacy.leave_chat()  # PRIV: never leak a chat's Private mode into the next request
 
     def _handle_chat_authed(self) -> None:
         """The authorized half of /api/chat (user bound; thread-local cleared
@@ -5611,6 +5651,11 @@ class _Handler(BaseHTTPRequestHandler):
         # exactly the old single shared session; see
         # _session_gate_lock_for_tab's own docstring.
         tab_id = (body.get("tab_id") or "").strip()
+        # PRIV: this tab is the chat whose Private mode and placeholder map
+        # the turn uses ("default" for the shared session).
+        from dourmouse import privacy
+
+        privacy.enter_chat(tab_id)
         # OS-6 (finding #118): a project's tab works inside the project's
         # own folder for this whole turn (file and coding tools included).
         if tab_id:
@@ -5714,31 +5759,10 @@ class _Handler(BaseHTTPRequestHandler):
                 f"something up or take an action. TASK: {prompt}"
             )
             if self.server.config is not None:
-                # 2026-09-14, real live-caught bug (STUDY tab, "HTTP Error
-                # 404: Not Found" on every question): _build_client()
-                # already knows a privacy-pinned agent (mail/docs/study/
-                # etc, model_delegation._LOCAL_ONLY_AGENTS) must run on a
-                # genuinely local Ollama client even when a real Ollama
-                # Cloud key is configured -- it swaps in
-                # load_ollama_config(force_local=True) for the CLIENT.
-                # This model_override computation never got the same
-                # memo: it kept calling model_for_agent() on the ambient
-                # (cloud) config, handing the local client a real cloud-
-                # only model name ("gpt-oss:20b", never pulled locally),
-                # which the local daemon then genuinely 404'd on. Traced
-                # live: client._root was correctly 127.0.0.1:11434, but
-                # the payload's own "model" field still said
-                # "gpt-oss:20b". 2026-09-14: this exact class of bug turned
-                # out to exist in THREE places (this one, dispatch.py's
-                # own top-level model resolution, and its per-agent
-                # routing refinement) -- all three now share one helper,
-                # dispatch._config_for_agent_model, so they can never
-                # independently disagree again (see its own docstring for
-                # the full diagnosis).
-                from dourmouse.dispatch import _config_for_agent_model
-
-                effective_config = _config_for_agent_model(self.server.config, focus_agent)
-                model_override = effective_config.model_for_agent(focus_agent)
+                # The focus agent's own model on the configured backend. PRIV
+                # (2026-10-12): no per-agent local swap any more; the privacy
+                # gate protects a sensitive agent's content on any backend.
+                model_override = self.server.config.model_for_agent(focus_agent)
 
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")

@@ -1156,3 +1156,4 @@ and a real build sequence, not just a requirement statement:
 - [x] Finding #176 2026-10-12 -- Fix wave 2b: cross-host Google sign-in, single config writer, trading guardrails wired (order_guard.py), SupabaseSync deleted, leftovers. Trading guard review found 3 high follow-ups (W3R-1..3), fixed next.
 - [x] Finding #177 2026-10-12 -- Fix wave 2c: trading guard hardened (state protected and signed, closes always allowed, MARKET sizing, hedging, locks). Second review: 13 more (W4R-1..13) next. NO real orders until owner demo test.
 - [x] Finding #178 2026-10-12 -- Fix wave 2d: trading guard counts queued orders, atomic check-and-send, unknown-status wording, rearm repair, freshness counter. Demo checklist written. NO real orders until the owner's demo test.
+- [x] Finding #179 2026-10-12 -- PRIV: tiers T0-T3, consent per source, Private mode, placeholders, egress ledger, SETTINGS privacy card, local routing removed. Review next; H-PRIV-5/6/7 open.

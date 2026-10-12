@@ -1,4 +1,4 @@
-"""Claude-as-orchestrator: fan work out to the cheaper local and cloud models.
+"""Claude-as-orchestrator: fan work out to other cloud models concurrently.
 
 The architecture this implements, per the user's instruction: Claude Code is
 the brain the user talks to in every tab. It does not do all the work itself.
@@ -7,41 +7,36 @@ one for that piece, runs them CONCURRENTLY, and reports back. That is what
 makes rapid-fire multi-prompt work feel fast -- five delegated questions take
 about as long as the slowest one, not the sum of all five.
 
-Three backends, three jobs:
+Two ways a delegated task can run:
 
-  Claude (the orchestrator)   Planning, decomposition, code, multi-step tool
-                              use, and assembling the final answer. It is the
-                              only model that talks to the user.
+  The roster (ROSTER)         The real dispatch loop with the named agent's
+                              real tools, on this machine's configured
+                              backend (Ollama Cloud with a key). Every tool
+                              result passes the privacy gate (privacy.py):
+                              tiers, the owner's consent per source, Private
+                              mode, placeholders for identifiers, the egress
+                              ledger.
 
-  Ollama (local)              Anything touching the user's private data. Free,
-                              private, already holds the whole agent roster.
-
-  Gemini (Google AI Studio)   Bulk work over PUBLIC data: research,
-                              summarisation, long-document reading, news and
+  Gemini (GEMINI)             One tool-less Gemini call for work whose input
+                              is public: research, summarisation, news and
                               world-monitor analysis. Large context, fast,
                               cheap.
 
 -----------------------------------------------------------------------------
-The routing rule, and why it is what it is
+The routing rule (PRIV, 2026-10-12)
 -----------------------------------------------------------------------------
-The split is drawn on PRIVACY first and capability second, because that is the
-line that actually matters and the one that is expensive to get wrong.
+Every model Dourmouse uses runs in the cloud (the owner's rule), so routing
+cannot keep anything on this machine and no longer claims to. It used to: a
+"local only" agent list promised that mail, memory, files and money never
+left the laptop, which was false the moment a cloud key was set (A-13).
 
-Anything that reads the user's mail, memory, files, calendar, Drive, finances
-or personal documents routes to Ollama, which runs on this machine. Sending
-that content to a cloud API would mean the user's inbox leaving their laptop
-to answer a question they thought was local. No amount of speed justifies it,
-so those agents are pinned local and the policy below is explicit rather than
-heuristic -- a heuristic would eventually guess wrong on a new agent, and the
-failure would be silent.
-
-Everything whose input is already public -- a news article, a web page, a
-research question, a world-monitor feed -- can go to Gemini, where the large
-context window and low cost are a genuine win.
-
-Agents not named in the policy default to LOCAL. That default is deliberate:
-if a future agent is added and nobody thinks about its routing, the safe
-outcome is that it stays on the machine.
+What routing still decides is whether a task gets real tools. An agent whose
+input is public may use tool-less Gemini. Every other agent, the sensitive
+ones above all (privacy.SENSITIVE_AGENTS), runs through the roster, where the
+privacy gate applies to whatever it reads. A model-supplied ``model`` cannot
+move a sensitive agent's task to Gemini (P5-31): that would hand the
+model-written prompt, possibly holding content it already read, to another
+provider without the gate.
 """
 
 from __future__ import annotations
@@ -55,79 +50,9 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-#: Agents pinned to the local model because their inputs are the user's own
-#: private data. Not a performance judgement -- a privacy one.
-#: Agents pinned to the local model because their inputs are the user's own
-#: private data. Not a performance judgement -- a privacy one. Names checked
-#: against the real registry (35 agents), not guessed.
-_LOCAL_ONLY_AGENTS = frozenset({
-    # Personal correspondence, documents and memory.
-    "mail", "comms", "messenger", "docs", "memory", "companion",
-    # The user's machine, files, schedule and running processes.
-    "admin_ops", "system", "tasks", "scheduling", "compute",
-    "browser", "panel_control", "freebuff", "design_3d",
-    # Controls other apps running on the user's own machine (window
-    # contents, keystrokes typed into them) -- same privacy class as
-    # system/admin_ops, not public-web material.
-    "apps", "app_driver",
-    # Money. Positions, balances and brokerage credentials.
-    "markets", "forex", "mt5", "t212",
-    # The user's own private repositories and research pipeline.
-    # v14 (user-directed, 2026-09-08): "atlas", "atlas_cmd", "atlas_ui"
-    # removed -- the ATLAS subagent was unplugged from the live roster
-    # entirely (see general_roster.py's own comment on the same date),
-    # so pinning a name that no longer resolves to anything is dead
-    # weight. Any name NOT listed here defaults to LOCAL routing anyway
-    # (see this module's own default-safe fallback below), so removing
-    # a name only ever widens what MAY be routed to cloud for agents
-    # that still exist -- it never silently exposes a real one.
-    "dev_coding",
-    # Reads real file content from the user's own repositories to review it
-    # (2026-09-20, Domain F's reviewer role) -- same privacy class as
-    # dev_coding right above, even though it cannot write or execute.
-    "reviewer",
-    # Reads and summarizes real content from the user's own configured
-    # folders (Domain E's device wiki, 2026-09-21) -- personal file
-    # content, same privacy class as "docs"/"memory" above.
-    "device_wiki",
-    # Delegating to a coding CLI from inside a delegated turn is a recursion
-    # risk, so these never route anywhere but local, and in practice the tool
-    # below refuses them outright.
-    "code_claude", "code_codex", "code_deepseek", "code_nvidia", "code_ollama",
-    # 2026-09-18: drafts real Python source that becomes part of this very
-    # system after a human approves it (Domain D, dourmouse/
-    # self_extensions.py) -- the same privacy/sensitivity class as the
-    # coding agents right above, not public-web material.
-    #
-    # "self_extended" (the tools a human has actually approved) is
-    # deliberately NOT listed here -- it only registers once at least one
-    # extension exists, so it isn't always a real agent, and this
-    # module's own established pattern (see the removed atlas/atlas_cmd/
-    # atlas_ui comment above) is to never pin a name that doesn't
-    # currently resolve to anything. Any unclassified agent defaults to
-    # LOCAL routing anyway (this module's own safe fallback), so
-    # self_extended is never accidentally cloud-routed by this omission.
-    "agent_smith",
-    "orchestrator",
-    # Spawns background tasks that can call ANY tool, including the
-    # private-data ones above -- same reasoning as orchestrator itself.
-    "goals",
-    # This host's own network topology, ARP neighbors, and listening
-    # services -- the same privacy class as system/admin_ops above.
-    "security",
-    # The user's real Gmail/Drive/Sheets/Slides/Calendar. Textbook private
-    # data -- an inbox or a Drive file leaving the machine to answer a
-    # question the user thought was local is exactly what this policy
-    # exists to prevent.
-    "google_workspace",
-    # The user's own study folder (~/Documents/MYP data folder) -- their
-    # own documents, same privacy class as mail/docs above.
-    "study",
-})
-
 #: Agents whose inputs are public by nature, where Gemini's large context and
-#: low cost are a real win and nothing private leaves the machine.
-_CLOUD_OK_AGENTS = frozenset({
+#: low cost are a real win. Every agent not listed runs through the roster.
+_PUBLIC_INPUT_AGENTS = frozenset({
     "research_info",
     "news",
     "worldmonitor",
@@ -143,8 +68,8 @@ _CLOUD_OK_AGENTS = frozenset({
     # setting (there is no local image-gen backend at all) -- this only
     # controls whether the CONVERSATIONAL/routing layer around a request
     # aimed at this agent may also use cloud Gemini, and an image prompt
-    # is not the personal/financial data class _LOCAL_ONLY_AGENTS exists
-    # to protect.
+    # is not the personal/financial data class privacy.SENSITIVE_AGENTS
+    # covers.
     "media",
     # 2026-09-19: field-specialist qualification (research_mesh_tools.py).
     # The real corpus is public academic exam papers scraped from public
@@ -153,32 +78,50 @@ _CLOUD_OK_AGENTS = frozenset({
     "research_mesh",
 })
 
-LOCAL = "ollama"
-CLOUD = "gemini"
+ROSTER = "roster"
+GEMINI = "gemini"
 
 
-def route_for(agent: str | None, *, allow_cloud: bool = True) -> str:
-    """Which backend should handle work for ``agent``.
+def route_for(agent: str | None, *, allow_gemini: bool = True) -> str:
+    """How a task for ``agent`` runs: ``GEMINI`` (one tool-less call) only
+    for a public-input agent while Gemini is configured and allowed, else
+    ``ROSTER`` (the dispatch loop with the agent's tools, behind the privacy
+    gate). Unknown agents run through the roster."""
+    from dourmouse.privacy import SENSITIVE_AGENTS
 
-    Unknown agents default to LOCAL, deliberately -- see the module docstring.
-    ``allow_cloud=False`` forces everything local, which is what a global
-    privacy switch would flip.
-    """
-    if not allow_cloud or not gemini_available():
-        return LOCAL
     name = (agent or "").strip().lower()
-    if name in _LOCAL_ONLY_AGENTS:
-        return LOCAL
-    if name in _CLOUD_OK_AGENTS:
-        return CLOUD
-    return LOCAL
+    if not allow_gemini or name in SENSITIVE_AGENTS or name not in _PUBLIC_INPUT_AGENTS:
+        return ROSTER
+    return GEMINI if gemini_available() else ROSTER
+
+
+def _backend_for(task: "DelegationTask", allow_gemini: bool) -> str:
+    """The task's own ``model`` may pick Gemini only for an agent that is
+    not sensitive, and no task goes to Gemini once the request has read a
+    sensitive source (P5-31); ``model`` naming anything else runs the roster."""
+    from dourmouse.privacy import SENSITIVE_AGENTS
+
+    from dourmouse.privacy import current_turn
+
+    turn = current_turn()
+    if turn is not None and turn.sources:
+        # This request already read a sensitive source; the model-written
+        # prompt may quote it, so it stays on the request's own backend.
+        return ROSTER
+    asked = (task.model or "").strip().lower()
+    name = (task.agent or "").strip().lower()
+    if asked == GEMINI and allow_gemini and name not in SENSITIVE_AGENTS and gemini_available():
+        return GEMINI
+    if asked:
+        return ROSTER
+    return route_for(task.agent, allow_gemini=allow_gemini)
 
 
 def gemini_available() -> bool:
     """True only if the Gemini backend is present AND configured.
 
     Imported lazily and defensively: this module must keep working, routing
-    everything local, on a machine where Gemini was never set up.
+    everything through the roster, on a machine where Gemini was never set up.
     """
     try:
         from dourmouse import gemini_backend
@@ -202,7 +145,8 @@ class DelegationTask:
     prompt: str
     #: Which roster agent should handle it. None lets the orchestrator route.
     agent: str | None = None
-    #: Force a backend. None means: apply the policy above.
+    #: Ask for a backend ("gemini"). Honoured only for an agent that is not
+    #: sensitive; None means: apply the policy above.
     model: str | None = None
     #: Free-form label so a caller can match results back to intent.
     label: str = ""
@@ -224,11 +168,8 @@ class DelegationResult:
 # Execution
 # --------------------------------------------------------------------------- #
 
-#: Concurrency ceiling. Local generation is memory-bound, not CPU-bound: each
-#: concurrent Ollama turn holds its own KV cache, and with num_ctx now at
-#: 32768 (see dispatch._OLLAMA_NUM_CTX) four of those is already a lot of
-#: resident memory on a laptop. Cloud calls are cheap to parallelise but are
-#: bounded by the same pool so one fan-out cannot starve the machine.
+#: Concurrency ceiling: one fan-out is bounded so it cannot flood the
+#: provider's rate limits or starve the machine of threads.
 _DEFAULT_MAX_WORKERS = int(os.environ.get("DOURMOUSE_DELEGATE_WORKERS", "4"))
 
 _pool_lock = threading.Lock()
@@ -252,8 +193,8 @@ def inherit_caller(ctx: Any) -> Iterator[None]:
         _caller_ctx.reset(token)
 
 
-def _run_local(task: DelegationTask, timeout: float) -> DelegationResult:
-    """One turn on the local model, through the real dispatch loop.
+def _run_roster(task: DelegationTask, timeout: float) -> DelegationResult:
+    """One turn through the real dispatch loop on the configured backend.
 
     Goes through run_dispatch_messages rather than a bare completion call so
     the delegated turn gets the SAME real tools the user would get -- a
@@ -329,7 +270,7 @@ def _run_local(task: DelegationTask, timeout: float) -> DelegationResult:
             task=task,
             ok=True,
             text=text,
-            model_used=LOCAL,
+            model_used=ROSTER,
             seconds=time.monotonic() - started,
         )
     except Exception as exc:  # noqa: BLE001 - one failed branch must not kill the fan-out
@@ -339,17 +280,17 @@ def _run_local(task: DelegationTask, timeout: float) -> DelegationResult:
             task=task,
             ok=False,
             error=f"{type(exc).__name__}: {exc}",
-            model_used=LOCAL,
+            model_used=ROSTER,
             seconds=time.monotonic() - started,
         )
 
 
-def _run_cloud(task: DelegationTask, timeout: float) -> DelegationResult:
-    """One turn on Gemini.
+def _run_gemini(task: DelegationTask, timeout: float) -> DelegationResult:
+    """One tool-less turn on Gemini, for a public-input task.
 
-    No tools: this path is deliberately reserved for reasoning over text the
-    caller already supplies. Giving the cloud model the private-data tools is
-    exactly what the routing policy above exists to prevent.
+    The prompt is written by the calling model and may quote what it read,
+    so it gets the same placeholder swap as a tool result (PRIV-2), and the
+    answer is restored on this Mac. ``call_gemini`` records the egress row.
     """
     import time
 
@@ -361,7 +302,7 @@ def _run_cloud(task: DelegationTask, timeout: float) -> DelegationResult:
             task=task,
             ok=False,
             error=f"NOT CONFIGURED: the Gemini backend is unavailable ({exc}).",
-            model_used=CLOUD,
+            model_used=GEMINI,
         )
     try:
         usage: dict[str, Any] = {}
@@ -369,12 +310,19 @@ def _run_cloud(task: DelegationTask, timeout: float) -> DelegationResult:
         def _on_usage(u: dict[str, Any]) -> None:
             usage.update(u or {})
 
-        text = gemini_backend.call_gemini(task.prompt, timeout=timeout, on_usage=_on_usage)
+        from dourmouse import privacy
+        from dourmouse.governance import PiiRedactor
+
+        with privacy.turn_scope() as turn:
+            prompt, counts = PiiRedactor(privacy.owner_emails()).redact(task.prompt, turn.placeholders)
+            turn.redactions.update(counts)
+            text = gemini_backend.call_gemini(prompt, timeout=timeout, on_usage=_on_usage)
+            text = turn.placeholders.restore_text(str(text or ""))
         return DelegationResult(
             task=task,
             ok=True,
-            text=str(text or ""),
-            model_used=CLOUD,
+            text=text,
+            model_used=GEMINI,
             seconds=time.monotonic() - started,
             usage=usage,
         )
@@ -383,7 +331,7 @@ def _run_cloud(task: DelegationTask, timeout: float) -> DelegationResult:
             task=task,
             ok=False,
             error=f"{type(exc).__name__}: {exc}",
-            model_used=CLOUD,
+            model_used=GEMINI,
             seconds=time.monotonic() - started,
         )
 
@@ -393,7 +341,7 @@ def delegate(
     *,
     max_workers: int | None = None,
     timeout: float = 300.0,
-    allow_cloud: bool = True,
+    allow_gemini: bool = True,
     on_result: Callable[[DelegationResult], None] | None = None,
 ) -> list[DelegationResult]:
     """Run every task concurrently and return results in the ORIGINAL order.
@@ -414,10 +362,8 @@ def delegate(
 
     def _one(index: int, task: DelegationTask) -> None:
         try:
-            backend = (task.model or "").strip().lower() or route_for(
-                task.agent, allow_cloud=allow_cloud
-            )
-            runner = _run_cloud if backend == CLOUD else _run_local
+            backend = _backend_for(task, allow_gemini)
+            runner = _run_gemini if backend == GEMINI else _run_roster
             result = runner(task, timeout)
         except BaseException as exc:  # noqa: BLE001
             # The runners catch their own errors, but a raise from routing --

@@ -131,3 +131,37 @@ export function activityLine(e, now = Date.now()) {
 export function activityRow(item) {
   return (clock(item.at) || '--:--:--') + '  ' + item.text;
 }
+
+/* ---------------- PRIV-4: what was sent to cloud models ---------------- */
+/* One row of GET /api/os/privacy/egress, worded for the screen. The ledger
+   holds metadata only (never content), so neither does this. */
+const TIER_WORD = { T0: 'public', T1: 'personal', T2: 'sensitive', T3: 'withheld' };
+
+export function egressRow(r) {
+  const tiers = r && r.tiers ? r.tiers : {};
+  const parts = ['T0', 'T1', 'T2', 'T3'].filter((t) => Number(tiers[t]) > 0).map((t) => tiers[t] + ' ' + TIER_WORD[t]);
+  const red = r && r.redactions ? Object.entries(r.redactions).map(([k, n]) => n + ' ' + k.toLowerCase()) : [];
+  const kb = Number(r && r.bytes) || 0;
+  return {
+    when: r && r.ts ? String(r.ts).replace('T', ' ').replace('Z', ' UTC') : 'unknown time',
+    provider: (r && r.provider) || 'unknown provider',
+    model: (r && r.model) || '',
+    size: kb >= 1024 ? (kb / 1024).toFixed(1) + ' KB' : kb + ' bytes',
+    tiers: parts.length ? parts.join(', ') : 'no tool results',
+    sources: r && Array.isArray(r.sources) && r.sources.length ? r.sources.join(', ') : '',
+    redactions: red.length ? red.join(', ') + ' replaced' : '',
+    sensitive: Number(tiers.T2) > 0,
+    private: Boolean(r && r.private),
+  };
+}
+
+export function egressSummary(d) {
+  const s = d && d.summary ? d.summary : null;
+  if (!s) return 'The ledger could not be read.';
+  if (!s.requests) return 'No request to a cloud model is recorded yet.';
+  const by = Object.entries(s.by_provider || {}).map(([p, n]) => p + ' ' + n).join(', ');
+  let text = 'The last ' + s.requests + (s.requests === 1 ? ' request' : ' requests') + ' to cloud models: ' + by + '. '
+    + s.with_sensitive + ' carried sensitive content the owner allowed.';
+  if (s.write_failures) text += ' ' + s.write_failures + ' could not be written to the ledger (see the server log).';
+  return text;
+}

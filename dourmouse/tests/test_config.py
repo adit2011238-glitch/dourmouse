@@ -328,24 +328,12 @@ class TestOrchestratorModelSetting:
         assert load_ollama_config().model_for_agent("orchestrator") != "ollama/persisted-choice"
 
 
-class TestSkipPersistedOrchestratorChoice:
-    """Real bug, found live this session: force_local=True was built to
-    make a config fully local (is_cloud=False, api_key="", no cloud base
-    URL) — but model_for_agent("orchestrator") still unconditionally
-    honored a persisted orchestrator-model choice regardless of that
-    flag. On this machine the persisted choice was "gpt-oss:20b" (a
-    cloud-only model, saved back when Ollama Cloud was the active
-    backend) — so a force_local config still resolved to a model that
-    does not exist on the local daemon, and every "apps"/"mail"/etc.
-    call (privacy-pinned to force_local per _LOCAL_ONLY_AGENTS) 404'd.
-    Confirmed live via a real GET to http://127.0.0.1:11434/api/tags:
-    "gpt-oss:20b" is not among the locally-pulled models.
-
-    skip_persisted_orchestrator_choice (set by load_ollama_config's
-    force_local=True) closes this: a force_local config skips the
-    persisted-choice lookup entirely and falls through to
-    _OLLAMA_FAST_DISPATCH's local pin ("qwen2.5:7b", confirmed present
-    locally) instead."""
+class TestPersistedOrchestratorChoice:
+    """PRIV-3 / A-13 (2026-10-12): the local-forcing parameter and its
+    skip_persisted_orchestrator_choice flag are gone with local routing (the
+    tests that pinned them were removed with the feature). What stays: a
+    cloud config never sends a stale LOCAL persisted model name to Ollama
+    Cloud, and a non-cloud config honours the persisted choice."""
 
     def _isolate(self, monkeypatch, tmp_path):
         monkeypatch.setattr(
@@ -355,60 +343,16 @@ class TestSkipPersistedOrchestratorChoice:
             "dourmouse.config.user_config_dir", lambda: tmp_path / "dourmouse"
         )
 
-    def test_force_local_skips_persisted_choice_and_uses_fast_dispatch_pin(
-        self, monkeypatch, tmp_path
-    ):
+    def test_a_non_cloud_config_still_honors_the_persisted_choice(self, monkeypatch, tmp_path):
         self._isolate(monkeypatch, tmp_path)
-        monkeypatch.delenv("DOURMOUSE_OLLAMA_MODEL_ORCHESTRATOR", raising=False)
-        from dourmouse.config import load_ollama_config, save_orchestrator_model_setting
-
-        # Simulate this machine's real persisted state: a cloud-only
-        # model saved while Ollama Cloud was active.
-        save_orchestrator_model_setting("gpt-oss:20b", backend="ollama")
-
-        cfg = load_ollama_config(force_local=True)
-        assert cfg.skip_persisted_orchestrator_choice is True
-        assert cfg.model_for_agent("orchestrator") == "qwen2.5:7b"
-        assert cfg.model_for_agent("orchestrator") != "gpt-oss:20b"
-
-    def test_non_force_local_still_honors_persisted_choice_unaffected(
-        self, monkeypatch, tmp_path
-    ):
-        """The fix must be scoped to force_local only — normal (cloud)
-        configs keep today's existing, working behavior exactly."""
-        self._isolate(monkeypatch, tmp_path)
+        monkeypatch.delenv("OLLAMA_API_KEY", raising=False)
         monkeypatch.delenv("DOURMOUSE_OLLAMA_MODEL_ORCHESTRATOR", raising=False)
         from dourmouse.config import load_ollama_config, save_orchestrator_model_setting
 
         save_orchestrator_model_setting("gpt-oss:20b", backend="ollama")
-
-        cfg = load_ollama_config(force_local=False)
-        assert cfg.skip_persisted_orchestrator_choice is False
+        cfg = load_ollama_config()
+        assert cfg.is_cloud is False
         assert cfg.model_for_agent("orchestrator") == "gpt-oss:20b"
-
-    def test_plain_construction_defaults_flag_to_false(self):
-        """A bare OllamaConfig() (no force_local involved at all) must
-        default to the old, unconditional-honor behavior — this flag is
-        opt-in, never a silent behavior change for existing callers."""
-        assert OllamaConfig().skip_persisted_orchestrator_choice is False
-
-    def test_flag_does_not_affect_non_orchestrator_agents(self, monkeypatch, tmp_path):
-        """skip_persisted_orchestrator_choice only ever gates the
-        persisted-setting lookup, which only ever applies to the
-        "orchestrator" key — a non-orchestrator agent's resolution path
-        (agent_models override, then the fast-dispatch pin, then the
-        plain default) must be identical either way."""
-        self._isolate(monkeypatch, tmp_path)
-        monkeypatch.delenv("DOURMOUSE_OLLAMA_MODEL_ORCHESTRATOR", raising=False)
-        from dourmouse.config import load_ollama_config, save_orchestrator_model_setting
-
-        save_orchestrator_model_setting("gpt-oss:20b", backend="ollama")
-
-        local_cfg = load_ollama_config(force_local=True)
-        cloud_cfg = load_ollama_config(force_local=False)
-        # "apps" has no dedicated fast-dispatch entry, so both fall
-        # through to the plain per-config default model either way.
-        assert local_cfg.model_for_agent("apps") == cloud_cfg.model_for_agent("apps")
 
     def test_cloud_config_skips_a_stale_local_persisted_choice(self, monkeypatch, tmp_path):
         """The mirror bug, live-caught 2026-09-20 (research_pipeline's own
@@ -417,8 +361,7 @@ class TestSkipPersistedOrchestratorChoice:
         locality. Once OLLAMA_API_KEY later makes this SAME config cloud,
         that stale local value must never be sent to Ollama Cloud --
         confirmed live as a real, reproducible 404 (Ollama Cloud has no
-        "qwen2.5:7b" in its catalog). Unlike the tests above, force_local
-        is never set here -- is_cloud alone must gate this, the same guard
+        "qwen2.5:7b" in its catalog). is_cloud alone gates this, the same guard
         _OLLAMA_FAST_DISPATCH's own pin already uses two lines below it in
         model_for_agent."""
         self._isolate(monkeypatch, tmp_path)
@@ -429,7 +372,7 @@ class TestSkipPersistedOrchestratorChoice:
 
         save_orchestrator_model_setting("qwen2.5:7b", backend="ollama")
 
-        cfg = load_ollama_config(force_local=False)
+        cfg = load_ollama_config()
         assert cfg.is_cloud is True
         assert cfg.model_for_agent("orchestrator") != "qwen2.5:7b"
         assert cfg.model_for_agent("orchestrator") == cfg.model  # the real cloud default

@@ -58,3 +58,22 @@ def test_quarantine_refuses_system_paths_in_any_case(tmp_path):
             _check_quarantinable(p)
     with pytest.raises(ResponseRefused):
         _check_quarantinable(Path("/System/Library"))
+
+
+def test_long_confirmation_required_text_is_not_replaced_by_the_privacy_gate():
+    """Finding #179: the dispatcher's own long CONFIRMATION REQUIRED message must reach the model."""
+    from dourmouse import privacy
+
+    text = "CONFIRMATION REQUIRED: run this privileged command: " + "x" * 1500 + " NOT executed."
+    turn = privacy.TurnPrivacy(chat="t", private=False, placeholders=privacy.PlaceholderMap())
+    out = privacy.gate_tool_result("run_privileged_command", {"command": "touch /tmp/a"}, text, turn=turn)
+    assert out == text
+
+
+def test_long_private_data_starting_with_error_is_still_gated():
+    from dourmouse import privacy
+
+    text = "ERROR " + "private data " * 200
+    turn = privacy.TurnPrivacy(chat="t", private=True, placeholders=privacy.PlaceholderMap())
+    out = privacy.gate_tool_result("run_privileged_command", {"command": "cat ~/Documents/x"}, text, turn=turn)
+    assert out != text

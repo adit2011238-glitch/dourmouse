@@ -2644,6 +2644,11 @@ class TestGlobalMemoryWiring:
                 pass
 
         monkeypatch.setattr("dourmouse.global_memory.get_default_memory", lambda: _FakeMemory())
+        # PRIV: memory added without a tool call needs the owner's Memory
+        # consent (cloud-only app); this test is about the wiring, so allow it.
+        from dourmouse import privacy
+
+        privacy.PrivacyStore().set_consent("memory", "allow")
 
         client = FakeClient([_FakeResponse(_FakeMessage(content="ok"))])
         run_dispatch("check my inbox", _test_registry(), client=client)
@@ -3366,13 +3371,9 @@ class TestOllamaCloudAccountPoolWiring:
         assert rotated_model == "m"
 
     def test_a_local_not_cloud_config_never_rotates_even_with_keys_configured(self, monkeypatch):
-        """The real safety guard this whole extension exists to preserve:
-        a privacy-pinned, force_local=True OllamaConfig (is_cloud=False)
-        must never be rotated into a cloud account, no matter how many
-        OLLAMA_API_KEY_* entries happen to be configured elsewhere in the
-        environment — the same privacy leak class this codebase already
-        found and fixed once this session (see load_ollama_config's own
-        force_local docstring), not reintroduced here."""
+        """A config pointed at an explicit endpoint (is_cloud=False) is the
+        operator's own choice and must never be rotated onto Ollama Cloud
+        accounts, however many OLLAMA_API_KEY_* entries are configured."""
         from dourmouse.config import OllamaConfig
 
         monkeypatch.setenv("OLLAMA_API_KEY", "key1")
@@ -3501,12 +3502,12 @@ class TestAgentSplitBackend:
         target to hit, it's however many real agents are privacy-
         sensitive vs not)."""
         from dourmouse.general_roster import build_general_registry
-        from dourmouse.model_delegation import CLOUD, route_for
+        from dourmouse.model_delegation import GEMINI, route_for
 
         names = [s.name for s in build_general_registry().all_subagents()]
         backends = [dispatch_module._agent_split_backend(n) for n in names]
         claude_count = backends.count("claude")
-        local_count = backends.count("local")
+        local_count = backends.count("default")
         gemini_count = backends.count("gemini")
         assert claude_count + local_count + gemini_count == len(names)
         heavy_count = sum(1 for n in names if dispatch_module._is_heavy_workflow_agent(n))
@@ -3519,11 +3520,11 @@ class TestAgentSplitBackend:
         for name, backend in zip(names, backends, strict=True):
             if backend == "claude":
                 continue
-            assert backend == ("gemini" if route_for(name) == CLOUD else "local"), name
+            assert backend == ("gemini" if route_for(name) == GEMINI else "default"), name
 
     def test_every_result_is_a_valid_backend_name(self):
         for name in ("mail", "code_claude", "research_info", "worldmonitor", "atlas", "tasks"):
-            assert dispatch_module._agent_split_backend(name) in ("claude", "local", "gemini")
+            assert dispatch_module._agent_split_backend(name) in ("claude", "default", "gemini")
 
     def test_heavy_workflow_agents_always_escalate_to_claude(self):
         for name in ("code_claude", "cn_backends_probe", "research_info", "atlas_lab"):
@@ -3533,15 +3534,15 @@ class TestAgentSplitBackend:
         # worldmonitor moved to the heavy list (see its own dedicated test
         # above) — not included here any more.
         for name in ("mail", "tasks", "calendar"):
-            assert dispatch_module._agent_split_backend(name) in ("local", "gemini")
+            assert dispatch_module._agent_split_backend(name) in ("default", "gemini")
 
-    def test_privacy_sensitive_agents_stay_local_not_cloud(self):
-        """The real value of merging with model_delegation.py: mail/docs/
-        money/the user's own repos must never land on the cloud side,
-        which an arbitrary even split could do and privacy-first routing
-        never should."""
+    def test_sensitive_agents_never_land_on_tool_less_gemini(self):
+        """PRIV (2026-10-12): every backend is a cloud backend, so this used
+        to be "stay local", a promise the app could not keep (A-13). What
+        holds: mail/docs/money/the user's own repos run on the configured
+        backend with their tools, behind the privacy gate."""
         for name in ("mail", "docs", "memory", "markets", "forex", "dev_coding"):
-            assert dispatch_module._agent_split_backend(name) == "local"
+            assert dispatch_module._agent_split_backend(name) == "default"
 
 
 class TestOllamaCloudConfig:
@@ -3957,27 +3958,11 @@ class TestBuildClientOrchestratorRouting:
                 assert isinstance(client, dispatch_module.OllamaNativeClient), agent
                 assert client._root == "https://ollama.com", agent
             else:
-                # This test hand-builds a bare OllamaConfig() (never
-                # reads env), so a NON-privacy-pinned "local" verdict
-                # (e.g. "atlas") passes that bare, always-local config
-                # straight through unchanged -- untouched by the
-                # 2026-09-14 cloud-only reversal below, which only ever
-                # applies where _build_client itself swaps in a REAL
-                # load_ollama_config() (its privacy-pin branch).
-                from dourmouse.model_delegation import _LOCAL_ONLY_AGENTS
-
+                # This test hand-builds a bare OllamaConfig() (never reads
+                # env): a "default" verdict passes it straight through, for
+                # every agent alike (PRIV: no per-agent local swap).
                 assert isinstance(client, dispatch_module.OllamaNativeClient), agent
-                if agent in _LOCAL_ONLY_AGENTS:
-                    # 2026-09-14, user-directed: "Ollama should only use
-                    # cloud models from the api key, never local models"
-                    # -- _build_client's privacy-pin branch now calls
-                    # load_ollama_config(force_local=True), which itself
-                    # now uses the real ambient key instead of stripping
-                    # it (see TestBuildClientNeverLeaksPrivacyPinnedAgentsToOllamaCloud's
-                    # own docstring for the full reversal).
-                    assert client._root == "https://ollama.com", agent
-                else:
-                    assert client._root != "https://ollama.com", agent
+                assert client._root != "https://ollama.com", agent
 
 
 class TestBuildClientPerAgentApiKeys:
@@ -4044,8 +4029,8 @@ class TestBuildClientNeverLeaksPrivacyPinnedAgentsToOllamaCloud:
     no key exists at all (config.load_ollama_config's own docstring
     documents this precedence in full). Callers who need the OLD
     privacy behavior back would need to explicitly re-scope
-    model_delegation._LOCAL_ONLY_AGENTS' role in _build_client -- not
-    done here, since the user's instruction was unconditional."""
+    model_delegation's old local-only list in _build_client -- removed
+    entirely on 2026-10-12 (PRIV, cloud models only)."""
 
     def test_privacy_pinned_agent_now_gets_cloud_too_when_a_key_is_set(self, monkeypatch):
         """2026-09-14, user-directed reversal of the 2026-09-13 privacy
@@ -4055,11 +4040,11 @@ class TestBuildClientNeverLeaksPrivacyPinnedAgentsToOllamaCloud:
         monkeypatch.setenv("OLLAMA_API_KEY", "real-looking-cloud-key")
         monkeypatch.delenv("OLLAMA_BASE_URL", raising=False)
         from dourmouse.config import load_ollama_config
-        from dourmouse.model_delegation import _LOCAL_ONLY_AGENTS
+        from dourmouse.privacy import SENSITIVE_AGENTS
 
         real_config = load_ollama_config()
         assert real_config.is_cloud  # the key alone does make the GLOBAL config cloud
-        for agent in sorted(_LOCAL_ONLY_AGENTS):
+        for agent in sorted(SENSITIVE_AGENTS):
             client = dispatch_module._build_client(real_config, forced_agent=agent)
             if not isinstance(client, dispatch_module.OllamaNativeClient):
                 continue  # a heavy-workflow name in this set (e.g. browser) goes to Claude instead -- fine, not the risk this guards
@@ -4079,50 +4064,21 @@ class TestBuildClientNeverLeaksPrivacyPinnedAgentsToOllamaCloud:
         real_config = load_ollama_config()
         # An agent name outside the registry entirely still falls to
         # model_delegation's own "unnamed agents default to LOCAL"
-        # verdict via _agent_split_backend -- but since it's NOT in
-        # _LOCAL_ONLY_AGENTS, this fix must not force it local either.
+        # verdict via _agent_split_backend -- this must not force it local
+        # either.
         client = dispatch_module._build_client(real_config, forced_agent="_not_a_real_privacy_pinned_agent")
         assert isinstance(client, dispatch_module.OllamaNativeClient)
         assert client._is_cloud is True
 
-    def test_force_local_now_uses_a_real_ambient_cloud_key_instead(self, monkeypatch):
-        """2026-09-14, user-directed: force_local used to strip a real,
-        already-configured cloud key unconditionally -- built for the
-        privacy case this class's docstring explains is no longer this
-        codebase's intent. force_local now only means "genuinely local"
-        in the one case that's unavoidable anyway: no key configured at
-        all, so there is no cloud option to use."""
-        monkeypatch.setenv("OLLAMA_API_KEY", "real-looking-cloud-key")
-        monkeypatch.delenv("OLLAMA_BASE_URL", raising=False)
+    def test_there_is_no_local_forcing_parameter_any_more(self):
+        """PRIV-3 / A-13 (2026-10-12): the parameter that promised a local
+        config for private agents is gone (cloud models only); the privacy
+        gate protects their content instead (test_fix_PRIV_*.py)."""
+        import inspect
+
         from dourmouse.config import load_ollama_config
 
-        forced = load_ollama_config(force_local=True)
-        assert forced.is_cloud is True
-        assert forced.api_key == "real-looking-cloud-key"
-        assert "ollama.com" in forced.base_url
-
-    def test_force_local_still_local_when_no_key_exists_at_all(self, monkeypatch):
-        monkeypatch.delenv("OLLAMA_API_KEY", raising=False)
-        monkeypatch.delenv("OLLAMA_BASE_URL", raising=False)
-        from dourmouse.config import load_ollama_config
-
-        forced = load_ollama_config(force_local=True)
-        assert forced.is_cloud is False
-        assert forced.api_key == ""
-        assert "ollama.com" not in forced.base_url
-
-    def test_force_local_still_honors_an_explicit_base_url_override(self, monkeypatch):
-        """An operator who explicitly pointed OLLAMA_BASE_URL somewhere
-        (a real, deliberate choice) should still have that respected --
-        force_local only refuses to go to the COMMERCIAL Ollama Cloud
-        default, it doesn't override a real explicit endpoint choice."""
-        monkeypatch.setenv("OLLAMA_API_KEY", "real-looking-cloud-key")
-        monkeypatch.setenv("OLLAMA_BASE_URL", "http://192.168.1.50:11434/v1")
-        from dourmouse.config import load_ollama_config
-
-        forced = load_ollama_config(force_local=True)
-        assert forced.is_cloud is False
-        assert forced.base_url == "http://192.168.1.50:11434/v1"
+        assert list(inspect.signature(load_ollama_config).parameters) == []
 
 
 class TestBrainEventReportsTheRealOrchestratorBackend:
@@ -4305,14 +4261,14 @@ class TestEffectiveSplitAgentForOrdinaryQueries:
         run_dispatch_messages(messages, registry, client=None, config=OllamaConfig(), event_sink=events.append)
         brain = next(e for e in events if e["type"] == "brain")
         # dispatch.py's own real "brain" event ALWAYS emits the mode
-        # "claude" as the label "claude_cli", and "local" (a routing-only
+        # "claude" as the label "claude_cli", and "default" (a routing-only
         # sentinel, never itself a client type) as whatever
         # backend_identity(config) really reports for the config actually
         # used — "ollama" for the plain OllamaConfig this test passes in
         # (see the ~line 2455/3114 backend_name assignments and
-        # _build_client's own "local" branch for why there's no override
+        # _build_client's own "default" branch for why there's no override
         # to translate).
-        expected_label = {"claude": "claude_cli", "local": "ollama"}.get(expected, expected)
+        expected_label = {"claude": "claude_cli", "default": "ollama"}.get(expected, expected)
         assert brain["backend"] == expected_label
 
     def test_gibberish_with_no_agent_match_falls_back_to_claude(self, monkeypatch):

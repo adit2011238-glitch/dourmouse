@@ -2333,23 +2333,15 @@ class TestSseChat:
         models = [c["model"] for c in srv.session.client.chat.completions.calls]
         assert models and all(m == "nvidia/echo-70b" for m in models)
 
-    def test_focus_agent_privacy_pinned_model_matches_the_forced_local_client(self, server, monkeypatch):
-        """2026-09-14, real live-caught bug (STUDY tab, "HTTP Error 404:
-        Not Found" on every question): _build_client() already swaps a
-        privacy-pinned agent (model_delegation._LOCAL_ONLY_AGENTS) onto a
-        genuinely local Ollama client even when a real Ollama Cloud key
-        is configured, but the webui.py handler's own model_override
-        computation used to call model_for_agent() on the AMBIENT
-        (cloud) config regardless — handing the local client a real
-        cloud-only model name it had never pulled, which the local
-        daemon then genuinely 404'd on. This asserts the model actually
-        used agrees with what a forced-local OllamaConfig resolves to,
-        not the ambient cloud config's own default model."""
+    def test_focus_agent_uses_the_configured_backends_model(self, server, monkeypatch):
+        """PRIV-3 / A-13 (2026-10-12): this used to assert that a privacy-
+        pinned focus agent ran on a forced-LOCAL model ("qwen2.5:7b"), the
+        promise a cloud-only app cannot keep. With the local swap removed,
+        the focus agent's model is resolved from the configured (cloud)
+        config, the same one the client uses, so the two still agree; the
+        privacy gate protects the agent's content instead."""
         from dourmouse.config import OllamaConfig
 
-        monkeypatch.setattr(
-            "dourmouse.model_delegation._LOCAL_ONLY_AGENTS", frozenset({"echo_agent"})
-        )
         srv, port = server
         srv.session.config = OllamaConfig(
             api_key="real-cloud-key",
@@ -2378,7 +2370,7 @@ class TestSseChat:
         conn.close()
         assert resp.status == 200
         models = [c["model"] for c in srv.session.client.chat.completions.calls]
-        assert models and all(m == "qwen2.5:7b" for m in models), models
+        assert models and all(m == "gpt-oss:20b" for m in models), models
 
     def test_force_backend_freellmapi_swaps_client_for_this_turn_then_restores(self, server, monkeypatch):
         """2026-09-14, user-directed: a real third DIRECTIVE VIA option,

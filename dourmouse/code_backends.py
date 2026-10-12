@@ -505,6 +505,10 @@ def _run_openai_compat(
     # parameter): tests monkeypatch the module attribute, and a def-time
     # default would capture the original and ignore the patch.
     client = _openai_client_factory(base_url, api_key)
+    from dourmouse import privacy
+
+    privacy.record_egress(backend=privacy.backend_for_base_url(base_url), model=model, text=task,
+                          origin="code_backend")
     # Keyless => Ollama: thinking models consume the budget on reasoning before
     # content; disable for a direct answer. NVIDIA ignores the option.
     extra_body = {"enable_thinking": False} if not api_key else None
@@ -553,6 +557,13 @@ def _inject_shared_context(task: str) -> str:
     ``merged_search`` honestly finds no source to consult and this
     injects nothing: no placeholder, no fabricated context.
     """
+    # PRIV: shared memory is the owner's Memory source. It is added to a task
+    # that leaves for Anthropic or OpenAI only when the owner allowed Memory
+    # and Private mode is off; this path never asks.
+    from dourmouse import privacy
+
+    if not privacy.auto_injection_allowed("memory"):
+        return task
     try:
         from dourmouse.shared_rag import format_merged_result, merged_search
 
@@ -590,6 +601,14 @@ def _run_claude_once(
         # process env into a spawned MCP server and merges the config's own
         # "env" dict on top rather than replacing it.
         env[_MCP_TOOLCALL_LOG_ENV_VAR] = toolcall_log_path
+    # PRIV: the bridge gates Dourmouse tool results with this chat's Private
+    # mode and placeholder map (handed over in a 0600 temp file for this one
+    # call, read back and removed after it), and the request is recorded.
+    from dourmouse import privacy
+
+    privacy_env, privacy_map = privacy.bridge_handoff() if bridge_wired else ({}, None)
+    env.update(privacy_env)
+    privacy.record_egress(backend="claude_cli", model="claude", text=task, origin="claude_cli")
     try:
         return subprocess.run(
             # The task goes on stdin, never argv (finding #088): on Windows the
@@ -611,6 +630,9 @@ def _run_claude_once(
         raise RuntimeError(f"claude timed out after {timeout}s (task still running).") from None
     except OSError as exc:
         raise RuntimeError(f"could not run the claude CLI: {exc}") from exc
+    finally:
+        if privacy_map is not None:
+            privacy.bridge_collect(privacy_map)
 
 
 def _cli_env(cli: str | None = None) -> dict[str, str]:
@@ -936,9 +958,22 @@ def stream_claude(
     # The briefing is added per run by _first_turn_task, which keys it on the
     # --session-id the run actually uses (findings P3-10, P3-12).
     mcp_args, _bridge_wired = _claude_tool_args()
+    # PRIV: the bridge gates Dourmouse tool results for this chat (Private
+    # mode, placeholders), the request is recorded, and placeholders in the
+    # streamed reply are shown to the owner as the real values.
+    from dourmouse import privacy
+
+    privacy_env, privacy_map = privacy.bridge_handoff() if _bridge_wired else ({}, None)
+    privacy_mapping = privacy.mapping_for_current_chat()
+    restorer = privacy.StreamRestorer(privacy_mapping, on_delta) if on_delta is not None else None
+    if restorer is not None:
+        on_delta = restorer.feed
+    cli_env = _cli_env(cli)
+    cli_env.update(privacy_env)
 
     def _run_once(session_args: list[str]) -> tuple[int | None, str, str, bool]:
         run_task = _first_turn_task(task, session_args)
+        privacy.record_egress(backend="claude_cli", model="claude", text=run_task, origin="claude_cli_stream")
         proc = subprocess.Popen(
             # The task goes on stdin, never argv (finding #088): on Windows the
             # npm-installed CLI is a .cmd shim run through cmd.exe, whose 8191-char
@@ -951,7 +986,7 @@ def stream_claude(
                 *session_args, *mcp_args,
             ],
             cwd=cwd,
-            env=_cli_env(cli),
+            env=cli_env,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -1087,15 +1122,22 @@ def stream_claude(
         stderr_reader.join(timeout=5)
         return proc.returncode, final_result, "".join(stderr_parts), timed_out.is_set()
 
-    with _claude_session_run_lock(session_key):
-        session_args = _claude_session_args(session_key)
-        returncode, final_result, err, timed_out = _run_once(session_args)
-        if not timed_out and returncode != 0 and "--resume" in session_args and (
-            _CLAUDE_NO_SESSION_ERR in err or _CLAUDE_SESSION_IN_USE_ERR in err
-        ):
-            _forget_claude_session(session_key)
+    try:
+        with _claude_session_run_lock(session_key):
             session_args = _claude_session_args(session_key)
             returncode, final_result, err, timed_out = _run_once(session_args)
+            if not timed_out and returncode != 0 and "--resume" in session_args and (
+                _CLAUDE_NO_SESSION_ERR in err or _CLAUDE_SESSION_IN_USE_ERR in err
+            ):
+                _forget_claude_session(session_key)
+                session_args = _claude_session_args(session_key)
+                returncode, final_result, err, timed_out = _run_once(session_args)
+    finally:
+        if privacy_map is not None:
+            privacy.bridge_collect(privacy_map)
+        if restorer is not None:
+            restorer.finish()
+    final_result = privacy_mapping.restore_text(final_result)
     err = err.strip()
     if timed_out:
         raise RuntimeError(
@@ -1144,6 +1186,9 @@ def _run_codex(task: str, *, cwd: str | None, timeout: int) -> str:
         # a coding task that doesn't even need Dourmouse's own tools.
         pass
     timeout = max(1, min(int(timeout), 600))
+    from dourmouse import privacy
+
+    privacy.record_egress(backend="codex_cli", model="codex", text=task, origin="codex_cli")
     try:
         proc = subprocess.run(
             # The task goes on stdin, never argv (finding #088): on Windows the

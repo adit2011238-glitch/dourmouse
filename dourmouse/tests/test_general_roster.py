@@ -1820,7 +1820,6 @@ def test_every_agent_resolves_to_a_large_cloud_model(monkeypatch):
     import re
 
     from dourmouse.config import load_llm_config
-    from dourmouse.dispatch import _config_for_agent_model
 
     monkeypatch.setenv("OLLAMA_API_KEY", "test-cloud-key")
     monkeypatch.setenv("DOURMOUSE_LLM_BACKEND", "ollama")
@@ -1830,7 +1829,7 @@ def test_every_agent_resolves_to_a_large_cloud_model(monkeypatch):
     cfg = load_llm_config()
     offenders = []
     for sub in build_general_registry().all_subagents():
-        eff = _config_for_agent_model(cfg, sub.name)
+        eff = cfg  # PRIV: one config for every agent, no per-agent local swap
         model = eff.model_for_agent(sub.name)
         size = re.search(r":(\d+(?:\.\d+)?)b\b", model or "")
         if "ollama.com" not in str(getattr(eff, "base_url", "")) or (size and float(size.group(1)) < 14):

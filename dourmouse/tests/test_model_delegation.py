@@ -11,56 +11,47 @@ from dourmouse.model_delegation import DelegationTask, delegate, format_results,
 
 
 class TestRoutingPolicy:
-    """The routing split is privacy-first. These tests exist so a future edit
-    cannot quietly move a private-data agent onto a cloud backend."""
+    """PRIV (2026-10-12): every model is a cloud model, so routing no longer
+    promises to keep anything on this machine (the old "local only" list was
+    false once a key was set, A-13). It decides whether a task gets real
+    tools: the roster (behind the privacy gate) or one tool-less Gemini call
+    for public work. These tests keep a future edit from sending a sensitive
+    agent's task to tool-less Gemini."""
 
-    def test_every_real_agent_has_an_explicit_policy(self):
-        """A heuristic would eventually guess wrong on a new agent and fail
-        silently, so every agent in the real registry must be named."""
+    def test_every_real_agent_is_sensitive_public_or_roster(self):
         from dourmouse.general_roster import build_general_registry
+        from dourmouse.privacy import SENSITIVE_AGENTS
 
         real = {sa.name for sa in build_general_registry().all_subagents()}
-        classified = md._LOCAL_ONLY_AGENTS | md._CLOUD_OK_AGENTS
-        assert real - classified == set(), (
-            "these real agents have no explicit routing policy: "
-            f"{sorted(real - classified)}"
-        )
-        assert classified - real == set(), (
-            f"policy names agents that do not exist: {sorted(classified - real)}"
-        )
+        assert set() == SENSITIVE_AGENTS & md._PUBLIC_INPUT_AGENTS
+        assert md._PUBLIC_INPUT_AGENTS - real == set(), sorted(md._PUBLIC_INPUT_AGENTS - real)
 
-    def test_the_two_sets_never_overlap(self):
-        assert set() == md._LOCAL_ONLY_AGENTS & md._CLOUD_OK_AGENTS
-
-    @pytest.mark.parametrize(
-        "agent", ["mail", "memory", "markets", "dev_coding", "atlas_cmd", "admin_ops"]
-    )
-    def test_private_data_agents_never_leave_the_machine(self, agent, monkeypatch):
-        """Even with the cloud backend fully available and allowed."""
+    @pytest.mark.parametrize("agent", ["mail", "memory", "markets", "admin_ops", "docs"])
+    def test_sensitive_agents_never_go_to_tool_less_gemini(self, agent, monkeypatch):
         monkeypatch.setattr(md, "gemini_available", lambda: True)
-        assert route_for(agent) == md.LOCAL
+        assert route_for(agent) == md.ROSTER
 
-    def test_unknown_agents_default_to_local(self, monkeypatch):
+    def test_unknown_agents_run_through_the_roster(self, monkeypatch):
         monkeypatch.setattr(md, "gemini_available", lambda: True)
-        assert route_for("some_future_agent") == md.LOCAL
-        assert route_for(None) == md.LOCAL
+        assert route_for("some_future_agent") == md.ROSTER
+        assert route_for(None) == md.ROSTER
 
-    def test_public_input_agents_may_use_the_cloud(self, monkeypatch):
+    def test_public_input_agents_may_use_gemini(self, monkeypatch):
         monkeypatch.setattr(md, "gemini_available", lambda: True)
-        assert route_for("research_info") == md.CLOUD
-        assert route_for("news") == md.CLOUD
+        assert route_for("research_info") == md.GEMINI
+        assert route_for("news") == md.GEMINI
 
-    def test_everything_is_local_when_the_cloud_is_unavailable(self, monkeypatch):
+    def test_everything_runs_on_the_roster_when_gemini_is_unavailable(self, monkeypatch):
         monkeypatch.setattr(md, "gemini_available", lambda: False)
-        assert route_for("research_info") == md.LOCAL
+        assert route_for("research_info") == md.ROSTER
 
-    def test_allow_cloud_false_forces_everything_local(self, monkeypatch):
+    def test_allow_gemini_false_keeps_everything_on_the_roster(self, monkeypatch):
         monkeypatch.setattr(md, "gemini_available", lambda: True)
-        assert route_for("news", allow_cloud=False) == md.LOCAL
+        assert route_for("news", allow_gemini=False) == md.ROSTER
 
 
 class TestRunCloud:
-    """`_run_cloud` (the Gemini delegation path) had no direct test at all
+    """`_run_gemini` (was _run_cloud, the Gemini delegation path) had no direct test at all
     before this: its on_usage wiring silently relied on gemini_backend.
     call_gemini accepting a keyword it never actually implemented, always
     raised TypeError, and was defensively swallowed by a fallback branch
@@ -75,7 +66,7 @@ class TestRunCloud:
         monkeypatch.setattr(
             "dourmouse.gemini_backend.call_gemini", fake_call_gemini, raising=False
         )
-        result = md._run_cloud(DelegationTask(agent="research_info", prompt="hi"), timeout=5.0)
+        result = md._run_gemini(DelegationTask(agent="research_info", prompt="hi"), timeout=5.0)
         assert result.ok is True
         assert result.text == "a real answer"
         assert result.usage == {
@@ -89,7 +80,7 @@ class TestRunCloud:
         monkeypatch.setattr(
             "dourmouse.gemini_backend.call_gemini", fake_call_gemini, raising=False
         )
-        result = md._run_cloud(DelegationTask(agent="research_info", prompt="hi"), timeout=5.0)
+        result = md._run_gemini(DelegationTask(agent="research_info", prompt="hi"), timeout=5.0)
         assert result.ok is False
         assert "HTTP 503" in result.error
 
@@ -101,9 +92,9 @@ class TestFanOut:
 
         def slow(task, timeout):
             time.sleep(0.4)
-            return md.DelegationResult(task=task, ok=True, text="ok", model_used=md.LOCAL)
+            return md.DelegationResult(task=task, ok=True, text="ok", model_used=md.ROSTER)
 
-        monkeypatch.setattr(md, "_run_local", slow)
+        monkeypatch.setattr(md, "_run_roster", slow)
         tasks = [DelegationTask(prompt=f"q{i}") for i in range(4)]
         started = time.monotonic()
         results = delegate(tasks, max_workers=4, timeout=10)
@@ -120,9 +111,9 @@ class TestFanOut:
         def variable(task, timeout):
             # Later tasks finish sooner, so completion order is reversed.
             time.sleep(0.05 * (3 - int(task.label)))
-            return md.DelegationResult(task=task, ok=True, text=task.label, model_used=md.LOCAL)
+            return md.DelegationResult(task=task, ok=True, text=task.label, model_used=md.ROSTER)
 
-        monkeypatch.setattr(md, "_run_local", variable)
+        monkeypatch.setattr(md, "_run_roster", variable)
         tasks = [DelegationTask(prompt="q", label=str(i)) for i in range(4)]
         results = delegate(tasks, max_workers=4, timeout=10)
         assert [r.text for r in results] == ["0", "1", "2", "3"]
@@ -131,9 +122,9 @@ class TestFanOut:
         def flaky(task, timeout):
             if task.label == "bad":
                 raise RuntimeError("backend exploded")
-            return md.DelegationResult(task=task, ok=True, text="fine", model_used=md.LOCAL)
+            return md.DelegationResult(task=task, ok=True, text="fine", model_used=md.ROSTER)
 
-        monkeypatch.setattr(md, "_run_local", flaky)
+        monkeypatch.setattr(md, "_run_roster", flaky)
         results = delegate(
             [
                 DelegationTask(prompt="a", label="good1"),
@@ -159,7 +150,7 @@ class TestFormatting:
             dispatch, "run_dispatch_messages",
             lambda *a, **k: {"final_text": "CLAUDE ORCHESTRATOR (reported honestly): claude exited 1: boom"},
         )
-        result = md._run_local(DelegationTask(prompt="x"), timeout=5.0)
+        result = md._run_roster(DelegationTask(prompt="x"), timeout=5.0)
         assert result.ok is False and "boom" in result.error
         assert "0 succeeded, 1 failed" in md.format_results([result])
 
@@ -184,7 +175,7 @@ class TestFormatting:
             policy="P",
         )
         with md.inherit_caller(caller):
-            result = md._run_local(DelegationTask(prompt="x"), timeout=5.0)
+            result = md._run_roster(DelegationTask(prompt="x"), timeout=5.0)
         assert result.ok and result.text == "fine"
         assert (seen["client"], seen["confirmation_gate"], seen["dlp"], seen["rbac"]) == ("C", "G", "D", "R")
         assert seen["depth"] == 2 and seen["budget"] is budget and seen["fanout_branch"] is True
@@ -198,7 +189,7 @@ class TestFormatting:
             seen.append(md._caller_ctx.get())
             return md.DelegationResult(task=task, ok=True, text="x")
 
-        monkeypatch.setattr(md, "_run_local", peek)
+        monkeypatch.setattr(md, "_run_roster", peek)
         with md.inherit_caller("the-caller"):
             md.delegate([DelegationTask(prompt="a"), DelegationTask(prompt="b")])
         assert seen == ["the-caller", "the-caller"]

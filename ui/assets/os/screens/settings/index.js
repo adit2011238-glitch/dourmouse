@@ -18,6 +18,7 @@ import { TEXT_SIZES } from '../../core/prefs.js';
 import {
   groupFeatures, featurePrompt, foldersPrompt, parseFolders, togglePrompt, shellPrompt, resetPrompt, shellChoices,
   keyTag, tokenTag, bindLine, orchestratorSource, localModelRow, backendRow, osReducedMotion, SHELL_WORD,
+  CONSENT_CHOICES, consentPrompt, privateModePrompt, providerPrompt, providerTag,
 } from './helpers.js';
 
 const reloaders = new WeakMap();
@@ -29,7 +30,7 @@ export default {
   thread: false,
 
   async mount(root, ctx) {
-    const st = { sum: null, sumError: null, staleMsg: '', orch: null, orchError: null, orchLoading: true, test: null, testing: false };
+    const st = { sum: null, sumError: null, staleMsg: '', orch: null, orchError: null, orchLoading: true, test: null, testing: false, priv: null };
 
     root.dataset.state = 'loading';
     setHtml(root, html`
@@ -39,6 +40,7 @@ export default {
         <div class="card"><div class="lbl">Shell</div><div id="setShell" data-region></div></div>
         <div class="card"><div class="lbl">Models &middot; large cloud only</div><div id="setModels" data-region></div></div>
       </div>
+      <div class="card set-gap"><div class="lbl">Privacy &middot; what may reach a cloud model</div><div id="setPrivacy" data-region></div></div>
       <div class="card set-gap"><div class="lbl">Appearance</div><div id="setLook" data-region></div></div>
       <div class="card set-gap"><div class="lbl">Remote access</div><div id="setAccess" data-region></div></div>
       <div class="card set-gap"><div class="lbl">Background switches</div><div id="setFeatures" data-region></div></div>
@@ -52,6 +54,7 @@ export default {
     const accessEl = $('setAccess');
     const featEl = $('setFeatures');
     const behEl = $('setBehaviour');
+    const privEl = $('setPrivacy');
     const regions = [shellEl, modelsEl, accessEl, featEl, behEl];
 
     const note = (text, tone) => {
@@ -59,6 +62,65 @@ export default {
       noteEl.textContent = text || '';
       noteEl.dataset.tone = tone || '';
     };
+
+    /* ---------------- privacy (PRIV-5) ---------------- */
+    async function loadPrivacy() {
+      try {
+        const d = await ctx.api.get('/api/os/settings/privacy');
+        if (ctx.signal.aborted) return;
+        st.priv = d;
+        paintPrivacy();
+      } catch (err) {
+        if (isAbort(err)) return;
+        states.error(privEl, err, { title: 'Could not read the privacy settings', retry: () => loadPrivacy() });
+      }
+    }
+
+    function paintPrivacy() {
+      const p = st.priv;
+      if (!p) return;
+      const sources = Array.isArray(p.sources) ? p.sources : [];
+      const providers = Array.isArray(p.providers) ? p.providers : [];
+      privEl.dataset.state = 'populated';
+      setHtml(privEl, html`<div class="muted set-help">${p.limits || ''} Public web results and your own calendar, tasks and file names are never asked about.</div>
+        ${p.note ? html`<div class="muted set-err">${p.note}</div>` : ''}
+        <div class="kv set-tg"><span>Private mode for every chat${p.private_mode ? html` <span class="tag ok">on</span>` : ''}</span>
+          ${sw('data-privmode', 'all', p.private_mode, 'Private mode for every chat', 'When on, no sensitive source is sent to a cloud model from any chat and the tools that read them are hidden. Each chat also has its own Private switch in its toolbar.', false)}</div>
+        <div class="lbl set-sec">Sources</div>
+        ${sources.map((src) => html`<div class="os-row set-priv"><span class="rt"><b>${src.label}</b><span class="muted set-block">${src.what}${src.note ? '. ' + src.note : ''}</span></span>
+          <span class="os-seg" role="group" aria-label="${src.label}">${CONSENT_CHOICES.map((c) => html`<button type="button" aria-selected="${String(c.id === src.decision)}" data-consent="${src.id}" data-decision="${c.id}" data-spec="${c.spec}">${c.label}</button>`)}</span></div>`)}
+        <div class="lbl set-sec">Providers</div>
+        <div class="muted set-help">Which company receives what a model reads. Dourmouse cannot see an account's data retention or training settings: check them on the provider's site, then tick the box.</div>
+        ${providers.map((pr) => {
+          const t = providerTag(pr);
+          return html`<div class="os-row set-priv set-prov"><span class="rt"><b>${pr.label}</b><span class="muted set-block">${pr.company}. Region: ${pr.region || 'not stated by the provider'}.${pr.verified_at ? ' Checked ' + pr.verified_at + '.' : ''}</span></span>
+            <span class="tag ${t.tone}">${t.word}</span>
+            <input type="checkbox" aria-label="I checked ${pr.label}'s retention and training settings" data-provider="${pr.id}" ${pr.verified ? 'checked' : ''} data-spec="Tick after you checked this account's retention and training settings yourself. Asks first."></div>`;
+        })}`);
+    }
+
+    function chooseConsent(sourceId, decision) {
+      const src = ((st.priv && st.priv.sources) || []).find((x) => x.id === sourceId);
+      if (!src || src.decision === decision) return;
+      ask(consentPrompt(src, decision), () => ctx.api.post('/api/os/settings/privacy/consent', { source: sourceId, decision }),
+        src.label + ': ' + (decision === 'allow' ? 'allowed' : decision === 'deny' ? 'never sent' : 'asks next time') + '.', loadPrivacy);
+    }
+
+    function flipPrivateMode() {
+      if (!st.priv) return;
+      const next = !st.priv.private_mode;
+      ask(privateModePrompt(next), () => ctx.api.post('/api/os/settings/privacy/private_mode', { enabled: next }),
+        'Private mode for every chat is now ' + (next ? 'on' : 'off') + '.', loadPrivacy);
+    }
+
+    function markProvider(id, box) {
+      const pr = ((st.priv && st.priv.providers) || []).find((x) => x.id === id);
+      if (!pr) return;
+      const next = !pr.verified;
+      box.checked = pr.verified; /* the box changes only after APPROVE */
+      ask(providerPrompt(pr, next), () => ctx.api.post('/api/os/settings/privacy/provider', { id, verified: next }),
+        pr.label + (next ? ' is marked as checked.' : ' is no longer marked as checked.'), loadPrivacy);
+    }
 
     /* ---------------- appearance (S2: Text size) ---------------- */
     function paintLook() {
@@ -294,15 +356,15 @@ export default {
     /* ---------------- actions ---------------- */
     async function reload() {
       regions.forEach((el) => states.loading(el, 'Reading the settings'));
-      await Promise.all([loadSummary(), loadOrch()]);
+      await Promise.all([loadSummary(), loadOrch(), loadPrivacy()]);
     }
 
     /* the owner's click plus a card that says what will happen; the write runs only after APPROVE */
-    function ask(prompt, run, doneText) {
+    function ask(prompt, run, doneText, after) {
       confirmHere(confirmEl, prompt, async () => {
         await run();
         note(doneText, 'ok');
-        await loadSummary();
+        await (after || loadSummary)();
       });
     }
 
@@ -384,6 +446,11 @@ export default {
       const fs = e.target.closest('[data-folders-save]');
       if (fs) return saveFolders(fs.dataset.foldersSave);
       if (e.target.closest('[data-testall]')) return testAll();
+      const cs = e.target.closest('[data-consent]');
+      if (cs) return chooseConsent(cs.dataset.consent, cs.dataset.decision);
+      if (e.target.closest('[data-privmode]')) return flipPrivateMode();
+      const pv = e.target.closest('[data-provider]');
+      if (pv) return markProvider(pv.dataset.provider, pv);
       return undefined;
     });
 
@@ -391,7 +458,9 @@ export default {
     paintLook();
     paintActions();
     regions.forEach((el) => states.loading(el, 'Reading the settings'));
+    states.loading(privEl, 'Reading the privacy settings');
     loadSummary();
+    loadPrivacy();
     await loadOrch();
   },
 

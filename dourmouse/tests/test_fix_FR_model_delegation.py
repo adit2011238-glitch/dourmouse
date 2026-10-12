@@ -12,14 +12,14 @@ from dourmouse.model_delegation import DelegationResult, DelegationTask, delegat
 def test_one_stuck_task_does_not_hold_back_the_finished_answers(monkeypatch):
     release = threading.Event()
     monkeypatch.setattr(md, "_DELEGATE_GRACE_S", 0.2)
-    monkeypatch.setattr(md, "route_for", lambda agent, allow_cloud=True: md.LOCAL)
+    monkeypatch.setattr(md, "route_for", lambda agent, allow_gemini=True: md.ROSTER)
 
     def runner(task, timeout):
         if task.prompt == "stuck":
             release.wait(10)  # a stalled local model turn
-        return DelegationResult(task=task, ok=True, text=f"answer to {task.prompt}", model_used=md.LOCAL)
+        return DelegationResult(task=task, ok=True, text=f"answer to {task.prompt}", model_used=md.ROSTER)
 
-    monkeypatch.setattr(md, "_run_local", runner)
+    monkeypatch.setattr(md, "_run_roster", runner)
     tasks = [DelegationTask(prompt="a"), DelegationTask(prompt="stuck"), DelegationTask(prompt="b")]
     started = time.monotonic()
     try:
@@ -34,7 +34,7 @@ def test_one_stuck_task_does_not_hold_back_the_finished_answers(monkeypatch):
 
 
 def test_run_local_stops_a_turn_that_outlives_its_timeout(monkeypatch):
-    """_run_local used to ignore its timeout argument entirely."""
+    """_run_roster (was _run_local) used to ignore its timeout argument entirely."""
     import dourmouse.dispatch as dispatch_mod
 
     seen = {}
@@ -48,6 +48,6 @@ def test_run_local_stops_a_turn_that_outlives_its_timeout(monkeypatch):
 
     monkeypatch.setattr(dispatch_mod, "run_dispatch_messages", fake_run)
     monkeypatch.setattr("dourmouse.general_roster.build_general_registry", lambda: object())
-    result = md._run_local(DelegationTask(prompt="slow", agent="news"), timeout=1.0)
+    result = md._run_roster(DelegationTask(prompt="slow", agent="news"), timeout=1.0)
     assert seen["stop_before"] is False and seen["stop_after"] is True
     assert result.ok is False and "did not finish" in result.error

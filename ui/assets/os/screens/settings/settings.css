@@ -21,3 +21,10 @@
 [data-screen="SETTINGS"] .set-folders textarea:focus-visible { outline: 2px solid var(--dm-active); outline-offset: 1px; }
 [data-screen="SETTINGS"] .os-seg button[disabled] { opacity: .38; cursor: not-allowed; }
 [data-screen="SETTINGS"] .os-switch[disabled] { opacity: .38; cursor: not-allowed; }
+
+/* PRIV-5: the privacy section */
+[data-screen="SETTINGS"] .set-priv { border-bottom: 1px solid var(--os-edge-lo); padding: 6px 0; }
+[data-screen="SETTINGS"] .set-priv:last-child { border-bottom: 0; }
+[data-screen="SETTINGS"] .set-priv .os-seg { flex-shrink: 0; }
+[data-screen="SETTINGS"] .set-prov input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--dm-active); }
+[data-screen="SETTINGS"] .set-prov input[type="checkbox"]:focus-visible { outline: 2px solid var(--dm-active); outline-offset: 2px; }

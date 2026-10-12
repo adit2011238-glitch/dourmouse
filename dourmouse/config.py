@@ -13,10 +13,10 @@ identically.
 
 v5.10: ``auto`` prefers the local Ollama server, then (only when the user
 opts in via ``DOURMOUSE_OMNIROUTE_AUTO=1``) the OmniRoute free-tier gateway,
-then NVIDIA. The opt-in keeps the local-first privacy guarantee (Rule 2.6):
-prompts never leave the machine for a third-party free provider without an
-explicit choice — the explicit ``omniroute`` backend is always available
-for users who want it.
+then NVIDIA. The opt-in means a free third-party gateway is never used without
+an explicit choice; the explicit ``omniroute`` backend is always available for
+users who want it. (PRIV, 2026-10-12: the owner's rule is cloud models only;
+what may reach a model is decided by the privacy gate in ``privacy.py``.)
 
 world-monitor-expansion: two additions to the ``DOURMOUSE_MODEL_<AGENT>``
 per-agent routing mechanism, which existed but shipped with nothing
@@ -645,23 +645,6 @@ class OllamaConfig:
     # pinned name ("qwen2.5:7b") is a local-only model unlikely to even
     # exist in Ollama Cloud's real hosted catalog.
     is_cloud: bool = False
-    # Real, live-caught bug (2026-09-13), the same class _persisted_model_
-    # for_backend's own docstring already names for the NVIDIA/Ollama
-    # cross-backend case ("a model id from one backend silently applied
-    # to a different backend's config... a real 404, the orchestrator
-    # going dead with no visible error"), one layer deeper: a model id
-    # the user persisted while running Ollama CLOUD (this exact machine
-    # has "gpt-oss:20b" persisted as its chosen orchestrator model) is
-    # NOT the same thing as a model that exists on the LOCAL daemon --
-    # live-verified, this config's own force_local=True path (built
-    # specifically so mail/docs/google_workspace/etc. never leave the
-    # machine even with a real cloud key present) still had
-    # model_for_agent("orchestrator") return that persisted CLOUD model
-    # name, which the local Ollama server then 404'd on (it was never
-    # pulled there — confirmed via a real GET /api/tags). True only on
-    # the config load_ollama_config(force_local=True) builds; never set
-    # by anything else, so no other caller's behavior changes.
-    skip_persisted_orchestrator_choice: bool = False
 
     def model_for_agent(self, agent: str | None) -> str:
         """The Ollama model a specific subagent runs on (deterministic).
@@ -678,10 +661,7 @@ class OllamaConfig:
         "qwen2.5:7b") was still trusted after ``OLLAMA_API_KEY`` later made
         this SAME config cloud -- sending a local-only model name to
         https://ollama.com/api/chat, a real, reproducible 404 on every
-        non-escalated orchestrator turn. This is the exact mirror of the
-        bug ``skip_persisted_orchestrator_choice`` already exists to
-        prevent (a CLOUD-saved value leaking into a force_local config) --
-        that fix only ever covered one direction. Rather than guess which
+        non-escalated orchestrator turn. Rather than guess which
         locality an "ollama"-tagged value was actually saved under (the
         stored tag genuinely cannot say), this follows the same "an
         ambiguous tag is never auto-applied" rule webui.py's own untagged-
@@ -697,7 +677,6 @@ class OllamaConfig:
             return self.agent_models[key]
         if (
             key == "ORCHESTRATOR"
-            and not self.skip_persisted_orchestrator_choice
             and not self.is_cloud
         ):
             persisted = _persisted_model_for_backend("ollama")
@@ -708,24 +687,14 @@ class OllamaConfig:
         return self.model
 
 
-def load_ollama_config(force_local: bool = False) -> OllamaConfig:
+def load_ollama_config() -> OllamaConfig:
     """Build the Ollama backend config from env (defaults when unset).
 
-    ``force_local=True`` (2026-09-13, real live-caught privacy bug): a
-    plain ``OLLAMA_API_KEY`` in the environment makes this function
-    return ``is_cloud=True`` for EVERY caller, with no per-agent
-    exception — dispatch.py's own privacy-pinned-agent fallthrough
-    (``_build_client``'s "mode == local" branch, used for mail/docs/
-    google_workspace/etc.) reused that SAME global config, so setting a
-    real Ollama Cloud key silently sent private Gmail/Drive/Calendar
-    content to Ollama's cloud API the very next real request — verified
-    live: ``_build_client(load_ollama_config(), forced_agent="mail")``
-    returned an ``OllamaNativeClient`` with ``_is_cloud=True`` the moment
-    a real key was stored, with no code change needed to trigger it.
-    ``force_local=True`` is the fix's other half: same model/retry/
-    fallback/agent-model resolution as the normal path, but the
-    cloud-routing decision is skipped entirely — always local, always
-    keyless, regardless of what's in the environment.
+    PRIV-3 / A-13 (2026-10-12): the old "force local" parameter is gone. It
+    promised that private agents (mail, docs, study) never left this Mac,
+    but with a key set it already went to Ollama Cloud, and the owner's
+    rule is cloud models only. Privacy is the gate in ``privacy.py`` (tiers,
+    consent, placeholders, the egress ledger), whatever the backend.
 
     v13.5 (live-diagnosed, explicit user request — "why is routing requests
     to qwen local instead of the Ollama api key"): OLLAMA_API_KEY was being
@@ -754,18 +723,7 @@ def load_ollama_config(force_local: bool = False) -> OllamaConfig:
     """
     api_key = os.environ.get("OLLAMA_API_KEY", "").strip()
     explicit_base_url = os.environ.get("OLLAMA_BASE_URL", "").strip()
-    # 2026-09-14, user-directed: "Ollama should only use cloud models from
-    # the api key, never local models." force_local used to unconditionally
-    # strip a real, already-configured cloud key -- built for the privacy
-    # case (mail/docs/study must never leave this machine even when a
-    # cloud key exists elsewhere on it). Per this explicit instruction,
-    # force_local no longer suppresses a real key: it only means "genuinely
-    # local" in the one case that's unavoidable anyway -- no key configured
-    # at all, so there is no cloud option to use.
-    if force_local and not api_key:
-        base_url = explicit_base_url or _OLLAMA_DEFAULT_BASE_URL
-        is_cloud = False
-    elif explicit_base_url:
+    if explicit_base_url:
         base_url = explicit_base_url
         is_cloud = False
     elif api_key:
@@ -797,7 +755,6 @@ def load_ollama_config(force_local: bool = False) -> OllamaConfig:
         fallback_model=fallback_model,
         agent_models=agent_models,
         is_cloud=is_cloud,
-        skip_persisted_orchestrator_choice=force_local,
     )
 
 

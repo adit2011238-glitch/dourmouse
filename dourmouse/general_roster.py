@@ -4811,13 +4811,14 @@ def build_general_registry() -> DispatchRegistry:
     registry.register_subagent(_build_memory_subagent(registry))
 
     # -- v2.4 coding subagents, one per LLM backend -------------------- #
-    # v4.0: code_ollama routes to the local Ollama server (keyless, free,
-    # fully local) — added BEFORE nvidia so the roster stays deterministic.
+    # v4.0: code_ollama routes to the Ollama backend (Ollama Cloud with the
+    # owner's key; PRIV: not local) — added BEFORE nvidia so the roster
+    # stays deterministic.
     registry.register_subagent(
         _subagent(
             "code_ollama",
             "Coding",
-            "Coding via the local Ollama LLM backend (keyless, zero API spend).",
+            "Coding via the Ollama backend (Ollama Cloud with your key; the task leaves this Mac).",
             [_make_code_tool("ollama", registry)],
         )
     )
@@ -6925,10 +6926,10 @@ def build_general_registry() -> DispatchRegistry:
     # the sum of all five (measured: 3 real local turns of 5.5s/8.0s/11.0s
     # finished in 12.0s wall clock).
     #
-    # Routing is privacy-first and lives in model_delegation.py: anything
-    # touching mail, memory, files, money or the user's repos stays on the
-    # local model; public-input work (research, news, world monitor) may go
-    # to Gemini. Unknown agents default to local. See that module for why.
+    # Routing lives in model_delegation.py: a task for an agent with real
+    # tools runs through the dispatch loop on the configured cloud backend,
+    # behind the privacy gate (privacy.py); public-input work (research,
+    # news, world monitor) may go to tool-less Gemini. See that module.
     def _delegate_to_models_h(arguments: dict[str, Any]) -> str:
         from dourmouse.model_delegation import (
             DelegationTask,
@@ -7021,11 +7022,12 @@ def build_general_registry() -> DispatchRegistry:
             "Each task is {prompt, agent?, model?, label?}. 'agent' names a "
             "roster specialist (mail, research_info, news, markets, ...) and "
             "gives that task the real tools; omit it for a plain question. "
-            "'model' forces a backend ('ollama' local, 'gemini' cloud); omit "
-            "it and routing is automatic and privacy-first -- anything "
-            "touching mail, memory, files, money or your repos stays on the "
-            "local model, public research may go to the cloud one. 'label' is "
-            "yours, for matching answers back to intent.\n"
+            "'model' may ask for 'gemini' (one call, no tools) for public "
+            "work only; omit it and routing is automatic. Every model is a "
+            "cloud model: a task for mail, memory, files, money or your repos "
+            "runs with that agent's tools behind the privacy gate (the "
+            "owner's consent per source, placeholders for identifiers). "
+            "'label' is yours, for matching answers back to intent.\n"
             "Returns each result separately, marked succeeded or failed. A "
             "failed task never invalidates the others."
         ),

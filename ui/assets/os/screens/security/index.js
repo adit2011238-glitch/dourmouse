@@ -17,7 +17,7 @@ import { agoLabel } from '../../kit/format.js';
 import { isAbort } from '../../core/api.js';
 import {
   SEV_TAG, SEV_WORD, RATING, findings, flowBoxes, flowLegend, macFacts, macTag,
-  lockdownLine, lockPrompt, remediationDirective, activityLine, activityRow,
+  lockdownLine, lockPrompt, remediationDirective, activityLine, activityRow, egressRow, egressSummary,
 } from './helpers.js';
 
 const ACTIVITY_CAP = 50;
@@ -51,6 +51,7 @@ export default {
         <div class="card"><div class="lbl">Live activity</div><div id="secActivity" data-region></div></div>
       </div>
       <div class="card sec-gap"><div class="lbl">AI analyst</div><div id="secAnalyst" data-region></div></div>
+      <div class="card sec-gap"><div class="lbl">Sent to cloud models</div><div id="secEgress" data-region></div></div>
       <details class="card sec-gap sec-how" id="secHow"><summary class="lbl">How a finding is made</summary><div id="secFlow" data-region></div></details>`);
     const $ = (id) => root.querySelector('#' + id);
     const noteEl = $('secNote');
@@ -62,6 +63,7 @@ export default {
     const anaEl = $('secAnalyst');
     const findLbl = $('secFindLbl');
     const actEl = $('secActivity');
+    const egressEl = $('secEgress');
 
     const note = (text, tone) => {
       noteEl.hidden = !text;
@@ -108,6 +110,28 @@ export default {
       }
       if (analyst.status === 'fulfilled') st.analyst = analyst.value;
       paint(reason);
+    }
+
+    /* PRIV-4: the egress ledger. Metadata only: provider, size, how many
+       results of each tier, which sources, how many identifiers were swapped. */
+    async function loadEgress() {
+      try {
+        const d = await ctx.api.get('/api/os/privacy/egress?limit=50');
+        if (ctx.signal.aborted) return;
+        paintEgress(d);
+      } catch (err) {
+        if (isAbort(err)) return;
+        states.error(egressEl, err, { title: 'Could not read the egress ledger', retry: () => loadEgress() });
+      }
+    }
+
+    function paintEgress(d) {
+      const rows = Array.isArray(d && d.rows) ? d.rows.map(egressRow) : [];
+      egressEl.dataset.state = rows.length ? 'populated' : 'empty';
+      setHtml(egressEl, html`<div class="muted sec-help">${egressSummary(d)} Every model Dourmouse uses runs in the cloud. This list records each request: never its content, only its size, a fingerprint and what kinds of data it carried.</div>
+        ${rows.map((r) => html`<div class="os-row sec-egress"><span class="rt"><b>${r.provider}</b>${r.model ? html` <span class="muted mono">${r.model}</span>` : ''}
+          <span class="muted sec-block">${r.when} &middot; ${r.size} &middot; ${r.tiers}${r.sources ? ' (' + r.sources + ')' : ''}${r.redactions ? ' · ' + r.redactions : ''}</span></span>
+          ${r.sensitive ? html`<span class="tag warn">sensitive</span>` : ''}${r.private ? html`<span class="tag ok">private</span>` : ''}</div>`)}`);
     }
 
     /* ---------------- painting ---------------- */
@@ -400,9 +424,12 @@ export default {
     });
     ctx.events.onResync(() => load('resync'));
     ctx.every(30000, () => load('poll'));
+    ctx.every(30000, () => loadEgress());
 
     paintActions();
     states.loading(flowEl, 'Reading the dashboard');
+    states.loading(egressEl, 'Reading the egress ledger');
+    loadEgress();
     await load('show');
   },
 
