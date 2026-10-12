@@ -17,6 +17,35 @@ def demo(monkeypatch):
     monkeypatch.delenv("T212_CONFIRM_LIVE", raising=False)
 
 
+_ACCOUNT = {"totalValue": 10000.0}
+_POSITIONS = [{"ticker": "AAPL", "quantity": 3, "currentPrice": 100.0}]
+
+
+class _Body:
+    def __init__(self, payload):
+        self._raw = __import__("json").dumps(payload).encode()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def read(self):
+        return self._raw
+
+
+def _post_fails_with(monkeypatch, post):
+    """The guardrail's account reads (GET) succeed; only the order POST goes through ``post``.
+    (FIX-W2 P4-24: t212_order now reads the account before it sends.)"""
+    def fake(req, timeout=None):
+        if req.get_method() == "POST":
+            return post(req)
+        return _Body(_ACCOUNT if req.full_url.endswith("/account/info") else _POSITIONS)
+
+    monkeypatch.setattr(t.urllib.request, "urlopen", fake)
+
+
 class _TimeoutOnRead:
     def __enter__(self):
         return self
@@ -29,7 +58,7 @@ class _TimeoutOnRead:
 
 
 def test_read_timeout_after_post_is_reported_as_unknown_status(monkeypatch):
-    monkeypatch.setattr(t.urllib.request, "urlopen", lambda req, timeout=None: _TimeoutOnRead())
+    _post_fails_with(monkeypatch, lambda req: _TimeoutOnRead())
     out = t._wrap(t.t212_order)({"ticker": "AAPL", "quantity": 1, "paper_confirm": True})
     assert out.startswith("ERROR")
     assert "UNKNOWN" in out
@@ -37,10 +66,10 @@ def test_read_timeout_after_post_is_reported_as_unknown_status(monkeypatch):
 
 
 def test_urlerror_after_post_is_also_unknown_not_just_unreachable(monkeypatch):
-    def boom(req, timeout=None):
+    def boom(req):
         raise urllib.error.URLError("connection reset")
 
-    monkeypatch.setattr(t.urllib.request, "urlopen", boom)
+    _post_fails_with(monkeypatch, boom)
     out = t._wrap(t.t212_order)({"ticker": "AAPL", "quantity": 1, "paper_confirm": True})
     assert "UNKNOWN" in out and "before retrying" in out
 
@@ -48,10 +77,10 @@ def test_urlerror_after_post_is_also_unknown_not_just_unreachable(monkeypatch):
 def test_http_error_on_post_is_a_definite_failure(monkeypatch):
     import io
 
-    def boom(req, timeout=None):
+    def boom(req):
         raise urllib.error.HTTPError("u", 400, "Bad Request", {}, io.BytesIO(b"bad"))
 
-    monkeypatch.setattr(t.urllib.request, "urlopen", boom)
+    _post_fails_with(monkeypatch, boom)
     out = t._wrap(t.t212_order)({"ticker": "AAPL", "quantity": 1, "paper_confirm": True})
     assert out.startswith("ERROR") and "UNKNOWN" not in out
 

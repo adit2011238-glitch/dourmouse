@@ -37,7 +37,6 @@ from __future__ import annotations
 import argparse
 import io
 import ipaddress
-import os
 import secrets
 import socket
 import subprocess
@@ -72,18 +71,19 @@ def generate_token() -> str:
 # --------------------------------------------------------------------------- #
 
 def read_env(path: Path | None = None) -> dict[str, str]:
-    """Parse a .env into {KEY: value}. Missing file -> {} (never raises)."""
+    """Parse a .env into {KEY: value} with python-dotenv, the parser that loads it
+    (``export KEY=v``, quotes and inline comments mean what they mean at start-up).
+    Missing or unreadable file -> {} (never raises)."""
+    from dotenv import dotenv_values
+
     path = path or _ENV_PATH
-    out: dict[str, str] = {}
     if not path.exists():
-        return out
-    for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, _, value = line.partition("=")
-        out[key.strip()] = value.strip()
-    return out
+        return {}
+    try:
+        parsed = dotenv_values(path, interpolate=False)
+    except (OSError, UnicodeDecodeError):
+        return {}
+    return {str(k): str(v) for k, v in parsed.items() if v is not None}
 
 
 def write_env(
@@ -93,59 +93,27 @@ def write_env(
 ) -> dict[str, Any]:
     """Write DOURMOUSE_HOST + DOURMOUSE_ACCESS_TOKEN into .env.
 
-    Idempotent: rewrites the file ONLY when a value changed; other keys,
-    comments, and blank lines are preserved byte-for-byte. Returns
-    ``{changed: bool, host: str, token_set: bool}`` so the CLI can say
-    honestly whether anything was modified.
+    Idempotent: the file is rewritten ONLY when a value (as python-dotenv reads
+    it) differs; other keys, comments, and blank lines are preserved
+    byte-for-byte, and an ``export KEY=v`` line is replaced in place rather than
+    duplicated. The file holds the access token, so it is written atomically and
+    0600 from its first byte. Returns ``{changed: bool, host: str, token_set:
+    bool}`` so the CLI can say honestly whether anything was modified.
     """
+    from dourmouse.config import merge_env_text
+    from dourmouse.state_file import atomic_write_text
+
     path = path or _ENV_PATH
-    target_host = f"DOURMOUSE_HOST={host}"
-    target_token = f"DOURMOUSE_ACCESS_TOKEN={token}"
-
-    had_host = False
-    had_token = False
-    changed = False
-    out_lines: list[str] = []
-    if path.exists():
-        for line in path.read_text(encoding="utf-8").splitlines():
-            key = line.strip().partition("=")[0].strip()
-            if key == "DOURMOUSE_HOST":
-                had_host = True
-                if line != target_host:
-                    changed = True
-                    out_lines.append(target_host)
-                else:
-                    out_lines.append(line)
-                continue
-            if key == "DOURMOUSE_ACCESS_TOKEN":
-                had_token = True
-                if line != target_token:
-                    changed = True
-                    out_lines.append(target_token)
-                else:
-                    out_lines.append(line)
-                continue
-            out_lines.append(line)
-
-    # In-place value changes were flagged by the loop above (a replaced line
-    # that differed from its target); missing keys are appended here.
-    if not had_host:
-        out_lines.append(target_host)
-        changed = True
-    if not had_token:
-        out_lines.append(target_token)
-        changed = True
-
+    current = read_env(path)
+    updates = {
+        key: value
+        for key, value in (("DOURMOUSE_HOST", host), ("DOURMOUSE_ACCESS_TOKEN", token))
+        if current.get(key) != value
+    }
+    changed = bool(updates)
     if changed:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        # The file holds the access token: create it private from the first
-        # byte (temp file at 0o600, then replace), never default-permission.
-        tmp = path.with_name(path.name + ".tmp")
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write("\n".join(out_lines) + "\n")
-        os.replace(tmp, path)
-        path.chmod(0o600)
+        old_text = path.read_text(encoding="utf-8") if path.exists() else None
+        atomic_write_text(path, merge_env_text(old_text, updates), mode=0o600)
     return {"changed": changed, "host": host, "token_set": bool(token)}
 
 

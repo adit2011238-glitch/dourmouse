@@ -16,6 +16,12 @@ Honest rules (mirror trading212_ops.py):
   demo accounts (the default) are genuine paper trading.
 - Every call is a real call into the local MT5 terminal; failures surface
   as errors.
+- ``mt5_order`` runs the trading guardrails (``order_guard.check_mt5_order``,
+  finding P4-24) right before ``order_send``: position size, sector (each
+  symbol its own sector), and the daily-loss kill switch with a persisted
+  latch. A breach, or an account that cannot be sized, means ``order_send``
+  is never called. The tool path uses the same check inside the worker
+  (``mt5_probe.cmd_order``).
 
 Scope honesty: symbol availability is broker/server dependent — the module
 queries the connected server (``mt5.symbols_get``) rather than assuming a
@@ -249,7 +255,9 @@ def mt5_order(code: str, side: str, volume: float = 0.01,
 
     Refuses without ``paper_confirm=true`` AND (for live accounts) the
     MT5_ALLOW_LIVE=1 + MT5_CONFIRM_LIVE=1 double gate. Demo accounts are
-    genuine paper trading with simulated fills.
+    genuine paper trading with simulated fills. The trading guardrails
+    (``order_guard.check_mt5_order``) run before ``order_send``; a breach
+    returns an error and nothing is sent.
     """
     try:
         mt5mod, _ = _config()
@@ -277,6 +285,14 @@ def mt5_order(code: str, side: str, volume: float = 0.01,
     name = _find_symbol(mt5mod, code)
     if name is None:
         return {"error": f"{code} not listed on this server — cannot order"}
+    from dourmouse import order_guard
+
+    tick = mt5mod.symbol_info_tick(name)
+    guard_price = tick.ask if side == "BUY" else tick.bid
+    try:
+        order_guard.check_mt5_order(mt5mod, name, side, volume, guard_price)
+    except order_guard.OrderRefused as exc:
+        return {"error": str(exc)}
     # Engineering audit, 2026-09-17: this used to fetch mt5mod.symbol_info(name)
     # here and never use it (dead code -- volume_min/volume_max/volume_step/
     # digits were never checked). Client-side validation against those
@@ -489,6 +505,8 @@ def build_mt5_tool_specs() -> list[Any]:
             "Place a REAL order through the local MT5 terminal. Paper-first: "
             "refuses without paper_confirm=true, and live accounts are double-"
             "gated (MT5_ALLOW_LIVE=1 + MT5_CONFIRM_LIVE=1). Demo = paper. "
+            "The trading guardrails (position size, daily-loss kill switch) "
+            "are checked first and a breach refuses the order. "
             "REQUIRES human confirmation before it places any order.",
             _mt5_order_tool,
             {

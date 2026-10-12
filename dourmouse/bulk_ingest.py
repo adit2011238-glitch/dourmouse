@@ -86,7 +86,9 @@ def _write_status(checkpoint_path: Path, status: dict[str, Any]) -> None:
 
 def _load_checkpoint(checkpoint_path: Path, log: Callable[[str], None] | None = None) -> set[str]:
     """The set of already-done keys. A checkpoint that cannot be read is kept aside (never overwritten by
-    the next save) and the failure is reported through ``log``; the run then starts from nothing."""
+    the next save) and the failure is reported through ``log``; the run then starts from nothing. A checkpoint
+    that cannot be read at all right now raises ``state_file.StateUnreadable`` (an OSError) and the run does not
+    start: it is left in place rather than replaced by a fresh one."""
     value, note = load_json_or_aside(checkpoint_path, list)
     if note:
         if log:
@@ -274,8 +276,23 @@ def list_all_drive_files(token: str, *, page_size: int = 1000) -> Iterator[dict[
             return
 
 
+#: Google 403 reason codes that mean "this file can never be read with this token": a Docs/Sheets export over
+#: Google's size limit, or a file whose owner has disabled downloads. A 404 is also permanent. Rate-limit,
+#: quota, auth and server failures are NOT in this set: they are retried on the next run.
+_PERMANENT_403_REASONS = frozenset({
+    "exportsizelimitexceeded", "cannotdownloadfile", "filenotdownloadable", "cannotdownloadabusivefile",
+})
+
+
+def _is_permanent_refusal(exc: BaseException) -> bool:
+    status = getattr(exc, "status", None)
+    if status == 404:
+        return True
+    return status == 403 and str(getattr(exc, "reason", "")).lower() in _PERMANENT_403_REASONS
+
+
 def _read_drive_file_text(token: str, file_meta: dict[str, Any]) -> str | None:
-    from dourmouse.google_services import _http_raw
+    from dourmouse.google_services import GoogleApiError, _http_raw
 
     fid = file_meta["id"]
     mime = str(file_meta.get("mimeType") or "")
@@ -308,11 +325,12 @@ def _read_drive_file_text(token: str, file_meta: dict[str, Any]) -> str | None:
                     text = extract_pdf_text(tmp.name)
                 return None if ("no extractable text" in text or text.startswith("ERROR")) else text
             body = raw.decode("utf-8", errors="replace")
-    except RuntimeError as exc:
-        # _http_raw wraps every failure in RuntimeError. A file past the byte cap is a genuine "no text we
-        # can index" (a skip); anything else (401 after token expiry, 403 rate limit, 5xx, network) is a
-        # failure that must reach the caller so it is counted in `errors` and retried, not checkpointed.
-        if "exceeds the" in str(exc) and "B cap" in str(exc):
+    except GoogleApiError as exc:
+        # A file past the byte cap is a genuine "no text we can index" (a skip); anything else (401 after
+        # token expiry, 403 rate limit, 5xx, network) is a failure that must reach the caller so it is
+        # counted in `errors` and retried, not checkpointed. Classified by the typed status and reason
+        # code, never by message text.
+        if exc.over_cap:
             return None
         raise
     return body if body.strip() else None
@@ -333,7 +351,7 @@ def ingest_drive(
     done = _load_checkpoint(checkpoint_path, log)
     stats = {
         "scanned": 0, "indexed": 0, "skipped_no_text": 0, "skipped_done": 0,
-        "skipped_duplicate": 0, "errors": 0,
+        "skipped_duplicate": 0, "skipped_refused": 0, "errors": 0,
     }
     last_saved = 0
     seen_hashes: set[str] = set()  # see ingest_local_tree's in-run dedup note
@@ -355,6 +373,14 @@ def ingest_drive(
         try:
             text = _read_drive_file_text(token, f)
         except Exception as exc:  # noqa: BLE001
+            if _is_permanent_refusal(exc):
+                # Google will never give this file to this token: record it so every future run does not
+                # ask again and count an error (W2R-7).
+                stats["skipped_refused"] += 1
+                done.add(fid)
+                if log:
+                    log(f"skipped drive file {name!r} ({fid}): Google refuses it permanently ({exc})")
+                continue
             # Not added to `done`: an expired token, a rate limit or a 5xx is retried on the next run.
             stats["errors"] += 1
             if log:

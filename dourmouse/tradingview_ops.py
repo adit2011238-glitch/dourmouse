@@ -105,7 +105,9 @@ def _signals_path() -> Path:
 
 
 def webhook_secret() -> str:
-    """TV_WEBHOOK_SECRET from env; '' = open webhook (loopback posture)."""
+    """TV_WEBHOOK_SECRET from env. '' means no secret is configured: the main server's /api/tv-webhook
+    then answers 403 (unless TV_WEBHOOK_ALLOW_OPEN=1) and the standalone listener refuses to start
+    (unless --allow-open-webhook); ``handle_tv_webhook`` itself still accepts an unsigned signal."""
     return os.environ.get("TV_WEBHOOK_SECRET", "").strip()
 
 

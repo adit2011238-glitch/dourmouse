@@ -154,6 +154,12 @@ def _resolve_paths() -> tuple[Path, Path]:
     return db_path, index_path
 
 
+def _readonly_uri(db_path: Path) -> str:
+    """A read-only SQLite URI for ``db_path``. ``as_uri()`` percent-encodes the path: a bare ``file:{path}``
+    is misread by SQLite when the path holds '?', '#' or '%' (it opens, or fails on, a different file)."""
+    return f"{Path(db_path).resolve().as_uri()}?mode=ro"
+
+
 def _pick_column(actual_cols: list[str], override: str, candidates: tuple[str, ...]) -> str | None:
     if override:
         return override if override in actual_cols else None
@@ -182,7 +188,7 @@ def probe_vault_schema(db_path: Path) -> VaultSchema:
     # Read-only URI connection — this module must never write to a vault
     # it doesn't own, and a live-growing DB may be mid-write from
     # bulletproof_vault.py at any moment.
-    uri = f"file:{db_path}?mode=ro"
+    uri = _readonly_uri(db_path)
     try:
         conn = sqlite3.connect(uri, uri=True)
     except sqlite3.OperationalError as exc:
@@ -388,7 +394,7 @@ def _load_position_id_map(db_path: Path, schema: VaultSchema, index_total: int) 
     order_sql = os.environ.get(_VAULT_ID_ORDER_ENV, "").strip() or _VAULT_ID_ORDER_DEFAULT
     filter_sql = os.environ.get(_VAULT_ID_FILTER_ENV, "").strip()
     where_clause = f"WHERE {filter_sql} " if filter_sql else ""
-    with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as conn:
+    with sqlite3.connect(_readonly_uri(db_path), uri=True) as conn:
         rows = conn.execute(
             f'SELECT "{schema.id_col}" FROM "{schema.table}" {where_clause}ORDER BY {order_sql} LIMIT ?',
             (index_total,),
@@ -447,7 +453,7 @@ def query_spatial_vault(query: str, *, top_k: int = 5) -> list[dict[str, Any]]:
     distances, indices = index.search(q, max(1, top_k))
     lower_is_better = _metric_is_lower_better(index)
 
-    uri = f"file:{db_path}?mode=ro"
+    uri = _readonly_uri(db_path)
     try:
         conn = sqlite3.connect(uri, uri=True)
     except sqlite3.Error as exc:

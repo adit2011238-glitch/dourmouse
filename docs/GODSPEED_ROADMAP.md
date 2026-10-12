@@ -83,7 +83,7 @@ test proving it.
       `memory_store.py`'s existing pattern) and double-checked-locking on the singleton itself
       (matching `goals.get_goal_store()`). See finding #017. Every own-write-path SQLite store now
       verified clean by direct reading: `cache.py`, `google_auth.py`, `memory_store.py` (already
-      WAL/busy_timeout-hardened from a prior real incident), `supabase_sync.py`. The five read-only
+      WAL/busy_timeout-hardened from a prior real incident); `supabase_sync.py` was verified then too and was deleted 2026-10-12 (never used). The five read-only
       external-database readers (Claude Code/Codex history, project files) are a different risk
       category, not yet evaluated.
 - [x] Git-history secret mining: installed `gitleaks` (industry-standard, real tool, not previously
@@ -1153,3 +1153,4 @@ and a real build sequence, not just a requirement statement:
 - [x] Finding #173 2026-10-09 -- Fix wave 1: FS1, FS2, FR, FB (120 findings worked; highs P5-1, P3-8, P3-67, P5-65, P2-13, P4-8, P5-40, P3-37 fixed), shared path_identity helper, click gate, console hides on close. 15 review follow-ups (W1R-1..15) next.
 - [x] Finding #174 2026-10-09 -- Fix wave 1b: 15 review follow-ups closed (iframe click gate, Space/Enter gate, approval cards showing None, MCP single flight, capture stops on hide, send_message asks, more). Open: H-FIXR-3, P4-24 (owner OK).
 - [x] Finding #175 2026-10-11 -- Fix wave 2: FW, FD1, FD2 (77 findings worked): Google claim hijack closed, alert stream ping, unreadable state files kept aside (state_file.py), patch/CRLF/ingest/sync fixes. 11 review follow-ups (W2R-1..11) next, then PRIV.
+- [x] Finding #176 2026-10-12 -- Fix wave 2b: cross-host Google sign-in, single config writer, trading guardrails wired (order_guard.py), SupabaseSync deleted, leftovers. Trading guard review found 3 high follow-ups (W3R-1..3), fixed next.

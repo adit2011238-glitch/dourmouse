@@ -70,6 +70,32 @@ def _monkey_http(monkeypatch, payload: dict):
     return captured
 
 
+def _monkey_order_http(monkeypatch, order_payload: dict):
+    """Like _monkey_http, but the guardrail's account reads get an account (10000 total) holding
+    3 AAPL at 100; only the order POST gets ``order_payload`` (FIX-W2 P4-24)."""
+    captured: list[dict] = []
+
+    def fake_urlopen(req, timeout=None):
+        captured.append({
+            "url": req.full_url, "method": req.get_method(),
+            "body": req.data.decode() if req.data else None,
+        })
+        if req.get_method() == "POST":
+            return _fake_response(order_payload)
+        if req.full_url.endswith("/account/info"):
+            return _fake_response({"totalValue": 10000.0})
+        return _fake_response([
+            {"ticker": "AAPL", "quantity": 3, "currentPrice": 100.0},
+        ])
+
+    monkeypatch.setattr(trading212_ops.urllib.request, "urlopen", fake_urlopen)
+    return captured
+
+
+def _posts(captured):
+    return [c for c in captured if c["method"] == "POST"]
+
+
 def _set_key(monkeypatch, env: str = "demo"):
     monkeypatch.setenv("T212_API_KEY", "test-key")
     monkeypatch.setenv("T212_ENV", env)
@@ -178,10 +204,10 @@ class TestOrderPaperFirst:
 
     def test_market_order_payload(self, monkeypatch):
         _set_key(monkeypatch)
-        captured = _monkey_http(monkeypatch, {"id": "ORD-1"})
+        captured = _monkey_order_http(monkeypatch, {"id": "ORD-1"})
         out = t212_order("AAPL", 2, paper_confirm=True)
         assert out["id"] == "ORD-1"
-        req = captured[0]
+        req = _posts(captured)[0]
         assert req["url"].endswith("/api/v0/equity/orders")
         assert req["method"] == "POST"
         body = json.loads(req["body"])
@@ -189,11 +215,11 @@ class TestOrderPaperFirst:
 
     def test_limit_order_includes_prices(self, monkeypatch):
         _set_key(monkeypatch)
-        captured = _monkey_http(monkeypatch, {"id": "ORD-2"})
+        captured = _monkey_order_http(monkeypatch, {"id": "ORD-2"})
         t212_order(
             "VOO", 1, order_type="LIMIT", limit_price=510.0, paper_confirm=True
         )
-        body = json.loads(captured[0]["body"])
+        body = json.loads(_posts(captured)[0]["body"])
         assert body["type"] == "LIMIT"
         assert body["limitPrice"] == 510.0
 
@@ -203,7 +229,7 @@ class TestOrderPaperFirst:
         with pytest.raises(ValueError, match="T212_CONFIRM_LIVE"):
             t212_order("AAPL", 1, paper_confirm=True)
         monkeypatch.setenv("T212_CONFIRM_LIVE", "1")
-        _monkey_http(monkeypatch, {"id": "ORD-LIVE"})
+        _monkey_order_http(monkeypatch, {"id": "ORD-LIVE"})
         out = t212_order("AAPL", 1, paper_confirm=True)
         assert out["id"] == "ORD-LIVE"
 

@@ -7,8 +7,10 @@ caller so the failure is reported rather than hidden.
 
 * ``set_aside(path)`` renames an unreadable file to ``<name>.corrupt-<utc stamp>`` and returns the new path.
 * ``load_json_or_aside(path, kind)`` returns ``(value, note)``: the parsed value when it is a ``kind``, ``None``
-  when the file is simply absent, and when the file exists but cannot be read or is the wrong shape it is set
-  aside, ``value`` is ``None`` and ``note`` says where it went.
+  when the file is simply absent, and when the file was read but is bad JSON or the wrong shape it is set
+  aside, ``value`` is ``None`` and ``note`` says where it went. A file that cannot be READ at all right now
+  (permission, I/O error) is not corrupt: it is never moved, and ``StateUnreadable`` is raised so the caller
+  refuses its write instead of starting from an empty value.
 * ``atomic_write_text(path, text, mode=None)`` writes a temp file in the same directory and ``os.replace``s it,
   so a crash leaves either the old file or the new one, never a truncated one.
 """
@@ -22,6 +24,11 @@ import tempfile
 import time
 from pathlib import Path
 from typing import Any
+
+
+class StateUnreadable(OSError):
+    """The state file exists but could not be read right now (permission, a sync client's lock, an I/O error).
+    It was left exactly where it is; the caller must not write an empty replacement over it."""
 
 
 def set_aside(path: Path) -> Path:
@@ -38,17 +45,27 @@ def set_aside(path: Path) -> Path:
 
 def load_json_or_aside(path: Path, kind: type) -> tuple[Any, str]:
     """``(value, note)``. Absent file: ``(None, "")``. Readable and a ``kind``: ``(value, "")``.
-    Unreadable or the wrong shape: the file is kept aside, ``(None, note)`` names where."""
+    Bad JSON or the wrong shape: the file is kept aside, ``(None, note)`` names where. Not readable at all:
+    raises ``StateUnreadable`` and the file is not touched."""
     path = Path(path)
     if not path.exists():
         return None, ""
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-        if isinstance(value, kind):
-            return value, ""
-        reason = f"it holds a {type(value).__name__}, not a {kind.__name__}"
-    except (OSError, ValueError) as exc:
-        reason = f"{type(exc).__name__}: {exc}"
+        text = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:  # read fine, but the bytes are not text: corrupt
+        text, reason = None, f"{type(exc).__name__}: {exc}"
+    except OSError as exc:
+        raise StateUnreadable(
+            f"{path.name} could not be read right now ({type(exc).__name__}: {exc}); it was left untouched."
+        ) from exc
+    if text is not None:
+        try:
+            value = json.loads(text)
+            if isinstance(value, kind):
+                return value, ""
+            reason = f"it holds a {type(value).__name__}, not a {kind.__name__}"
+        except ValueError as exc:
+            reason = f"{type(exc).__name__}: {exc}"
     try:
         aside = set_aside(path)
     except OSError as exc:

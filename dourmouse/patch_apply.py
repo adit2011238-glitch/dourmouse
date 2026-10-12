@@ -91,7 +91,12 @@ def parse_search_replace_blocks(text: str) -> list[SearchReplaceBlock]:
     the order they appear. An empty ``search`` means "append" (Aider's own
     convention for a brand-new file / appending to the end) — callers
     decide what that means for their target.
+
+    Line endings in the patch text are normalised to "\\n" first: the file text is held as "\\n"
+    only and written back in its own style, so a "\\r\\n" left in a block would double up
+    ("\\r\\r\\n") in a CRLF file.
     """
+    text = text.replace("\r\n", "\n")
     return [
         SearchReplaceBlock(m.group("search"), m.group("replace"))
         for m in _SR_BLOCK_RE.finditer(text)
@@ -286,9 +291,13 @@ def apply_unified_diff(path: Path, diff_text: str) -> ApplyResult:
                 "file and regenerate the diff against its actual content.",
             )
         positioned.append((pos, hunk))
-    ordered = sorted(positioned, key=lambda ph: ph[0])
-    for (prev_pos, prev), (next_pos, _nxt) in zip(ordered, ordered[1:], strict=False):
-        if next_pos < prev_pos + len(prev.old_lines) or next_pos == prev_pos:
+    # An insertion (no old lines) sorts before a hunk that starts at the same index, so the replaced
+    # lines are never shifted by it and the two apply in a fixed order.
+    ordered = sorted(positioned, key=lambda ph: (ph[0], len(ph[1].old_lines) > 0))
+    for (prev_pos, prev), (next_pos, nxt) in zip(ordered, ordered[1:], strict=False):
+        if next_pos < prev_pos + len(prev.old_lines) or (
+            next_pos == prev_pos and not prev.old_lines and not nxt.old_lines
+        ):
             return ApplyResult(
                 False,
                 f"PATCH FAILED: two hunks overlap in {path.name} (around "

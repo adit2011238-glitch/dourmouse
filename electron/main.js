@@ -3541,6 +3541,8 @@ async function refreshAlerts() {
   }
 }
 
+const ALERT_RECONNECT_MS = 5000;
+
 function startAlertNotifications() {
   if (process.env.DOURMOUSE_DESKTOP_NOTIFICATIONS === "0") return;
   // Raw SSE consumption (no npm dependency needed): /api/events is a
@@ -3556,6 +3558,18 @@ function startAlertNotifications() {
     }
     alertStream = null;
   }
+  // A stream that ends or fails (the server closed it, or was briefly down) is opened again after
+  // ALERT_RECONNECT_MS, but only while it is still THE current stream and the app is not quitting. A
+  // stream replaced by a restart is not current, so the old one's late error cannot start a second.
+  let reconnectPlanned = false;
+  const reconnectLater = () => {
+    if (reconnectPlanned || alertStream !== req || serverQuitting) return;
+    reconnectPlanned = true;
+    const timer = setTimeout(() => {
+      if (alertStream === req && !serverQuitting) startAlertNotifications();
+    }, ALERT_RECONNECT_MS);
+    if (timer && typeof timer.unref === "function") timer.unref();
+  };
   const req = http.get(`${BASE_URL}/api/events`, (res) => {
     let buffer = "";
     res.on("data", (chunk) => {
@@ -3575,9 +3589,16 @@ function startAlertNotifications() {
         }
       }
     });
-    res.on("end", () => log("notifications: /api/events stream ended"));
+    res.on("end", () => {
+      log("notifications: /api/events stream ended");
+      reconnectLater();
+    });
+    res.on("error", () => reconnectLater());
   });
-  req.on("error", (exc) => log("notifications: /api/events connection failed (non-fatal):", exc.message));
+  req.on("error", (exc) => {
+    log("notifications: /api/events connection failed (non-fatal):", exc.message);
+    reconnectLater();
+  });
   alertStream = req;
 }
 

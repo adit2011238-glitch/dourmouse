@@ -750,6 +750,31 @@ class LocalFallbackMemoryStore:
         self._local: MemoryStore | None = None
         self.last_used_local_fallback = False
         self.last_remote_error: str | None = None
+        self._probe_at = 0.0
+        self._probe_local = False
+
+    #: How long a reachability answer is reused (seconds), so a loop of deletes does not probe the remote
+    #: once per fact.
+    _PROBE_TTL = 3.0
+
+    def _writes_go_local(self) -> bool:
+        """True when ``remember`` would land in the LOCAL store right now, because the remote cannot be
+        reached. ``all_facts`` and ``delete`` must act on the store that ``remember`` writes to (W2R / P4-50):
+        a reachable remote holds the facts and cannot list or delete them over its HTTP API."""
+        import time
+
+        now = time.monotonic()
+        if now - self._probe_at < self._PROBE_TTL:
+            return self._probe_local
+        try:
+            self._remote.count()
+            self._note_remote_ok()
+            self._probe_local = False
+        except RemoteMemoryStoreUnavailable as exc:
+            self._note_fallback(exc)
+            self._probe_local = True
+        self._probe_at = now
+        return self._probe_local
 
     def _local_store(self) -> "MemoryStore":
         if self._local is None:
@@ -804,19 +829,14 @@ class LocalFallbackMemoryStore:
             return self._local_store().get(source, title)
 
     def all_facts(self) -> list[dict[str, Any]]:
-        # RemoteMemoryStore.all_facts() always raises unsupported (a full
-        # table dump is deliberately not exposed over the remote HTTP
-        # API — see that method's own comment) — so this is always a
-        # fallback in practice, not conditionally one. Matches
-        # MemoryStore.all_facts()'s own real signature (no `source`
-        # param), not RemoteMemoryStore's.
-        try:
-            self._remote.all_facts()
-            self._note_remote_ok()
-            return []  # unreachable: the line above always raises
-        except RemoteMemoryStoreUnavailable as exc:
-            self._note_fallback(exc)
-            return self._local_store().all_facts()
+        # RemoteMemoryStore.all_facts() always raises unsupported (a full table dump is deliberately not
+        # exposed over the remote HTTP API). While the remote is reachable, remember() writes there, so a
+        # list from the local store would be a different set of facts than the one just written: the typed
+        # error is raised instead (callers already handle it). While it is down, remember() writes locally
+        # and this lists the same local store. Matches MemoryStore.all_facts()'s signature (no `source`).
+        if not self._writes_go_local():
+            self._remote.all_facts()  # raises the remote's own typed "not available over the remote API"
+        return self._local_store().all_facts()
 
     # The operations the remote API does not expose (RemoteMemoryStore raises its typed "unsupported" error
     # for each). They are served by the local store, the same way all_facts() is, so the post-turn session
@@ -830,6 +850,10 @@ class LocalFallbackMemoryStore:
         return self._local_store().ingest_vault(root)
 
     def delete(self, source: str, title: str) -> bool:
+        # Same rule as all_facts(): act on the store remember() writes to. A reachable remote cannot delete
+        # over its HTTP API, so the typed error is raised and the local store is left alone.
+        if not self._writes_go_local():
+            self._remote.delete(source, title)  # raises the remote's own typed error
         return self._local_store().delete(source, title)
 
     def save_embedding(self, fact_id: int, model: str, vector: list[float]) -> None:

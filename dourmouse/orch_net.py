@@ -63,10 +63,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import math
 import os
 import re
+import shutil
 import threading
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -74,6 +77,10 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+
+from dourmouse.state_file import atomic_write_text, set_aside
+
+_log = logging.getLogger(__name__)
 
 _NET_ENV = "DOURMOUSE_NET"
 _NET_DIR_ENV = "DOURMOUSE_NET_DIR"
@@ -560,6 +567,11 @@ class NeuroStore:
                     updated += 1
                     changed = True
             if changed:
+                if len([ln for ln in self.experiences_path.read_text(errors="replace").splitlines() if ln.strip()]) != len(recs):
+                    # Some lines could not be parsed and the rewrite below drops them: keep a copy first.
+                    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+                    shutil.copy2(self.experiences_path, self.experiences_path.with_name(
+                        f"{self.experiences_path.name}.corrupt-{stamp}"))
                 # Rewrite through a temp file and a rename, under the same
                 # lock log_experience appends under, so an append can never
                 # land in a half-truncated file.
@@ -584,10 +596,22 @@ class NeuroStore:
         except (json.JSONDecodeError, OSError):
             return {}
 
-    def _write_meta(self, meta: dict[str, Any]) -> None:
-        tmp = self.meta_path.with_name(self.meta_path.name + ".tmp")
-        tmp.write_text(json.dumps(meta, indent=2))
-        os.replace(tmp, self.meta_path)
+    def _write_meta(self, meta: dict[str, Any]) -> bool:
+        """Replace the meta file atomically. ``_read_meta`` reports a failed read as {}, so a writer that
+        merges into it must not put that {} over the real file: a meta file that cannot be read right now
+        is left exactly as it is (and the write skipped, logged), and one that is not valid JSON is kept
+        aside as ``meta.json.corrupt-<time>`` before it is replaced. Returns whether it wrote."""
+        if self.meta_path.exists():
+            try:
+                json.loads(self.meta_path.read_text())
+            except OSError as exc:
+                _log.error("orch_net: %s cannot be read right now (%s); the update was skipped", self.meta_path, exc)
+                return False
+            except ValueError:  # includes JSONDecodeError and UnicodeDecodeError
+                aside = set_aside(self.meta_path)
+                _log.error("orch_net: %s was not valid JSON; kept as %s", self.meta_path.name, aside.name)
+        atomic_write_text(self.meta_path, json.dumps(meta, indent=2))
+        return True
 
     # -- training ----------------------------------------------------------- #
     def train(self, agent_names: Sequence[str] | None = None) -> dict[str, Any]:

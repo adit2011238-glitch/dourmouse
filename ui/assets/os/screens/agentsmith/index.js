@@ -14,7 +14,7 @@ import { agoLabel } from '../../kit/format.js';
 import { isAbort } from '../../core/api.js';
 import {
   signature, statusInfo, GROUPS, grouped, ledeLine, restartLine, boardSignature, approvePrompt, rejectPrompt,
-  draftDirective, draftCheck, diskLine, whyNotApprovable,
+  draftDirective, draftCheck, diskLine, whyNotApprovable, moduleHashLine, reviewHashLine,
 } from './helpers.js';
 
 const POLL_MS = 10000;
@@ -195,10 +195,11 @@ export default {
       if (x.too_large_to_review) {
         box.append(el('div', 'as-warn', 'This draft is ' + x.module_chars + ' characters, too large to read on this screen. It cannot be approved here.'));
       } else {
-        box.append(el('div', 'who', 'The module that would be written and run (' + x.module_lines + ' lines, sha256 ' + x.preview_sha256 + ')'));
+        box.append(el('div', 'who', moduleHashLine(x)));
         box.append(codeBlock(x.module_preview, 'Module source'));
         box.append(el('div', 'who', 'The draft\'s own test, run once when you approve (' + x.test_chars + ' characters)'));
         box.append(codeBlock(x.test_source, 'Test source'));
+        box.append(el('div', 'muted as-body', reviewHashLine(x)));
       }
       if (x.status === 'APPROVED') {
         box.append(el('div', 'muted as-body', (x.module_sha256 ? 'Recorded at approval: sha256 ' + x.module_sha256 + '. ' : '') + diskLine(x)));

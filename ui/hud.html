@@ -527,6 +527,7 @@ async function loadTasks() {
   try {
     const d = await jget('/api/tasks');
     const list = $('taskList');
+    if (d.error) { $('taskCount').textContent = '[ ? ]'; list.innerHTML = '<div class="empty">' + esc(d.error) + '</div>'; return; }
     $('taskCount').textContent = '[ ' + d.active + ' ACTIVE ]';
     if (!d.tasks.length) { list.innerHTML = '<div class="empty">no tasks</div>'; return; }
     list.innerHTML = d.tasks.slice(0, 12).map(t =>

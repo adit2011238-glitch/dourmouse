@@ -98,18 +98,21 @@ def summarize_activity(snapshot: dict[str, Any] | None) -> dict[str, Any]:
     return {"busy": False, "headline": "IDLE", "detail": "nothing in progress"}
 
 
-def _read_privacy_state() -> dict[str, bool]:
+def _read_privacy_state() -> dict[str, bool | None]:
     """Mic/camera armed-vs-killed, read from the SAME persisted flag
     dourmouse/tray.py's kill switch writes — the overlay never keeps its
-    own copy of this truth. Honest defaults (both armed) when tray.py has
-    never run or can't be read, matching tray.load_state()'s own defaults."""
+    own copy of this truth. ``tray.load_state()`` already answers for a fresh
+    install (both enabled) and a damaged file (both killed, fail closed). If it
+    cannot answer at all (an import or other failure) the state is UNKNOWN and
+    is reported as None, which the page draws as unknown: showing the devices as
+    armed, or as killed, on a guess would tell the owner something untrue."""
     try:
         from dourmouse.tray import load_state
 
         state = load_state()
         return {"mic_enabled": state.mic_enabled, "camera_enabled": state.camera_enabled}
     except Exception:  # noqa: BLE001 -- the overlay must never crash on this
-        return {"mic_enabled": True, "camera_enabled": True}
+        return {"mic_enabled": None, "camera_enabled": None}
 
 
 class OverlayStatusPoller:
@@ -128,7 +131,7 @@ class OverlayStatusPoller:
         *,
         interval: float = _POLL_INTERVAL_SECONDS,
         fetch: Callable[[str], dict[str, Any] | None] | None = None,
-        privacy_reader: Callable[[], dict[str, bool]] | None = None,
+        privacy_reader: Callable[[], dict[str, bool | None]] | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._on_update = on_update
@@ -201,6 +204,7 @@ _OVERLAY_HTML = """<!doctype html>
   .dot.on { background:#3adc64; }
   .dot.off { background:#e0413a; }
   .dot.offline { background:#555; }
+  .dot.unknown { background:transparent; border:1.5px solid #e0b43a; box-sizing:border-box; }
   #headline { font-size:13px; font-weight:600; margin:6px 0 2px; }
   #detail { font-size:11px; opacity:.7; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 </style></head>
@@ -221,8 +225,10 @@ window.__dourmouseOverlayUpdate = function(s) {
     var offline = s.online === false;
     var micDot = document.getElementById('micDot');
     var camDot = document.getElementById('camDot');
-    micDot.className = 'dot ' + (offline ? 'offline' : (s.mic_enabled ? 'on' : 'off'));
-    camDot.className = 'dot ' + (offline ? 'offline' : (s.camera_enabled ? 'on' : 'off'));
+    // true armed, false killed, anything else (null: the state could not be read) unknown.
+    var kind = function(v) { return v === true ? 'on' : (v === false ? 'off' : 'unknown'); };
+    micDot.className = 'dot ' + (offline ? 'offline' : kind(s.mic_enabled));
+    camDot.className = 'dot ' + (offline ? 'offline' : kind(s.camera_enabled));
   } catch (e) {}
 };
 </script>

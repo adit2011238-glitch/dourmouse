@@ -234,11 +234,13 @@ class GoalRuntime:
         permanently_failed = [t for t in tasks if t["status"] == "FAILED" and t["attempt_count"] >= t["max_attempts"]]
         if permanently_failed:
             culprit = permanently_failed[0]
-            self._store.update_goal_status(
+            # Announce only a status this call actually wrote: a goal the owner cancelled while this
+            # tick held a stale snapshot refuses the write, and must not also raise a "Blocked" alert.
+            if self._store.update_goal_status(
                 goal_id, "BLOCKED",
                 blocked_reason=f"task {culprit['id']!r} ({culprit['description']}) failed permanently: {culprit['last_error']}",
-            )
-            self._notify(goal_id, f"Blocked: {goal['objective']}", culprit["last_error"] or "a task failed")
+            ):
+                self._notify(goal_id, f"Blocked: {goal['objective']}", culprit["last_error"] or "a task failed")
             return True
         return False
 
@@ -282,8 +284,8 @@ class GoalRuntime:
                 task_id, "WAITING_FOR_APPROVAL", error=reason,
                 result={"pending_prompts": list(report.get("pending_prompts") or [])},
             )
-            self._store.update_goal_status(goal_id, "WAITING_FOR_APPROVAL", blocked_reason=reason)
-            self._notify(goal_id, f"Needs your approval: {goal['objective']}", reason)
+            if self._store.update_goal_status(goal_id, "WAITING_FOR_APPROVAL", blocked_reason=reason):
+                self._notify(goal_id, f"Needs your approval: {goal['objective']}", reason)
             return
         final_text = (report.get("final_text") or "").strip()
         if not final_text:
@@ -523,28 +525,30 @@ class GoalRuntime:
             current = self._store.get_goal(goal_id)
             if current is None or current["status"] in GOAL_TERMINAL_STATES:
                 return
+            # Each branch announces only a status the store accepted (update_goal_status is False for a
+            # goal that is already cancelled/expired, or finished by someone else).
             if verdict["error"] is not None:
-                self._store.update_goal_status(
+                if self._store.update_goal_status(
                     goal_id, "COMPLETED",
                     result={"summary": summary, "criteria_checked": False, "note": f"criteria check could not run: {verdict['error']}"},
-                )
-                self._notify(goal_id, f"Done: {goal['objective']}", "every task completed (criteria check could not run)")
+                ):
+                    self._notify(goal_id, f"Done: {goal['objective']}", "every task completed (criteria check could not run)")
                 return
             if not verdict["satisfied"]:
-                self._store.update_goal_status(
+                if self._store.update_goal_status(
                     goal_id, "BLOCKED",
                     blocked_reason=f"success criteria not met: {verdict['reasoning'][:500]}",
-                )
-                self._notify(goal_id, f"Blocked: {goal['objective']}", "every task completed, but success criteria were not met")
+                ):
+                    self._notify(goal_id, f"Blocked: {goal['objective']}", "every task completed, but success criteria were not met")
                 return
-            self._store.update_goal_status(
+            if self._store.update_goal_status(
                 goal_id, "COMPLETED",
                 result={"summary": summary, "criteria_checked": True, "reasoning": verdict["reasoning"][:2000]},
-            )
-            self._notify(goal_id, f"Done: {goal['objective']}", "every task completed, success criteria verified")
+            ):
+                self._notify(goal_id, f"Done: {goal['objective']}", "every task completed, success criteria verified")
             return
-        self._store.update_goal_status(goal_id, "COMPLETED", result={"summary": summary})
-        self._notify(goal_id, f"Done: {goal['objective']}", "every task completed")
+        if self._store.update_goal_status(goal_id, "COMPLETED", result={"summary": summary}):
+            self._notify(goal_id, f"Done: {goal['objective']}", "every task completed")
 
     def _notify(self, goal_id: str, title: str, detail: str) -> None:
         """Real, established two-step notification, same as every other

@@ -64,7 +64,7 @@ class TestGatePages:
     def test_setup_keeps_its_handlers_endpoints_and_the_ungated_skip(self):
         src = _read("ui/setup.html")
         for needle in ("/api/setup/save", "/api/setup/validate-key", "/api/setup/probe-node", "/api/setup/restart",
-                       "/api/auth/google/start?claim=", "/api/auth/claim?code=", 'onclick="show(2)"', "pywebview",
+                       "/api/auth/google/start?claim=1", 'fetch("/api/auth/claim")', 'onclick="show(2)"', "pywebview",
                        'id="gSkipBtn" onclick="gAdvance()">Skip<'):
             assert needle in src, needle
         assert ".hide{display:none!important}" in src, "a hidden card must stay hidden whatever else sets display"

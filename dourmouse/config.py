@@ -49,11 +49,14 @@ model unless a user hand-set an env var):
 
 from __future__ import annotations
 
+import io
 import os
 import re
 import sys
+import threading
 import urllib.error
 import urllib.request
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -61,6 +64,7 @@ from typing import Any
 from dotenv import load_dotenv
 
 from .guardrails import GuardrailConfig
+from .state_file import atomic_write_text
 
 
 def user_config_dir() -> Path:
@@ -108,13 +112,11 @@ def _env_value_text(key: str, text: str) -> str:
     if not text:
         return ""
     if "${" in text:
-        # dotenv expands ${VAR} even inside single quotes, so it cannot be
-        # stored literally. A line the owner wrote by hand that way is kept as
-        # written (it already means what the loader makes of it); one that
-        # also needs quoting cannot be represented and is refused.
-        if _ENV_NEEDS_QUOTES.search(text.replace("$", "")):
-            raise ValueError(f"the value for {key} contains '${{' and other characters that cannot be stored together")
-        return text
+        # python-dotenv expands ${VAR} even inside single quotes, so a value
+        # holding it cannot be stored literally. Refused here, in the one place
+        # every writer goes through. (A line the owner wrote by hand that way is
+        # never re-emitted: the writers keep every line they are not changing.)
+        raise ValueError(f"the value for {key} contains '${{', which the config loader would expand")
     if not _ENV_NEEDS_QUOTES.search(text):
         return text
     return "'" + text.replace("\\", "\\\\").replace("'", "\\'") + "'"
@@ -143,32 +145,90 @@ def env_lines(values: dict[str, str]) -> list[str]:
     return lines
 
 
-def write_user_config(path: Path, values: dict[str, str]) -> None:
-    """Write the user's config file: the header plus ``env_lines(values)``.
+_ENV_HEADER = [
+    "# Dourmouse configuration, written by first-run setup and Settings.",
+    "# This file holds credentials. Keep it to yourself; it is never",
+    "# bundled into a build or uploaded anywhere.",
+    "",
+]
 
-    FW A-15: the file is created 0600 from its first byte (a temp file in the
-    same directory, then an atomic replace), never written world-readable and
-    chmod'ed afterwards, and a config directory this call has to create is
-    0700. A failed write leaves the old file untouched. Raises OSError or
-    ValueError; callers report them."""
-    body = [
-        "# Dourmouse configuration \u2014 written by first-run setup / settings.",
-        "# This file holds credentials. Keep it to yourself; it is never",
-        "# bundled into a build or uploaded anywhere.",
-        "",
-    ]
-    body += env_lines(values)
-    text = "\n".join(body) + "\n"
-    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(text)
-        os.replace(tmp, path)
-    except BaseException:
-        tmp.unlink(missing_ok=True)
-        raise
+#: ONE lock for every read-modify-write of the user's config file, shared by
+#: this module, settings_registry and firstrun (W2R-4). Re-entrant so a caller
+#: that reads, decides and writes can hold it across all three.
+config_lock = threading.RLock()
+
+_LEADING_BLANKS = re.compile(r"\A(?:[ \t]*\n)*")
+
+
+def merge_env_text(old_text: str | None, updates: dict[str, str], removals: Iterable[str] = ()) -> str:
+    """The config text with ``updates`` applied and ``removals`` dropped, line by line.
+
+    The file is split with python-dotenv's own parser, so a quoted value that
+    spans several lines (or holds ``\\n`` escapes) is one unit and everything
+    this call is not changing, comments, blank lines, order, ``export`` forms and
+    values it could not re-quote, is kept byte for byte (W2R-2, W2R-10). A line
+    that sets a changed key is replaced by one properly quoted line (a repeated
+    key keeps only the first slot: dotenv takes the last one); keys not present
+    are appended. Raises ValueError on a bad key or value (``env_lines``)."""
+    from dotenv.parser import parse_stream
+
+    new_lines = {k: env_lines({k: v})[0] for k, v in updates.items()}  # validates keys and values
+    drop = {str(k) for k in removals}
+    pieces: list[str] = []
+    written: set[str] = set()
+    base = old_text or ""
+    for binding in parse_stream(io.StringIO(base)):
+        raw = binding.original.string
+        key = binding.key
+        if key is not None and not binding.error and key in new_lines:
+            if key not in written:
+                lead = _LEADING_BLANKS.match(raw)
+                pieces.append((lead.group(0) if lead else "") + new_lines[key] + "\n")
+                written.add(key)
+            continue
+        if key is not None and not binding.error and key in drop:
+            continue
+        pieces.append(raw)
+    text = "".join(pieces)
+    if text and not text.endswith("\n"):
+        text += "\n"
+    if not base.strip():
+        text = "\n".join(_ENV_HEADER) + "\n" + text
+    for key in sorted(new_lines):
+        if key not in written:
+            text += new_lines[key] + "\n"
+    return text
+
+
+def update_user_config(updates: dict[str, str] | None = None, removals: Iterable[str] = ()) -> Path:
+    """Apply ``updates`` / ``removals`` to the user's config file and return its path.
+
+    The one writer of that file (config.save_*, settings_registry, firstrun):
+    it takes ``config_lock``, re-reads the file under it, merges line by line
+    (``merge_env_text``) and replaces it through ``state_file.atomic_write_text``
+    (unique temp name, fsync, 0600 from the first byte). A directory this call
+    creates is 0700; a symlinked file is written through, so the link stays.
+    A file that exists but cannot be read is left exactly as it is and the call
+    raises OSError, because treating it as empty would erase every saved key.
+    Raises OSError or ValueError; callers report them. Within this process the
+    lock makes concurrent saves safe; another process writing the same file at
+    the same moment is not excluded."""
+    with config_lock:
+        path = user_env_path()
+        target = Path(os.path.realpath(path)) if path.is_symlink() else path
+        old_text: str | None = None
+        if target.exists():
+            try:
+                old_text = target.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError) as exc:
+                raise OSError(
+                    f"{target} exists but cannot be read ({type(exc).__name__}: {exc}); the setting was "
+                    "not changed and the file was left exactly as it is. Fix or move it, then try again."
+                ) from exc
+        text = merge_env_text(old_text, dict(updates or {}), removals)
+        target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        atomic_write_text(target, text, mode=0o600)
+        return path
 
 
 def user_env_path() -> Path:
@@ -1164,16 +1224,16 @@ def save_orchestrator_model_setting(model: str, backend: str = "") -> dict[str, 
         return {"ok": False, "detail": "no model given"}
     path = user_env_path()
     try:
-        existing = _read_user_config_file()
-        existing[ORCHESTRATOR_MODEL_SETTING_KEY] = model
+        updates = {ORCHESTRATOR_MODEL_SETTING_KEY: model}
+        removals: list[str] = []
         if backend:
-            existing[ORCHESTRATOR_BACKEND_SETTING_KEY] = backend
+            updates[ORCHESTRATOR_BACKEND_SETTING_KEY] = backend
         else:
             # A raw manual override with no known backend invalidates any
             # PREVIOUS backend tag too — an untagged model must never keep
             # riding a stale tag from an earlier, different save.
-            existing.pop(ORCHESTRATOR_BACKEND_SETTING_KEY, None)
-        write_user_config(path, existing)
+            removals.append(ORCHESTRATOR_BACKEND_SETTING_KEY)
+        update_user_config(updates, removals)
     except (OSError, ValueError) as exc:
         return {"ok": False, "detail": f"could not write config: {exc}"}
     return {"ok": True, "detail": "saved", "model": model, "backend": backend or None, "path": str(path)}
@@ -1217,9 +1277,7 @@ def save_claude_front_mode_setting(enabled: bool) -> dict[str, Any]:
     never clobbers unrelated saved settings."""
     path = user_env_path()
     try:
-        existing = _read_user_config_file()
-        existing[CLAUDE_FRONT_MODE_SETTING_KEY] = "on" if enabled else "off"
-        write_user_config(path, existing)
+        update_user_config({CLAUDE_FRONT_MODE_SETTING_KEY: "on" if enabled else "off"})
     except (OSError, ValueError) as exc:
         return {"ok": False, "detail": f"could not write config: {exc}"}
     return {"ok": True, "detail": "saved", "enabled": enabled, "path": str(path)}
@@ -1262,9 +1320,7 @@ def save_google_oauth_full_scopes_setting(enabled: bool) -> dict[str, Any]:
     file discipline as every other save_*_setting here."""
     path = user_env_path()
     try:
-        existing = _read_user_config_file()
-        existing[GOOGLE_OAUTH_FULL_SCOPES_SETTING_KEY] = "on" if enabled else "off"
-        write_user_config(path, existing)
+        update_user_config({GOOGLE_OAUTH_FULL_SCOPES_SETTING_KEY: "on" if enabled else "off"})
     except (OSError, ValueError) as exc:
         return {"ok": False, "detail": f"could not write config: {exc}"}
     return {"ok": True, "detail": "saved", "enabled": enabled, "path": str(path)}
@@ -1322,9 +1378,7 @@ def save_grounded_mode_setting(enabled: bool) -> dict[str, Any]:
     settings. Never raises; a write failure is reported honestly."""
     path = user_env_path()
     try:
-        existing = _read_user_config_file()
-        existing[GROUNDED_MODE_SETTING_KEY] = "1" if enabled else "0"
-        write_user_config(path, existing)
+        update_user_config({GROUNDED_MODE_SETTING_KEY: "1" if enabled else "0"})
     except (OSError, ValueError) as exc:
         return {"ok": False, "detail": f"could not write config: {exc}"}
     return {"ok": True, "detail": "saved", "enabled": enabled, "path": str(path)}
@@ -1358,9 +1412,7 @@ def save_auto_approve_setting(enabled: bool) -> dict[str, Any]:
     Never raises; a write failure is reported honestly."""
     path = user_env_path()
     try:
-        existing = _read_user_config_file()
-        existing[AUTO_APPROVE_SETTING_KEY] = "1" if enabled else "0"
-        write_user_config(path, existing)
+        update_user_config({AUTO_APPROVE_SETTING_KEY: "1" if enabled else "0"})
     except (OSError, ValueError) as exc:
         return {"ok": False, "detail": f"could not write config: {exc}"}
     return {"ok": True, "detail": "saved", "enabled": enabled, "path": str(path)}
@@ -1401,9 +1453,7 @@ def save_app_control_dry_run_setting(enabled: bool) -> dict[str, Any]:
     settings. Never raises; a write failure is reported honestly."""
     path = user_env_path()
     try:
-        existing = _read_user_config_file()
-        existing[APP_CONTROL_DRY_RUN_SETTING_KEY] = "1" if enabled else "0"
-        write_user_config(path, existing)
+        update_user_config({APP_CONTROL_DRY_RUN_SETTING_KEY: "1" if enabled else "0"})
     except (OSError, ValueError) as exc:
         return {"ok": False, "detail": f"could not write config: {exc}"}
     return {"ok": True, "detail": "saved", "enabled": enabled, "path": str(path)}
@@ -1450,13 +1500,11 @@ def save_api_key_setting(env_name: str, value: str) -> dict[str, Any]:
         return {"ok": False, "detail": "a key containing '${' cannot be stored: the config loader would expand it"}
     path = user_env_path()
     try:
-        existing = _read_user_config_file()
         value = value.strip()
         if value:
-            existing[env_name] = value
+            update_user_config({env_name: value})
         else:
-            existing.pop(env_name, None)
-        write_user_config(path, existing)
+            update_user_config(removals=[env_name])
     except (OSError, ValueError) as exc:
         return {"ok": False, "detail": f"could not write config: {exc}"}
     return {"ok": True, "detail": "saved" if value else "cleared", "configured": bool(value), "path": str(path)}

@@ -78,12 +78,48 @@ _SKIP_FILES = frozenset(
 # later model prompts). Directory names are skipped during the walk; file names
 # are matched case-insensitively.
 _CREDENTIAL_DIRS = frozenset({".aws", ".ssh", ".gnupg", ".kube", ".docker", ".azure", ".gcloud"})
+# Credential files are recognised by WHOLE name words, not substrings (W2R-9): ``credentials.json``,
+# ``client_secret_1.json`` and ``api_keys.txt`` are credential files; ``tokenizer.py``, ``token_bucket.ts``,
+# ``design-tokens.json``, ``password_reset.html`` and ``SECRET_SCAN.md`` are ordinary source and docs.
+# The file stem is lower-cased, separators and digits are dropped, and what is left must be a credential word
+# optionally wrapped in the usual qualifiers (client, google, prod, ...).
 _CREDENTIAL_NAME_RE = re.compile(
-    r"(credential|secret|token|passw(or)?d|passwd|api[_-]?key|private[_-]?key|service[_-]?account"
-    r"|^auth\.json$|^id_(rsa|dsa|ecdsa|ed25519)|\.(pem|key|p12|pfx|keystore|jks)$"
+    r"(^auth\.json$|^\.env(\..+)?$|^id_(rsa|dsa|ecdsa|ed25519)|\.(pem|key|p12|pfx|keystore|jks)$"
     r"|^\.(netrc|npmrc|pgpass|pypirc|git-credentials)$)",
     re.IGNORECASE,
 )
+_CRED_WORD = (
+    r"(?:credentials?|secrets?|tokens?|passwords?|passwd|apikeys?|serviceaccount(?:keys?)?|privatekeys?|"
+    r"accesskeys?|secretkeys?)"
+)
+_CRED_STEM_RE = re.compile(
+    r"^(?:client|service|my|app|prod|production|dev|staging|local|user|db|api|github|google|aws|gcp|"
+    r"oauth|access|refresh|auth|bearer|session|private|ssh)*" + _CRED_WORD +
+    r"(?:local|prod|production|dev|staging|backup|old|new|example|sample|template)*$"
+)
+# Documents are matched only on the bare word (secrets.md, passwords.md): an ordinary page about tokens or
+# secrets (auth_tokens.md, SECRET_SCAN.md) is documentation. Stylesheets carry design tokens, never secrets.
+_DOC_SUFFIXES = frozenset({".md", ".rst", ".adoc", ".html", ".htm"})
+_STYLE_SUFFIXES = frozenset({".css", ".scss", ".less", ".styl", ".svg"})
+_CRED_BARE_STEM_RE = re.compile(r"^" + _CRED_WORD + r"$")
+
+
+def _is_credential_name(fn: str) -> bool:
+    """True for a file name that marks credential or secret material (see ``_CREDENTIAL_NAME_RE``)."""
+    if _CREDENTIAL_NAME_RE.search(fn):
+        return True
+    path = Path(fn)
+    suffix = path.suffix.lower()
+    if suffix in _STYLE_SUFFIXES:
+        return False
+    stem = re.sub(r"[^a-z0-9]", "", path.stem.lower().lstrip(".")).strip("0123456789")
+    if suffix in _DOC_SUFFIXES:
+        return bool(_CRED_BARE_STEM_RE.match(stem))
+    # A name with no real extension (``github_token``, ``passwd``) is its whole name.
+    if not suffix or path.stem == fn:
+        stem = re.sub(r"[^a-z0-9]", "", fn.lower().lstrip(".")).strip("0123456789")
+    return bool(_CRED_STEM_RE.match(stem))
+
 
 _MAX_MD = 2500
 _MAX_SKELETON = 1200
@@ -134,11 +170,15 @@ def _collect_files(root: Path) -> list[Path]:
             d for d in dirnames if d not in _EXCLUDED_DIRS and d.lower() not in _CREDENTIAL_DIRS
         )
         for fn in sorted(filenames):
-            if fn in _SKIP_FILES or _CREDENTIAL_NAME_RE.search(fn) or fn.endswith(
+            if fn in _SKIP_FILES or _is_credential_name(fn) or fn.endswith(
                 (".pyc", ".zip", ".gz", ".db", ".bi5", ".repo-meta.json")
             ):
                 continue
             p = Path(dirpath) / fn
+            if p.is_symlink():
+                # A link inside an allowed root can point anywhere (a key file, another project): never read
+                # through it, as the device-wiki walker does not.
+                continue
             try:
                 if p.stat().st_size > _MAX_FILE_SIZE or _is_binary(p):
                     continue

@@ -22,6 +22,7 @@ here is a cache of state that lives somewhere else.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sqlite3
 import threading
@@ -29,6 +30,19 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+_log = logging.getLogger(__name__)
+
+
+def _cell(raw: Any, fallback: Any, what: str) -> Any:
+    """``json.loads(raw)``, or ``fallback`` when the cell is damaged (logged, never raised): one bad row
+    must not make every read of a goal, its tasks or its audit trail fail. The fallbacks are chosen so a
+    damaged cell never reads as 'no rule here' (see the callers)."""
+    try:
+        return json.loads(raw)
+    except (TypeError, ValueError):
+        _log.warning("goals: damaged %s cell ignored: %r", what, str(raw)[:80])
+        return fallback
 
 #: Goal lifecycle — exactly the states a real autonomous run needs to be
 #: honest about, not just "running"/"done". A goal is never silently
@@ -405,11 +419,13 @@ class GoalStore:
         return {
             "id": row["id"], "owner": row["owner"], "objective": row["objective"],
             "status": row["status"], "priority": row["priority"],
-            "success_criteria": json.loads(row["success_criteria"]),
-            "resource_limits": json.loads(row["resource_limits"]),
+            # Damaged criteria must not read as "no criteria" (that would finish the goal unchecked): one
+            # criterion that can never be shown satisfied keeps it from completing silently.
+            "success_criteria": _cell(row["success_criteria"], ["(success criteria unreadable: the stored value is damaged)"], "success_criteria"),
+            "resource_limits": _cell(row["resource_limits"], {}, "resource_limits"),
             "deadline": row["deadline"], "current_task_id": row["current_task_id"],
             "blocked_reason": row["blocked_reason"],
-            "result": json.loads(row["result"]) if row["result"] else None,
+            "result": _cell(row["result"], None, "goal result") if row["result"] else None,
             "session_id": row["session_id"],
             "paused_from": row["paused_from"],
             "created_at": row["created_at"], "updated_at": row["updated_at"],
@@ -505,10 +521,13 @@ class GoalStore:
         return {
             "id": row["id"], "goal_id": row["goal_id"], "parent_task_id": row["parent_task_id"],
             "description": row["description"], "status": row["status"],
-            "depends_on": json.loads(row["depends_on"]), "assigned_agent": row["assigned_agent"],
+            # Damaged dependencies must not read as "none" (the task would run before what it waits for):
+            # a dependency that can never complete keeps it pending.
+            "depends_on": _cell(row["depends_on"], ["(dependencies unreadable: the stored value is damaged)"], "depends_on"),
+            "assigned_agent": row["assigned_agent"],
             "attempt_count": row["attempt_count"], "max_attempts": row["max_attempts"],
             "last_error": row["last_error"],
-            "result": json.loads(row["result"]) if row["result"] else None,
+            "result": _cell(row["result"], None, "task result") if row["result"] else None,
             "created_at": row["created_at"], "updated_at": row["updated_at"],
         }
 
@@ -541,7 +560,8 @@ class GoalStore:
         return [
             {
                 "id": r["id"], "goal_id": r["goal_id"], "task_id": r["task_id"],
-                "type": r["type"], "detail": json.loads(r["detail"]), "at": r["at"],
+                "type": r["type"], "detail": _cell(r["detail"], {"unreadable": str(r["detail"])[:200]}, "event detail"),
+                "at": r["at"],
             }
             for r in rows
         ]
@@ -583,7 +603,8 @@ class GoalStore:
         return [
             {
                 "id": r["id"], "goal_id": r["goal_id"], "task_id": r["task_id"],
-                "type": r["type"], "detail": json.loads(r["detail"]), "at": r["at"],
+                "type": r["type"], "detail": _cell(r["detail"], {"unreadable": str(r["detail"])[:200]}, "event detail"),
+                "at": r["at"],
             }
             for r in rows
         ]

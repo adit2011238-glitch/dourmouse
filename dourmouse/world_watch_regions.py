@@ -32,9 +32,16 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from dourmouse.state_file import StateUnreadable, atomic_write_text, load_json_or_aside
+
+#: Serialises the read-modify-write of the region file within this process.
+_REGIONS_LOCK = threading.RLock()
 
 _WATCH_REGIONS_ENV = "DOURMOUSE_WATCH_REGIONS_FILE"
 
@@ -70,6 +77,8 @@ def _regions_file() -> Path:
 
 
 def _load_regions(path: Path) -> list[dict[str, Any]]:
+    """The stored regions for READING: a missing, unreadable or malformed file is an empty list. Reading
+    never moves or changes the file; writers use ``_load_regions_for_update`` instead."""
     if not path.exists():
         return []
     try:
@@ -81,12 +90,33 @@ def _load_regions(path: Path) -> list[dict[str, Any]]:
     return [r for r in data if isinstance(r, dict)]
 
 
+def _load_regions_for_update(path: Path) -> list[dict[str, Any]]:
+    """The stored regions for a caller that is about to WRITE. A missing file is an empty list. A file that
+    was read but is bad JSON or not a list is kept aside (``<name>.corrupt-<time>``, never overwritten) and
+    the change is refused with a message saying where it went; the next call starts a new list. A file that
+    cannot be read right now (permission, I/O) is left exactly where it is and the change is refused.
+    Returning [] here would let the write that follows put an empty list over every region."""
+    try:
+        value, note = load_json_or_aside(path, list)
+    except StateUnreadable as exc:
+        raise RuntimeError(f"{exc} The region was not saved; try again later.") from exc
+    if note:
+        raise RuntimeError(f"{note} The change was not saved; try again to start a new list.")
+    return [r for r in (value or []) if isinstance(r, dict)]
+
+
 def _save_regions(path: Path, regions: list[dict[str, Any]]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(regions, indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
+    atomic_write_text(path, json.dumps(regions, indent=2, ensure_ascii=False) + "\n")
+
+
+def _next_region_id(regions: list[dict[str, Any]]) -> str:
+    """region-<max numeric suffix + 1>: len(regions)+1 collides as soon as one region has been deleted."""
+    highest = 0
+    for r in regions:
+        m = re.fullmatch(r"region-(\d+)", str(r.get("id", "")))
+        if m:
+            highest = max(highest, int(m.group(1)))
+    return f"region-{highest + 1}"
 
 
 # --------------------------------------------------------------------------- #
@@ -153,18 +183,19 @@ def add_region(name: str, min_lat: float, max_lat: float, min_lon: float, max_lo
         name, min_lat, max_lat, min_lon, max_lon
     )
     path = _regions_file()
-    regions = _load_regions(path)
-    region = {
-        "id": f"region-{len(regions) + 1}",
-        "name": clean_name[:200],
-        "min_lat": lo_lat,
-        "max_lat": hi_lat,
-        "min_lon": lo_lon,
-        "max_lon": hi_lon,
-        "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-    }
-    regions.append(region)
-    _save_regions(path, regions)
+    with _REGIONS_LOCK:
+        regions = _load_regions_for_update(path)
+        region = {
+            "id": _next_region_id(regions),
+            "name": clean_name[:200],
+            "min_lat": lo_lat,
+            "max_lat": hi_lat,
+            "min_lon": lo_lon,
+            "max_lon": hi_lon,
+            "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        }
+        regions.append(region)
+        _save_regions(path, regions)
     return region
 
 
@@ -178,14 +209,16 @@ def list_regions() -> list[dict]:
 def delete_region(region_id: str) -> bool:
     """Remove one region by id. Returns whether it existed and was removed.
 
-    Never raises.
+    Raises RuntimeError (and changes nothing) when the region file cannot be read
+    or is damaged, rather than writing an empty list over it.
     """
     path = _regions_file()
-    regions = _load_regions(path)
-    kept = [r for r in regions if r.get("id") != region_id]
-    if len(kept) == len(regions):
-        return False
-    _save_regions(path, kept)
+    with _REGIONS_LOCK:
+        regions = _load_regions_for_update(path)
+        kept = [r for r in regions if r.get("id") != region_id]
+        if len(kept) == len(regions):
+            return False
+        _save_regions(path, kept)
     return True
 
 

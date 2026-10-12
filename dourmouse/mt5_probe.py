@@ -150,6 +150,12 @@ def cmd_order(code: str, side: str, volume: float,
     price = tick.ask if side == "BUY" else tick.bid
     if price is None or price != price:
         return {"error": f"no valid price for {name} yet"}
+    # P4-24: the trading guardrails run before anything is sent (same check as mt5_ops.mt5_order).
+    from dourmouse import order_guard
+    try:
+        order_guard.check_mt5_order(mt5, name, side, volume, price)
+    except order_guard.OrderRefused as exc:
+        return {"error": str(exc)}
     request = {
         "action": mt5.TRADE_ACTION_DEAL,
         "symbol": name,

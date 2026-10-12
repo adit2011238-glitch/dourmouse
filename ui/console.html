@@ -5530,7 +5530,8 @@ function paintSettings(){
           const c = j.claude || {}, x = j.codex || {};
           const parts = [];
           if (c.root) parts.push(`Claude Code: ${c.imported} imported, ${c.scanned} scanned`);
-          if (x.configured) parts.push(`Codex: ${x.imported} imported, ${x.scanned} scanned`);
+          if (x.error) parts.push(`Codex: ${x.error}`);
+          else if (x.configured) parts.push(`Codex: ${x.imported} imported, ${x.scanned} scanned`);
           else parts.push("Codex: not found on this machine");
           note.textContent = parts.join(" · ") + ".";
           // Refreshes sys.memory for other panels (HOME's fact count etc.)

@@ -18,11 +18,13 @@ Design decisions (see conversation / PROGRESS.md):
   above the notional threshold is APPROVED but flagged ``requires_confirmation``
   so a human must say yes before Execution acts.
 
-Where it is enforced (finding P4-24, stated plainly): only where a caller
-runs ``evaluate_trade``. As of 2026-10-09 the broker order tools
-(``trading212_ops.t212_order``, ``mt5_ops.mt5_order``) do NOT call it; they
-rely on the human confirmation prompt alone, so these limits are not yet
-applied to real orders.
+Where it is enforced (finding P4-24): only where a caller runs
+``evaluate_trade``. Since 2026-10-12 the broker order functions
+(``trading212_ops.t212_order``, ``mt5_ops.mt5_order`` and the MT5 worker's
+``mt5_probe.cmd_order``) run it through ``order_guard.enforce`` right before
+they send an order, with ``latch=True``, and refuse when it says no; the human
+confirmation prompt still applies on top. Nothing else in the system places
+orders. See ``order_guard`` for what is checked and its stated limits.
 """
 
 from __future__ import annotations
@@ -194,13 +196,15 @@ class KillSwitch:
     point of a manual re-arm.
     """
 
-    def __init__(self, daily_loss_limit_pct: float) -> None:
+    def __init__(self, daily_loss_limit_pct: float, *, tripped: bool = False) -> None:
         if not (0.0 < daily_loss_limit_pct <= 1.0):
             raise ValueError(
                 f"daily_loss_limit_pct must be in (0, 1], got {daily_loss_limit_pct!r}"
             )
         self._limit = daily_loss_limit_pct
-        self._tripped = False
+        # ``tripped=True`` restores a latch remembered from an earlier process
+        # (order_guard persists it); only ``rearm()`` clears it.
+        self._tripped = bool(tripped)
 
     @property
     def tripped(self) -> bool:

@@ -3638,8 +3638,10 @@ class TestSetupWizardGoogleStep:
         status, _, raw = self._get(server, "/setup")
         assert status == 200
         html = raw.decode("utf-8", errors="replace")
-        assert "/api/auth/google/start?claim=" in html
-        assert "/api/auth/claim?code=" in html
+        # FIX-W2 A-20 UI: the page asks for the bridge (?claim=1) and polls without a value; the
+        # server mints the secret and hands it back as a cookie (the old strings pinned a client-chosen code).
+        assert "/api/auth/google/start?claim=1" in html
+        assert 'fetch("/api/auth/claim")' in html and "/api/auth/claim?code=" not in html
         assert "/api/auth/status" in html
         assert "/api/auth/me" in html
         assert "Connect Google" in html

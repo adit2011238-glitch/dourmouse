@@ -39,6 +39,7 @@ class _FakeSymbol:
     def __init__(self, name):
         self.name = name
         self.visible = True
+        self.trade_contract_size = 1.0  # the order guardrail sizes orders with it (FIX-W2 P4-24)
 
 
 class _FakeTick:

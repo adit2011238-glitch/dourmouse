@@ -1901,6 +1901,15 @@ def _cookie_from(header: str, name: str) -> str:
     return ""
 
 
+def _host_name_of(host_header: str) -> str:
+    """The lower-cased host name of a Host header (port dropped; cookies are
+    shared across ports of one host), or '' when absent or malformed."""
+    value = (host_header or "").strip().lower()
+    if value.startswith("["):
+        return value[1:].partition("]")[0]
+    return value.partition(":")[0]
+
+
 def _pending_created_ts(pending: dict[str, Any] | None) -> float | None:
     """Unix timestamp of an OAuth pending entry's creation, or None when
     absent/unparseable (treated as stale by the pruner)."""
@@ -2737,7 +2746,13 @@ class _Handler(BaseHTTPRequestHandler):
             # agent never diverge.
             from dourmouse.live_feeds import list_tasks
 
-            tasks = list_tasks(include_done=True)
+            try:
+                tasks = list_tasks(include_done=True)
+            except RuntimeError as exc:
+                # P4-32: a task file that cannot be read is reported, not a bare 500 and not an empty
+                # list passed off as "no tasks". The file itself is left untouched.
+                self._send_json({"tasks": [], "active": 0, "total": 0, "error": str(exc)[:300]})
+                return
             self._send_json(
                 {
                     "tasks": tasks,
@@ -4620,6 +4635,9 @@ class _Handler(BaseHTTPRequestHandler):
             except (ValueError, TypeError) as exc:
                 self._send_json({"ok": False, "error": str(exc)}, status=400)
                 return
+            except RuntimeError as exc:  # the region file cannot be read: nothing was changed
+                self._send_json({"ok": False, "error": str(exc)}, status=409)
+                return
             self._send_json({"ok": True, "region": region})
         elif parsed.path == "/api/world/regions/delete":
             # v8.20 watch regions: delete. POST, not DELETE — this server
@@ -4632,7 +4650,12 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             from dourmouse.world_watch_regions import delete_region
 
-            self._send_json({"ok": True, "deleted": delete_region(region_id)})
+            try:
+                deleted = delete_region(region_id)
+            except RuntimeError as exc:  # the region file cannot be read: nothing was changed
+                self._send_json({"ok": False, "error": str(exc)}, status=409)
+                return
+            self._send_json({"ok": True, "deleted": deleted})
         elif parsed.path == "/api/push-notify":
             # v8.2: external watchers (tools/watch_dourmouse.py) surface a
             # real event into the AGENT COMMS bus — e.g. an upstream push
@@ -5207,8 +5230,22 @@ class _Handler(BaseHTTPRequestHandler):
         default, or raw JSON), hands it to tradingview_ops.handle_tv_webhook
         for parse/validate/persist/broadcast, and answers 200 to stop
         TradingView retrying. Caps the body at 256 KB."""
-        from dourmouse.tradingview_ops import handle_tv_webhook
+        from dourmouse.tradingview_ops import handle_tv_webhook, webhook_secret
 
+        if not webhook_secret() and os.environ.get("TV_WEBHOOK_ALLOW_OPEN", "").strip() != "1":
+            # Same rule as the standalone listener (tv_webhook_server refuses to start without a secret):
+            # a tunnel that forwards to this loopback server would otherwise let anyone inject signals
+            # into the paper log and the agent bus. TV_WEBHOOK_ALLOW_OPEN=1 is the explicit opt-out.
+            self._send_json(
+                {
+                    "ok": False,
+                    "error": "TV_WEBHOOK_SECRET is not set, so the TradingView webhook is closed",
+                    "fix": "set TV_WEBHOOK_SECRET in the config file (and put the same value in the alert "
+                           "message), or set TV_WEBHOOK_ALLOW_OPEN=1 for a loopback-only test",
+                },
+                status=403,
+            )
+            return
         raw_len = self.headers.get("Content-Length", "0") or "0"
         try:
             length = int(raw_len)
@@ -6415,6 +6452,24 @@ class _Handler(BaseHTTPRequestHandler):
         qs = urllib.parse.parse_qs(parsed.query)
         # The caller may ask for the bridge but never picks its code (A-20).
         claim = secrets.token_urlsafe(32) if "claim" in qs else None
+        # W2R-1: the bind cookie is host-only, so it must be set by the host the
+        # callback will land on. When DOURMOUSE_OAUTH_REDIRECT_BASE pins the
+        # callback elsewhere (loopback behind a tunnel while the page was opened
+        # on a Tailscale address), hand the browser over to that host first and
+        # start the flow there. The target is the operator's own pinned base,
+        # never a request value; "handoff" only stops a second hop.
+        if not claim and "handoff" not in qs:
+            callback = urllib.parse.urlparse(redirect_uri)
+            asked = _host_name_of(self.headers.get("Host", ""))
+            if asked and asked != (callback.hostname or "").lower():
+                self.send_response(302)
+                # Same base as the callback URI (a pinned base may carry a path prefix), "start" for "callback".
+                start_url = redirect_uri[: -len("callback")] + "start?handoff=1"
+                self.send_header("Location", start_url)
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
         # The in-app flow finishes in the browser that started it; bind it.
         bind = None if claim else secrets.token_urlsafe(32)
         state = secrets.token_urlsafe(24)
@@ -7294,7 +7349,13 @@ class _Handler(BaseHTTPRequestHandler):
         except Exception as exc:  # honest failure surface (Rule 2.2)
             self._send_json({"ok": False, "error": str(exc)}, status=500)
             return
-        self._send_json({"ok": True, **result})
+        # A source that exists but could not be read (a changed Codex schema, a locked database) is
+        # surfaced, not left to look like "nothing to import".
+        warnings = []
+        codex_error = (result.get("codex") or {}).get("error")
+        if codex_error:
+            warnings.append(f"Codex: {codex_error}")
+        self._send_json({"ok": True, **result, "warnings": warnings})
 
     def _handle_profile_status(self) -> None:
         """v8.14: GET /api/profile — honest status for the SETTINGS panel.

@@ -81,7 +81,7 @@ from typing import Any
 
 from dourmouse import project_import
 from dourmouse.history_import import _flatten_content
-from dourmouse.state_file import atomic_write_text, load_json_or_aside, set_aside
+from dourmouse.state_file import StateUnreadable, atomic_write_text, load_json_or_aside, set_aside
 
 _log = logging.getLogger(__name__)
 
@@ -150,7 +150,13 @@ def _load_store(path: Path) -> dict[str, Any]:
     store is returned carrying ``_load_note`` so the failure is reported.
     If it cannot even be moved aside, the returned store is marked
     ``_unwritable`` and _save_store refuses to write over the real file."""
-    data, note = load_json_or_aside(path, dict)
+    try:
+        data, note = load_json_or_aside(path, dict)
+    except StateUnreadable as exc:
+        # Unreadable right now (permission, I/O): not corrupt, so nothing is moved; the empty store
+        # that readers see is marked unwritable so no save can replace the real file with it.
+        note = str(exc)
+        data = None
     if data is not None and not isinstance(data.get("projects"), dict):
         # A dict without a projects map is not a store this module wrote.
         try:

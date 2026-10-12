@@ -39,7 +39,7 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
-from dourmouse.state_file import atomic_write_text, load_json_or_aside
+from dourmouse.state_file import StateUnreadable, atomic_write_text, load_json_or_aside
 
 _log = logging.getLogger(__name__)
 _LOCK = threading.Lock()
@@ -90,7 +90,11 @@ def _load_for_update(path: Path) -> dict[str, Any]:
     """The totals to add to. A file that exists but cannot be read is kept
     aside as ``usage.json.corrupt-<time>`` (not zeroed by the write that
     follows) and the failure is logged."""
-    raw, note = load_json_or_aside(path, dict)
+    try:
+        raw, note = load_json_or_aside(path, dict)
+    except StateUnreadable as exc:
+        _log.error("usage_tracker: %s", exc)
+        raise  # unreadable right now: left in place, the update is refused (it is an OSError)
     if note:
         _log.error("usage_tracker: %s", note)
         if path.exists():

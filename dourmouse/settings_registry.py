@@ -17,12 +17,10 @@ apply live.
 from __future__ import annotations
 
 import os
-import threading
 from pathlib import Path
 from typing import Any
 
 from dourmouse import config
-from dourmouse.state_file import atomic_write_text
 
 FEATURES: list[dict[str, Any]] = [
     {"key": "DOURMOUSE_SECURITY_SENTRY_LOOP", "section": "security", "kind": "bool", "default": True,
@@ -131,35 +129,24 @@ def reset_features() -> dict[str, Any]:
             "restart_required": True}
 
 
-_SETTINGS_LOCK = threading.Lock()
-_HEADER = ["# Dourmouse configuration: written by first-run setup and Settings.",
-           "# This file holds credentials. Keep it to yourself; it is never",
-           "# bundled into a build or uploaded anywhere.", ""]
-
-
 def _update_user_settings(mutate: Any) -> None:
-    """Read-modify-write the user's config file under one lock.
+    """Read-modify-write the user's config file under the one shared lock.
 
-    The file holds API keys, so: it is written through a private (0600) temp
-    file and ``os.replace`` (never created world-readable and chmodded later);
-    two concurrent saves cannot lose one change; and a file that EXISTS but
-    cannot be read is left exactly as it is and the save is refused, because
-    ``config._read_user_config_file`` reports it as empty and writing that back
+    ``mutate`` edits a dict of the saved values; only the keys it added,
+    changed or removed are written, line by line, through
+    ``config.update_user_config`` (W2R-4, W2R-10): every other line, comment
+    included, is kept as the owner wrote it, the file is written atomically
+    and privately (0600), two concurrent saves cannot lose one change, and a
+    file that EXISTS but cannot be read is left exactly as it is and the save
+    is refused (OSError), because reading it as empty and writing that back
     would erase every saved key."""
-    with _SETTINGS_LOCK:
-        path = config.user_env_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        if path.exists():
-            try:
-                path.read_text(encoding="utf-8")
-            except (OSError, UnicodeDecodeError) as exc:
-                raise OSError(
-                    f"{path} exists but cannot be read ({type(exc).__name__}: {exc}); the setting was "
-                    "not changed and the file was left exactly as it is. Fix or move it, then try again."
-                ) from exc
-        values = config._read_user_config_file()
+    with config.config_lock:
+        before = config._read_user_config_file()
+        values = dict(before)
         mutate(values)
-        atomic_write_text(path, "\n".join(_HEADER + config.env_lines(values)) + "\n", mode=0o600)
+        updates = {k: v for k, v in values.items() if before.get(k) != v}
+        removals = [k for k in before if k not in values]
+        config.update_user_config(updates, removals)
 
 
 def _remove_user_settings(keys: list[str]) -> None:

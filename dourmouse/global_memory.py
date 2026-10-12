@@ -211,6 +211,12 @@ class GlobalMemory:
                     ts REAL NOT NULL
                 )"""
             )
+            # Which embedding model produced each row (W2R-3). A side table, not a column, so a
+            # database written before this existed opens unchanged; a row with no entry is a legacy
+            # row of unknown model and stays searchable when its dimension matches.
+            self._conn.execute(
+                "CREATE TABLE IF NOT EXISTS memory_model (id TEXT PRIMARY KEY, model TEXT NOT NULL)"
+            )
             self._conn.commit()
 
     def close(self) -> None:
@@ -220,10 +226,16 @@ class GlobalMemory:
     #: How many stored rows the last search() skipped as unusable (wrong dimension or not a vector).
     last_search_skipped: int = 0
 
-    def _stored_dimension(self) -> int | None:
-        """Dimension of the vectors already in the store (None when empty or unreadable)."""
+    def _stored_dimension(self, model: str) -> int | None:
+        """Dimension of the newest vector this embedding ``model`` stored (None when it has stored
+        none, or that row is unreadable). Rows of another model do not count: after a model change
+        the old rows must not pin the store to their size."""
         with self._lock:
-            row = self._conn.execute("SELECT embedding FROM memory ORDER BY ts DESC LIMIT 1").fetchone()
+            row = self._conn.execute(
+                "SELECT m.embedding FROM memory m JOIN memory_model k ON k.id = m.id "
+                "WHERE k.model = ? ORDER BY m.ts DESC LIMIT 1",
+                (model,),
+            ).fetchone()
         if not row:
             return None
         try:
@@ -249,11 +261,17 @@ class GlobalMemory:
             or not all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in vec)
         ):
             return False
-        # Every vector in one store must share a dimension, or cosine similarity cannot be taken; a vector
-        # of another size (a different embedding model, a mis-sized hand-off) is refused here, not stored
-        # to break every later search.
-        known = self._stored_dimension()
+        # Vectors of one embedding model must share a dimension, or cosine similarity cannot be taken;
+        # a mis-sized vector for the CURRENT model (a bad hand-off) is refused here, not stored to
+        # break every later search. Rows of a previous model do not pin the size (W2R-3): after
+        # DOURMOUSE_EMBED_MODEL changes, new rows are stored under the new model.
+        model = EMBED_MODEL
+        known = self._stored_dimension(model)
         if known is not None and len(vec) != known:
+            print(
+                f"[GLOBAL_MEMORY] refused a {len(vec)}-dimension vector: model {model!r} already stores "
+                f"{known}-dimension vectors in this store, so this memory was not recorded"
+            )
             return False
         item_id = item_id or f"m{time.time_ns()}"
         with self._lock:
@@ -264,6 +282,7 @@ class GlobalMemory:
                     json.dumps(metadata or {}), json.dumps(vec), time.time(),
                 ),
             )
+            self._conn.execute("INSERT OR REPLACE INTO memory_model VALUES (?, ?)", (item_id, model))
             self._conn.commit()
         return True
 
@@ -274,16 +293,23 @@ class GlobalMemory:
         qvec = embed_text(query)
         if qvec is None:
             return []
-        sql = "SELECT id, text, screen, session_id, metadata, embedding, ts FROM memory"
+        sql = (
+            "SELECT m.id, m.text, m.screen, m.session_id, m.metadata, m.embedding, m.ts, k.model "
+            "FROM memory m LEFT JOIN memory_model k ON k.id = m.id"
+        )
         params: tuple[Any, ...] = ()
         if screen:
-            sql += " WHERE screen = ?"
+            sql += " WHERE m.screen = ?"
             params = (screen,)
         with self._lock:
             rows = self._conn.execute(sql, params).fetchall()
         scored = []
         skipped = 0
-        for rid, text, scr, sess, meta, emb_json, ts in rows:
+        for rid, text, scr, sess, meta, emb_json, ts, row_model in rows:
+            # A row embedded by another model lives in another vector space, even at the same size.
+            if row_model is not None and row_model != EMBED_MODEL:
+                skipped += 1
+                continue
             try:
                 vec = json.loads(emb_json)
             except json.JSONDecodeError:
@@ -305,8 +331,9 @@ class GlobalMemory:
         self.last_search_skipped = skipped
         if skipped:
             print(
-                f"[GLOBAL_MEMORY] search skipped {skipped} stored row(s) whose vector does not match the "
-                f"query's {len(qvec)} dimensions (embedding model changed?); re-ingest them to make them searchable"
+                f"[GLOBAL_MEMORY] search skipped {skipped} stored row(s) from another embedding model or whose vector "
+                f"does not match the query's {len(qvec)} dimensions (embedding model changed?); re-ingest them "
+                "to make them searchable"
             )
         scored.sort(key=lambda r: r["score"], reverse=True)
         return scored[:top_k]

@@ -85,9 +85,20 @@ export function shortHash(sha) {
   return /^[0-9a-f]{64}$/.test(String(sha || '')) ? sha.slice(0, 12) : '';
 }
 
+/* The two hashes of a draft are different things and the screen says which is which: the module hash covers
+   the module text alone; the review hash covers the module, the test and the parameters schema together, and
+   it is the one the server compares when APPROVE is pressed. */
+export function moduleHashLine(d) {
+  return 'The module that would be written and run (' + d.module_lines + ' lines, module sha256 ' + (d.module_preview_sha256 || '') + ')';
+}
+
+export function reviewHashLine(d) {
+  return 'Review hash, covering the module, its test and the parameters schema together (APPROVE sends this one): sha256 ' + (d.preview_sha256 || '');
+}
+
 export function approvePrompt(d) {
   const name = d.tool_name;
-  return 'Approve "' + name + '"? You are approving the ' + d.module_lines + '-line module shown above (sha256 ' + shortHash(d.preview_sha256) + '...) and its own test. '
+  return 'Approve "' + name + '"? You are approving the ' + d.module_lines + '-line module shown above and its own test (review hash sha256 ' + shortHash(d.preview_sha256) + '...). '
     + 'Approving writes the module to this workspace and runs the draft\'s test now. It is not callable until the server restarts, '
     + 'and after that every call still asks for your confirmation.';
 }

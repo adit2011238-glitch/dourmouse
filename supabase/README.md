@@ -192,30 +192,15 @@ present, Chromium's own fallback is obfuscation, not encryption.
 
 ## Local-first cache and sync
 
-`dourmouse/supabase_sync.py` pushes/pulls between the local SQLite memory
-store and `public.facts` via `sync_facts`. Offline is treated as a normal
-outcome, not an error: writes queue in a local outbox
-(`SyncOutbox`, its own SQLite file, deliberately separate from
-`memory_store.py`'s) and drain on the next successful sync. A 5xx or a
-transport-level failure (DNS, TLS, socket) is treated the same as being
-offline — the work stays queued and is retried, rather than being discarded
-over a transient outage; a genuine 4xx is reported as a real failure.
-
-The module never raises into a chat turn (42 tests cover this explicitly,
-including a store that raises on every call and a transport that raises an
-arbitrary exception) — this is the specific bug the codebase has already hit
-twice: `RemoteMemoryStore`, despite calling itself "a drop-in" in its own
-docstring, genuinely raises where local `MemoryStore` never does, and one
-such exception already escaped into a live request and dropped a connection
-outright. A cloud-sync module is strictly more exposed than that, so the
-exception boundary is drawn once, here, around every `self._store` call.
-
-A real, previously-live timezone bug is fixed here too:
-`MemoryStore.remember()` stamps rows with a naive local timestamp (no UTC
-offset), and Postgres casts a naive string to `timestamptz` under the
-session's UTC `TimeZone` — so a fact written at UTC+4 arrived stamped four
-hours into the future. `to_utc_iso()` normalises every timestamp this module
-touches before it is compared or sent.
+There is no Python sync client in this repository any more. `dourmouse/supabase_sync.py`
+(a push/pull between the local SQLite memory store and `public.facts`, with an offline
+outbox) was never constructed by any running code, and the owner chose on 2026-10-12 to
+delete it rather than wire it in (finding P5-60). The tables, policies and TypeScript
+client in this folder are unchanged; the local memory store (`dourmouse/memory_store.py`)
+remains the only memory store the app uses. If cloud memory is ever wanted, a sync layer
+has to be written again, and it should avoid the faults the deleted module had: an outbox
+path that depended on the launch directory, and a push that recorded server-skipped rows as
+synced.
 
 ---
 

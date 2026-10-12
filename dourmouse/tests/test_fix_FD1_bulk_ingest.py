@@ -61,7 +61,10 @@ def test_drive_genuine_non_text_is_still_a_counted_skip(tmp_path, store, monkeyp
 
 def test_drive_over_cap_response_is_a_skip_not_an_error(tmp_path, store, monkeypatch):
     def reader(method, url, token, **kw):
-        raise RuntimeError("GOOGLE API: response exceeds the 8,000,000 B cap on x - nothing was read.")
+        # FIX-W2 W2R-7: classified by the typed flag, no longer by matching the message text
+        from dourmouse.google_services import GoogleApiError
+
+        raise GoogleApiError("GOOGLE API: response exceeds the 8,000,000 B cap on x - nothing was read.", over_cap=True)
 
     _drive(monkeypatch, [{"id": "f1", "name": "big.txt", "mimeType": "text/plain"}], reader)
     stats = bi.ingest_drive(store, "tok", tmp_path / "c.json")

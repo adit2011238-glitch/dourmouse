@@ -24,6 +24,14 @@ from dourmouse.learn import default_store_path
 from dourmouse.memory_store import MemoryStore, MemoryStoreUnavailable
 
 
+def _print_source_errors(result: dict) -> None:
+    """A history source that exists but could not be read (a changed Codex schema, a locked database) is
+    reported on its own line, so it is not mistaken for 'nothing new to import'."""
+    codex = result.get("codex") or {}
+    if codex.get("error"):
+        print(f"history sync: codex: {codex['error']}")
+
+
 def main() -> int:
     try:
         store = MemoryStore(default_store_path())
@@ -36,6 +44,7 @@ def main() -> int:
     finally:
         store.close()
 
+    _print_source_errors(result)
     if result.get("reason") == "not_configured":
         print("history sync: DOURMOUSE_HISTORY_SYNC_* not set, nothing to do")
         return 0

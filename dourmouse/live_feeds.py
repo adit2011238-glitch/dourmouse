@@ -34,7 +34,7 @@ from typing import Any
 
 import defusedxml.ElementTree as ET  # real external RSS bodies -- never the stdlib parser on untrusted XML
 
-from dourmouse.state_file import atomic_write_text, load_json_or_aside
+from dourmouse.state_file import StateUnreadable, atomic_write_text, load_json_or_aside
 
 try:
     import fcntl
@@ -495,7 +495,11 @@ def _load_tasks_for_update(path: Path) -> list[dict[str, Any]]:
     try:
         return _load_tasks(path)
     except RuntimeError as exc:
-        _value, note = load_json_or_aside(path, list)
+        try:
+            _value, note = load_json_or_aside(path, list)
+        except StateUnreadable as unreadable:
+            # Cannot be read right now: not corrupt, so it is not moved and nothing is written.
+            raise RuntimeError(f"{unreadable} The task was not saved; try again later.") from unreadable
         raise RuntimeError(f"{note or exc} The task was not saved; try again to start a new list.") from exc
 
 

@@ -324,7 +324,7 @@
   // v5.22.12: honest fallback when the system browser can't be opened — show
   // a copyable link + a retry button instead of silently navigating the
   // webview (Google blocks embedded WebKit; a silent nav would 500 again).
-  function showManualLink(googleUrl, claim) {
+  function showManualLink(googleUrl) {
     // Real bug found while fixing this function's own colors below:
     // getElementById('claimNote') targets an id that does not exist
     // anywhere in this page's markup, so the whole manual-link fallback
@@ -349,28 +349,29 @@
     document.getElementById('manualUrl').addEventListener('click', e => e.target.select());
     document.getElementById('retryOpen').addEventListener('click', () => {
       window.pywebview?.api?.open_external(googleUrl)
-        .then(ok => { if (!ok) showManualLink(googleUrl, claim); })
-        .catch(() => showManualLink(googleUrl, claim));
+        .then(ok => { if (!ok) showManualLink(googleUrl); })
+        .catch(() => showManualLink(googleUrl));
     });
   }
 
   ggoogleBtn.addEventListener('click', () => {
     if (!IN_WEBVIEW) { window.location.href = '/api/auth/google/start'; return; }
-    const claim = crypto.randomUUID().replace(/-/g, '');
+    // The claim secret is minted by the SERVER and handed to this window as an HttpOnly cookie;
+    // the page only asks for the bridge (?claim=1) and never chooses or sees the value.
     // Step 1: get the Google consent URL from the server (start 302s; fetch
     // follows it, giving us the final Google URL without leaving this page).
-    fetch('/api/auth/google/start?claim=' + claim, { redirect: 'follow' })
+    fetch('/api/auth/google/start?claim=1', { redirect: 'follow' })
       .then(r => r.url)
       .then(googleUrl => {
         // Step 2: open Chrome (the bridge prefers Chrome, falls back to the
         // default browser). When it honestly cannot, show a copyable link.
         window.pywebview?.api?.open_external(googleUrl)
-          .then(opened => { if (opened === false) showManualLink(googleUrl, claim); })
-          .catch(() => showManualLink(googleUrl, claim));
+          .then(opened => { if (opened === false) showManualLink(googleUrl); })
+          .catch(() => showManualLink(googleUrl));
         // Step 3: mark the claim in the URL — pollClaim() below adopts the
         // session once the browser tab finishes and redirects to /login?claimed=1.
-        history.replaceState(null, '', '/login?claiming=' + claim);
-        startClaimPoll(claim);
+        history.replaceState(null, '', '/login?claiming=1');
+        startClaimPoll();
         const w = document.getElementById('ggoogleMsg');
         if (w) {
           w.style.display = 'block';
@@ -378,26 +379,27 @@
             'Approve it there. This window signs you in automatically when done.</span>';
         }
       })
-      .catch(() => { window.location.href = '/api/auth/google/start?claim=' + claim; });
+      .catch(() => { window.location.href = '/api/auth/google/start?claim=1'; });
   });
 
-  // Adopt a system-browser session: poll /api/auth/claim until the code is
-  // redeemed (browser finished), then land signed in. Also auto-starts when
-  // the page loads with ?claiming= (e.g. after an app restart mid-flow).
-  function startClaimPoll(claim) {
+  // Adopt a system-browser session: poll /api/auth/claim until the parked session is
+  // redeemed (browser finished), then land signed in. The poll carries no value: the
+  // server reads the claim cookie it set on this window. Also auto-starts when the
+  // page loads with ?claiming=1 (e.g. after an app restart mid-flow).
+  function startClaimPoll() {
     const attempts = 150; // 5 minutes at 2s — generous, honest ceiling
     let n = 0;
     const timer = setInterval(async () => {
       n += 1;
       if (n > attempts) { clearInterval(timer); return; }
       try {
-        const r = await fetch('/api/auth/claim?code=' + claim);
+        const r = await fetch('/api/auth/claim');
         if (r.ok) { clearInterval(timer); location.href = '/'; return; }
       } catch (e) { /* server restarting mid-flow — keep polling */ }
     }, 2000);
   }
   const claiming = new URLSearchParams(location.search).get('claiming');
-  if (claiming) startClaimPoll(claiming);
+  if (claiming) startClaimPoll();
 
   // Real, live-caught UX gap (2026-09-13): the system-browser tab this
   // desktop flow opens for consent lands here on

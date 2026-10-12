@@ -200,18 +200,24 @@ def _leg_has_open(key: str) -> bool:
 # Core run
 # ---------------------------------------------------------------------------
 
-def _load_env() -> None:
-    """Load .env (setdefault — real env wins) like tv_webhook_server."""
-    env_path = Path(__file__).resolve().parent.parent / ".env"
+def _default_env_path() -> Path:
+    """The repo root's .env (this file is dourmouse/atlas/atlas_scheduler.py, so the root is three levels up;
+    two levels up is the package directory, which has no .env)."""
+    return Path(__file__).resolve().parents[2] / ".env"
+
+
+def _load_env(env_path: Path | None = None) -> None:
+    """Load .env into os.environ (setdefault, so the real environment wins), parsed with python-dotenv like
+    tv_webhook_server and the main server: ``export KEY=v``, quotes and inline comments mean the same here."""
+    from dotenv import dotenv_values
+
     try:
-        for line in env_path.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, _, value = line.partition("=")
-            os.environ.setdefault(key.strip(), value.strip())
-    except OSError:
-        pass
+        values = dotenv_values(env_path or _default_env_path(), interpolate=False)
+    except (OSError, UnicodeDecodeError):
+        return
+    for key, value in values.items():
+        if value is not None:
+            os.environ.setdefault(key, value)
 
 
 def _timestamp_for(today: date) -> str:

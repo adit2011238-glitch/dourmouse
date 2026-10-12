@@ -297,12 +297,19 @@ def load_external_mcp_servers(path: str | Path | None = None) -> dict[str, dict[
     p = Path(path) if path is not None else default_config()
     if not p.is_file():
         return {}
+    log = logging.getLogger(__name__)
     try:
         data = json.loads(p.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, ValueError) as exc:
+        # The file is there but unusable: say so (the owner would otherwise see their servers silently
+        # missing). It is only read here, never rewritten.
+        log.warning("MCP config %s could not be read (%s: %s); no external servers were started", p, type(exc).__name__, exc)
         return {}
-    servers = data.get("mcpServers")
-    return servers if isinstance(servers, dict) else {}
+    servers = data.get("mcpServers") if isinstance(data, dict) else None
+    if not isinstance(servers, dict):
+        log.warning("MCP config %s has no 'mcpServers' map; no external servers were started", p)
+        return {}
+    return servers
 
 
 def _wrap_external_tool(client: McpClient, tool: dict[str, Any]) -> ToolSpec:

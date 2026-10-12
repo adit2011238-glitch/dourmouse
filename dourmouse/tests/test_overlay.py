@@ -107,13 +107,15 @@ class TestReadPrivacyState:
         result = overlay._read_privacy_state()
         assert result == {"mic_enabled": True, "camera_enabled": True}
 
-    def test_defaults_when_tray_load_state_raises(self, monkeypatch):
+    def test_unknown_when_tray_load_state_raises(self, monkeypatch):
+        # FIX-W2 H-FD2-2: this used to pin "both armed" on a failed read, which tells the owner the
+        # devices are armed on a guess; the state is now reported as unknown (None).
         def _raiser(path=None):
             raise RuntimeError("boom")
 
         monkeypatch.setattr(tray, "load_state", _raiser)
         result = overlay._read_privacy_state()
-        assert result == {"mic_enabled": True, "camera_enabled": True}
+        assert result == {"mic_enabled": None, "camera_enabled": None}
 
 
 # --------------------------------------------------------------------------- #

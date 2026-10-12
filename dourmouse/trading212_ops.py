@@ -17,6 +17,12 @@ Honest rules (2.1 / 2.2 / 2.8):
 - ``t212_order`` is paper-first by construction: it refuses (a) without
   an explicit ``paper_confirm=true`` argument AND (b) on live unless the
   double gate above is open. It is the one tool that WRITES.
+- ``t212_order`` also runs the trading guardrails (``order_guard.enforce``,
+  finding P4-24) right before it sends: position size, sector (each ticker
+  its own sector here), daily-loss kill switch with a persisted latch. A
+  breach, or an account that cannot be read, means NO request reaches the
+  order endpoint. A MARKET order for a ticker you do not hold has no known
+  price and is refused: use a LIMIT order (its limit price sizes the check).
 
 Scope honesty: the official API covers Invest/ISA *equity* accounts
 (stocks/ETFs) — it does NOT expose CFDs, so the commodity-seasonal CFD
@@ -87,6 +93,18 @@ def _config() -> tuple[str, str]:
     return (_BASE_LIVE if env == "live" else _BASE_DEMO), key
 
 
+def _order_status_unknown(path: str, why: object) -> RuntimeError:
+    # A POST may have reached T212 before the connection failed, the read timed
+    # out, a gateway answered 5xx, or the answer could not be read. Reporting a
+    # plain failure invites a retry that places a second order, so say the
+    # outcome is unknown.
+    return RuntimeError(
+        f"order status UNKNOWN: the request to {path} did not complete cleanly ({why}) but T212 "
+        "may have executed it. Check t212_positions / t212_portfolio (open orders) "
+        "before retrying; do not place the order again until you have."
+    )
+
+
 def _request(base: str, key: str, path: str, payload: dict | None = None) -> Any:
     """One real T212 API call; returns parsed JSON or raises honestly."""
     url = base + path
@@ -103,28 +121,33 @@ def _request(base: str, key: str, path: str, payload: dict | None = None) -> Any
     try:
         with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
             raw = resp.read().decode()
-            return json.loads(raw) if raw else None
     except urllib.error.HTTPError as exc:
         detail = ""
         try:
             detail = " · " + exc.read().decode()[:200]
         except Exception:  # noqa: BLE001 -- best-effort detail
             pass
+        if payload is not None and (exc.code == 408 or exc.code >= 500):
+            # A timeout or server/gateway error on the order POST says nothing about whether the
+            # order was filled (W2R-5).
+            raise _order_status_unknown(path, f"HTTP {exc.code} {exc.reason}{detail}") from exc
         raise RuntimeError(f"T212 API {exc.code} on {path}: {exc.reason}{detail}") from exc
     except (urllib.error.URLError, TimeoutError, OSError, http.client.HTTPException) as exc:
         reason = getattr(exc, "reason", None) or exc
         if payload is not None:
-            # A POST may have reached T212 before the connection failed or the
-            # read timed out. Reporting a plain "unreachable" invites a retry
-            # that places a second order, so say the outcome is unknown.
-            raise RuntimeError(
-                f"order status UNKNOWN: the request to {path} did not complete ({reason}) but T212 "
-                "may have executed it. Check t212_positions / t212_portfolio (open orders) "
-                "before retrying; do not place the order again until you have."
-            ) from exc
+            raise _order_status_unknown(path, reason) from exc
         if isinstance(exc, TimeoutError) or isinstance(reason, TimeoutError):
             raise RuntimeError(f"T212 API timed out ({path})") from exc
         raise RuntimeError(f"T212 API unreachable ({path}): {reason}") from exc
+    if payload is not None and not raw.strip():
+        # A 2xx with no body: the order endpoint always answers with the order.
+        raise _order_status_unknown(path, "empty response body")
+    try:
+        return json.loads(raw) if raw.strip() else None
+    except ValueError as exc:
+        if payload is not None:
+            raise _order_status_unknown(path, "response was not valid JSON") from exc
+        raise RuntimeError(f"T212 API returned a response that is not JSON ({path})") from exc
 
 
 def t212_status() -> dict[str, Any]:
@@ -167,6 +190,93 @@ def t212_portfolio() -> dict[str, Any]:
     }
 
 
+def _number(obj: Any, names: tuple[str, ...]) -> float | None:
+    """First of ``names`` found in the dict ``obj`` as a finite number."""
+    if isinstance(obj, dict):
+        for name in names:
+            v = obj.get(name)
+            if isinstance(v, (int, float)) and not isinstance(v, bool) and v == v and abs(v) != float("inf"):
+                return float(v)
+    return None
+
+
+def _account_state(base: str, key: str) -> tuple[float, dict[str, tuple[float, float]]]:
+    """(account equity, {ticker: (signed market value, current price)}) from the broker.
+
+    The key names tried are the ones the T212 account and positions payloads use;
+    anything that cannot be read raises, because the order must then not be sent."""
+    info = _request(base, key, "/api/v0/equity/account/info")
+    equity = _number(info, ("totalValue", "total", "equity", "accountValue"))
+    if equity is None:
+        cash = _request(base, key, "/api/v0/equity/account/cash")
+        equity = _number(cash, ("total", "totalValue"))
+    if equity is None:
+        raise RuntimeError("no account total (totalValue / total / equity) in the T212 account response")
+    raw = _request(base, key, "/api/v0/equity/positions")
+    if isinstance(raw, dict):
+        raw = raw.get("items", raw.get("positions"))
+    if raw is None:
+        raw = []
+    if not isinstance(raw, list):
+        raise RuntimeError("the T212 positions response is not a list")
+    held: dict[str, tuple[float, float]] = {}
+    for item in raw:
+        if not isinstance(item, dict):
+            raise RuntimeError("a T212 position entry is not an object")
+        nested = item.get("instrument")
+        instrument: dict[str, Any] = nested if isinstance(nested, dict) else {}
+        ticker = str(item.get("ticker") or instrument.get("ticker") or "").strip()
+        qty = _number(item, ("quantity",))
+        price = _number(item, ("currentPrice",))
+        if not ticker or qty is None or price is None:
+            raise RuntimeError(f"cannot value the position {ticker or item!r} (ticker, quantity or currentPrice missing)")
+        value, _ = held.get(ticker, (0.0, price))
+        held[ticker] = (value + qty * price, price)
+    return equity, held
+
+
+def _guard_order(
+    base: str, key: str, ticker: str, quantity: Any, order_type: str,
+    limit_price: float | None, stop_price: float | None,
+) -> None:
+    """Run the trading guardrails (P4-24). Raises order_guard.OrderRefused; returns when approved."""
+    from dourmouse import order_guard
+    from dourmouse.guardrails import Side
+
+    try:
+        qty = float(quantity)
+    except (TypeError, ValueError):
+        raise order_guard.OrderRefused(f"order not placed: quantity must be a number, got {quantity!r}") from None
+    if qty == 0 or qty != qty:
+        raise order_guard.OrderRefused(f"order not placed: quantity must be non-zero, got {quantity!r}")
+    try:
+        equity, held = _account_state(base, key)
+    except RuntimeError as exc:
+        raise order_guard.OrderRefused(
+            f"order not placed: could not read the account to check the risk limits ({exc})"
+        ) from exc
+    # T212 sells are negative quantities. The price that sizes the check is the order's own limit /
+    # stop price, else the current price of a position already held; a MARKET order for a ticker
+    # that is not held has no known price and is refused.
+    price = None
+    for candidate in (limit_price, stop_price):
+        if candidate is not None:
+            price = candidate
+            break
+    if price is None and ticker in held:
+        price = held[ticker][1]
+    if price is None:
+        raise order_guard.OrderRefused(
+            f"order not placed: {ticker} is not held and the order has no limit or stop price, so its "
+            "size cannot be checked against the risk limits. Place a LIMIT order with limit_price."
+        )
+    env = "live" if base == _BASE_LIVE else "demo"
+    order_guard.enforce(
+        f"t212:{env}", ticker, Side.SELL if qty < 0 else Side.BUY, abs(qty), price, equity,
+        {t: v for t, (v, _) in held.items()},
+    )
+
+
 def t212_order(
     ticker: str,
     quantity: float,
@@ -180,6 +290,11 @@ def t212_order(
     Refuses without ``paper_confirm=true`` AND (for live) the
     T212_ALLOW_LIVE=1 double gate. On demo this is genuine paper trading
     against T212's practice account — a real market order executes there.
+
+    Before anything is sent, ``order_guard.enforce`` runs the trading
+    guardrails against the live account; a breach (or an account that cannot
+    be read) raises ``order_guard.OrderRefused`` (a ValueError) and the order
+    endpoint is never contacted.
     """
     base, key = _config()
     # Literally True: the value is model-supplied, and a truthy string such as
@@ -197,6 +312,7 @@ def t212_order(
                 "live order blocked: set T212_CONFIRM_LIVE=1 as the final "
                 "explicit confirmation before real-money orders."
             )
+    _guard_order(base, key, ticker, quantity, order_type, limit_price, stop_price)
     payload: dict[str, Any] = {
         "ticker": ticker,
         "quantity": quantity,
@@ -279,7 +395,10 @@ def build_t212_tool_specs() -> list[Any]:
             "t212_order",
             "Place a REAL order via the T212 API. Paper-first: refuses without "
             "paper_confirm=true, and live requires the double gate. Demo "
-            "executes against the practice account. REQUIRES human "
+            "executes against the practice account. The trading guardrails "
+            "(position size, daily-loss kill switch) are checked first and a "
+            "breach refuses the order; a MARKET order for a ticker not held "
+            "needs a limit_price (use LIMIT) so it can be sized. REQUIRES human "
             "confirmation before it places any order.",
             _wrap(t212_order),
             {

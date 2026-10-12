@@ -161,6 +161,32 @@ def _oauth_user_needs_reauth(action: str) -> str | None:
     )
 
 
+class GoogleApiError(RuntimeError):
+    """A Google REST failure that carries what a caller needs to classify it without reading the message:
+    the HTTP ``status`` (None for a transport failure), Google's machine ``reason`` code when the error body
+    has one, and ``over_cap`` when a response was refused for exceeding the byte cap."""
+
+    def __init__(self, message: str, *, status: int | None = None, reason: str = "", over_cap: bool = False) -> None:
+        super().__init__(message)
+        self.status = status
+        self.reason = reason
+        self.over_cap = over_cap
+
+
+def _google_error_reason(raw: bytes) -> str:
+    """Google's machine reason (``exportSizeLimitExceeded``, ``rateLimitExceeded`` ...) from an error body, or ''."""
+    try:
+        err = json.loads(raw.decode("utf-8", errors="replace")).get("error")
+    except (ValueError, AttributeError):
+        return ""
+    if not isinstance(err, dict):
+        return ""
+    errors = err.get("errors")
+    if isinstance(errors, list) and errors and isinstance(errors[0], dict) and errors[0].get("reason"):
+        return str(errors[0]["reason"])
+    return str(err.get("status") or "")
+
+
 def _http_json(method: str, url: str, token: str, body: Any = None) -> Any:
     """One authed REST call. Raises RuntimeError with the REAL Google message
     on any failure (Rule 2.2) — never a fabricated result."""
@@ -175,11 +201,12 @@ def _http_json(method: str, url: str, token: str, body: Any = None) -> Any:
             raw = resp.read().decode("utf-8", errors="replace")
     except urllib.error.HTTPError as exc:
         raw = exc.read().decode("utf-8", errors="replace") if exc.fp else ""
-        raise RuntimeError(
-            f"GOOGLE API {exc.code} on {url.split('?')[0]}: {raw[:300]}"
+        raise GoogleApiError(
+            f"GOOGLE API {exc.code} on {url.split('?')[0]}: {raw[:300]}",
+            status=exc.code, reason=_google_error_reason(raw.encode("utf-8")),
         ) from exc
     except Exception as exc:  # noqa: BLE001 - surface the real transport error
-        raise RuntimeError(f"GOOGLE API: request failed: {exc}") from exc
+        raise GoogleApiError(f"GOOGLE API: request failed: {exc}") from exc
     if not raw:
         return {}
     try:
@@ -226,18 +253,22 @@ def _http_raw(
                 chunks.append(chunk)
                 total += len(chunk)
                 if total > max_bytes:
-                    raise RuntimeError(
+                    raise GoogleApiError(
                         f"GOOGLE API: response exceeds the {max_bytes:,} B cap "
-                        f"on {url.split('?')[0]} — nothing was read."
+                        f"on {url.split('?')[0]} — nothing was read.",
+                        over_cap=True,
                     )
             return b"".join(chunks)
+    except GoogleApiError:
+        raise
     except urllib.error.HTTPError as exc:
         raw = exc.read() if exc.fp else b""
-        raise RuntimeError(
-            f"GOOGLE API {exc.code} on {url.split('?')[0]}: {raw[:300]!r}"
+        raise GoogleApiError(
+            f"GOOGLE API {exc.code} on {url.split('?')[0]}: {raw[:300]!r}",
+            status=exc.code, reason=_google_error_reason(raw),
         ) from exc
     except Exception as exc:  # noqa: BLE001 - surface the real transport error
-        raise RuntimeError(f"GOOGLE API: request failed: {exc}") from exc
+        raise GoogleApiError(f"GOOGLE API: request failed: {exc}") from exc
 
 
 def _gmail_search_oauth(token: str, query: str, max_results: int) -> str:
