@@ -24,7 +24,11 @@ Where it is enforced (finding P4-24): only where a caller runs
 ``mt5_probe.cmd_order``) run it through ``order_guard.enforce`` right before
 they send an order, with ``latch=True``, and refuse when it says no; the human
 confirmation prompt still applies on top. Nothing else in the system places
-orders. See ``order_guard`` for what is checked and its stated limits.
+orders. See ``order_guard`` for what is checked and its stated limits. An
+order that only reduces a position the broker reports does not reach
+``evaluate_trade`` at all: ``order_guard.approve_reduction`` lets it through
+even with the kill switch tripped, so a losing position can always be closed
+(W3R-2); ``evaluate_trade`` itself still blocks every trade while tripped.
 """
 
 from __future__ import annotations

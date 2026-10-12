@@ -1338,7 +1338,7 @@ _PROTECTED_WORKSPACE_TOP = frozenset({
     "research_pipeline", "compute", "atlas_lab", "device_wiki", "neuro",
 })
 _PROTECTED_FILE_RE = re.compile(
-    r"(^\.env($|\.)|\.(db|sqlite|sqlite3|pem|key|p12)$|\.db-(wal|shm)$|^(schedules|world_history)\.jsonl$|^mcp_servers\.json$|^spotify_tokens\.json$)", re.IGNORECASE
+    r"(^\.env($|\.)|\.(db|sqlite|sqlite3|pem|key|p12)$|\.db-(wal|shm)$|^(schedules|world_history)\.jsonl$|^mcp_servers\.json$|^spotify_tokens\.json$|^order_guard(_state\.json|\.lock)$)", re.IGNORECASE
 )
 
 

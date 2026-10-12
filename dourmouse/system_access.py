@@ -404,6 +404,14 @@ def _under_dir(path: Path, base: Path) -> bool:
     return is_under_folded(path, base)
 
 
+def _is_order_guard_file(path: Path) -> bool:
+    """W3R-1: the trading kill switch's state, its HMAC key and its lock (and the old workspace
+    copy of the state). Compared by folded real path, so a case variant or a symlink still matches."""
+    from dourmouse import order_guard
+
+    return any(is_under_folded(path, p) for p in order_guard.protected_paths())
+
+
 def _protected_target_reason(target: Path) -> str | None:
     """Why an UNGATED absolute-path write to ``target`` must be refused, or None.
 
@@ -422,6 +430,8 @@ def _protected_target_reason(target: Path) -> str | None:
     root = _PROJECT_ROOT.resolve()
     if any(_under_dir(path, root / d) for d in ("dourmouse", "ui", "electron", "scripts", "extension", ".venv")) or _under_dir(path, root / ".env"):
         return "is part of Dourmouse's own code or its secrets"
+    if _is_order_guard_file(path):
+        return "is the trading guardrails' kill-switch state"
     if name_in(".git", path.parts):
         return "is inside a .git folder (hooks and config run when git runs)"
     if folded_parts(path.parent) == folded_parts(home) and name_in(path.name, _STARTUP_FILES):
@@ -503,6 +513,12 @@ def _delete_path_tool(arguments: dict[str, Any]) -> str:
         return (
             f"REFUSED: {target} is inside a credential/system directory "
             "(Rule 2.6) — the agent never deletes there."
+        )
+    if _is_order_guard_file(target):
+        # Deleting it would forget a latched kill switch; the owner re-arms from a terminal instead.
+        return (
+            f"REFUSED: {target} is the trading guardrails' kill-switch state; no tool deletes it. "
+            "The owner clears a tripped switch with `python -m dourmouse.order_guard rearm` in a terminal."
         )
     if not target.is_file():
         return f"ERROR: not a file (or missing): {target}"

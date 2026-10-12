@@ -395,8 +395,19 @@
       try {
         const r = await fetch('/api/auth/claim');
         if (r.ok) { clearInterval(timer); location.href = '/'; return; }
+        // W3R-7: 403 (not the app window) and 400 (this window started no sign-in) never
+        // change by waiting; say so instead of polling silently. 404 means "not yet".
+        if (r.status === 403 || r.status === 400) { clearInterval(timer); showClaimDeadEnd(r.status); return; }
       } catch (e) { /* server restarting mid-flow — keep polling */ }
     }, 2000);
+  }
+  function showClaimDeadEnd(status) {
+    const w = document.getElementById('ggoogleMsg');
+    if (!w) return;
+    w.style.display = 'block';
+    w.innerHTML = '<span class="warn">' + (status === 403
+      ? 'This page cannot finish the sign-in: only the Dourmouse app window can. Open Dourmouse and sign in from there.'
+      : 'No sign-in was started from this window. Press Sign in with Google again.') + '</span>';
   }
   const claiming = new URLSearchParams(location.search).get('claiming');
   if (claiming) startClaimPoll();

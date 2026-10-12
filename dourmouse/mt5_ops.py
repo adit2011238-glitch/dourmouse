@@ -219,8 +219,11 @@ def mt5_account() -> dict[str, Any]:
         mt5mod, info = _config()
     except MT5NotConfiguredError as exc:
         return {"configured": False, "error": str(exc)}
+    raw = mt5mod.positions_get()
+    if raw is None:  # an error, not "no positions"
+        return {"configured": True, "error": f"could not read the open positions ({mt5mod.last_error()})"}
     positions = []
-    for p in mt5mod.positions_get():
+    for p in raw:
         positions.append({
             "symbol": p.symbol, "side": "BUY" if p.type == 0 else "SELL",
             "volume": p.volume, "open_price": p.price_open,
@@ -249,32 +252,67 @@ def mt5_quote(code: str) -> dict[str, Any]:
     return {"configured": True, "code": code, "symbol": name, **q}
 
 
+def _ticket(position: Any) -> int | None:
+    """A model-supplied position ticket as an int (None stays None); raises ValueError otherwise."""
+    if position is None or position == "":
+        return None
+    if isinstance(position, bool):
+        raise ValueError(f"position must be a ticket number, got {position!r}")
+    try:
+        ticket = int(str(position).strip())
+    except ValueError:
+        raise ValueError(f"position must be a ticket number, got {position!r}") from None
+    if ticket <= 0:
+        raise ValueError(f"position must be a ticket number, got {position!r}")
+    return ticket
+
+
+def _tick_price(mt5mod: Any, name: str, side: str) -> float | None:
+    """The one price this order is both checked and sent at: ask for BUY, bid for SELL."""
+    tick = mt5mod.symbol_info_tick(name)
+    if tick is None:
+        return None
+    price = tick.ask if side == "BUY" else tick.bid
+    if not isinstance(price, (int, float)) or isinstance(price, bool) or price != price or price <= 0:
+        return None
+    return float(price)
+
+
 def mt5_order(code: str, side: str, volume: float = 0.01,
-              paper_confirm: bool = False) -> dict[str, Any]:
+              paper_confirm: bool = False, position: Any = None) -> dict[str, Any]:
     """Place a real order through the local MT5 terminal (paper-first).
 
     Refuses without ``paper_confirm=true`` AND (for live accounts) the
     MT5_ALLOW_LIVE=1 + MT5_CONFIRM_LIVE=1 double gate. Demo accounts are
     genuine paper trading with simulated fills. The trading guardrails
     (``order_guard.check_mt5_order``) run before ``order_send``; a breach
-    returns an error and nothing is sent.
+    returns an error and nothing is sent. ``position`` (a ticket) closes or
+    trims that one position; on a hedging account that is the only way an
+    order reduces exposure (W3R-4).
     """
     try:
         mt5mod, _ = _config()
     except MT5NotConfiguredError as exc:
         return {"configured": False, "error": str(exc)}
-    if not paper_confirm:
+    if paper_confirm is not True:
         return {"error": "paper confirmation required: pass paper_confirm="
                 "true to place an order (paper-first, Rule 2.1)"}
-    side = side.upper()
+    code = str(code).strip().upper()
+    side = str(side).strip().upper()
     if side not in ("BUY", "SELL"):
         return {"error": f"side must be BUY or SELL, got {side!r}"}
+    if isinstance(volume, bool):
+        return {"error": f"volume must be a number, got {volume!r}"}
     try:
         volume = float(volume)
     except (TypeError, ValueError):
         return {"error": f"volume must be a number, got {volume!r}"}
-    if volume <= 0:
-        return {"error": f"volume must be positive, got {volume}"}
+    if volume != volume or volume <= 0 or volume == float("inf"):
+        return {"error": f"volume must be a positive number, got {volume}"}
+    try:
+        ticket = _ticket(position)
+    except ValueError as exc:
+        return {"error": str(exc)}
     if not _is_demo():
         if os.environ.get(_ALLOW_LIVE_ENV, "").strip() != "1":
             return {"error": f"live account detected: set {_ALLOW_LIVE_ENV}=1 "
@@ -287,10 +325,12 @@ def mt5_order(code: str, side: str, volume: float = 0.01,
         return {"error": f"{code} not listed on this server — cannot order"}
     from dourmouse import order_guard
 
-    tick = mt5mod.symbol_info_tick(name)
-    guard_price = tick.ask if side == "BUY" else tick.bid
+    # W3R-5: one tick, read once; the guard and the request use the same price.
+    price = _tick_price(mt5mod, name, side)
+    if price is None:
+        return {"error": f"no valid price for {name} yet ({mt5mod.last_error()})"}
     try:
-        order_guard.check_mt5_order(mt5mod, name, side, volume, guard_price)
+        order_guard.check_mt5_order(mt5mod, name, side, volume, price, position=ticket)
     except order_guard.OrderRefused as exc:
         return {"error": str(exc)}
     # Engineering audit, 2026-09-17: this used to fetch mt5mod.symbol_info(name)
@@ -307,14 +347,15 @@ def mt5_order(code: str, side: str, volume: float = 0.01,
         "volume": volume,
         "type": mt5mod.ORDER_TYPE_BUY if side == "BUY"
         else mt5mod.ORDER_TYPE_SELL,
-        "price": mt5mod.symbol_info_tick(name).ask if side == "BUY"
-        else mt5mod.symbol_info_tick(name).bid,
+        "price": price,
         "deviation": 20,
         "magic": 20260801,
         "comment": "dourmouse seasonal paper",
         "type_time": mt5mod.ORDER_TIME_GTC,
         "type_filling": mt5mod.ORDER_FILLING_IOC,
     }
+    if ticket is not None:
+        request["position"] = ticket
     result = mt5mod.order_send(request)
     if result is None:
         return {"error": f"order_send failed ({mt5mod.last_error()})"}
@@ -442,12 +483,23 @@ def _mt5_quote_tool(arguments: dict[str, Any]) -> str:
 def _mt5_order_tool(arguments: dict[str, Any]) -> str:
     code = str(arguments.get("code", "")).strip().upper()
     side = str(arguments.get("side", "")).strip().upper()
-    volume = float(arguments.get("volume", 0.01))
-    confirm = bool(arguments.get("paper_confirm", False))
+    raw_volume = arguments.get("volume", 0.01)
+    try:
+        if isinstance(raw_volume, bool):
+            raise ValueError
+        volume = float(raw_volume)
+    except (TypeError, ValueError):
+        return f"MT5 ORDER: volume must be a number, got {raw_volume!r}"
+    # Literally True: a model-supplied "false" string is truthy and must not confirm.
+    confirm = arguments.get("paper_confirm") is True
+    try:
+        ticket = _ticket(arguments.get("position"))
+    except ValueError as exc:
+        return f"MT5 ORDER: {exc}"
     if not code or side not in ("BUY", "SELL"):
         return "MT5 ORDER: need code (e.g. ZC) and side BUY|SELL"
-    r = _run_worker(["order", code, side, str(volume),
-                     "true" if confirm else "false"])
+    r = _run_worker(["order", code, side, repr(volume),
+                     "true" if confirm else "false"] + ([str(ticket)] if ticket is not None else []))
     if "error" in r:
         return f"MT5 ORDER {code} {side}: REFUSED — {r['error']}"
     return (f"MT5 ORDER FILLED: {r['side']} {r['volume']} {r['code']} "
@@ -506,19 +558,24 @@ def build_mt5_tool_specs() -> list[Any]:
             "refuses without paper_confirm=true, and live accounts are double-"
             "gated (MT5_ALLOW_LIVE=1 + MT5_CONFIRM_LIVE=1). Demo = paper. "
             "The trading guardrails (position size, daily-loss kill switch) "
-            "are checked first and a breach refuses the order. "
+            "are checked first and a breach refuses the order; closing or "
+            "trimming an open position (pass its ticket as position) stays "
+            "allowed. "
             "REQUIRES human confirmation before it places any order.",
             _mt5_order_tool,
             {
                 "code": {"type": "string", "description": "Seasonal universe code, e.g. ZC"},
                 "side": {"type": "string", "description": "BUY or SELL"},
                 "volume": {"type": "number", "description": "Lots (default 0.01 micro lot)"},
+                "position": {"type": "integer", "description": "Optional ticket of an open position to close or trim "
+                             "(opposite side, at most its volume); on a hedging account a SELL without it opens a new short"},
                 "paper_confirm": {"type": "boolean", "description": "Must be true to place any order (paper-first)"},
             },
             permission=Permission.REQUIRES_CONFIRMATION,
             confirm_prompt=lambda a: (
                 f"Place MT5 order: {str(a.get('side', '?')).upper()} "
-                f"{a.get('volume', '?')} lots of {a.get('code', '?')}? "
+                f"{a.get('volume', '?')} lots of {a.get('code', '?')}"
+                f"{' closing position ' + str(a['position']) if a.get('position') else ''}? "
                 "(paper account unless MT5_ALLOW_LIVE is set)"
             ),
         ),

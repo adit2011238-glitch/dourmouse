@@ -176,7 +176,8 @@ def merge_env_text(old_text: str | None, updates: dict[str, str], removals: Iter
     drop = {str(k) for k in removals}
     pieces: list[str] = []
     written: set[str] = set()
-    base = old_text or ""
+    # W3R-8: a byte order mark (Windows editors write one) would glue itself to the first key.
+    base = (old_text or "").removeprefix("\ufeff")
     for binding in parse_stream(io.StringIO(base)):
         raw = binding.original.string
         key = binding.key
@@ -219,7 +220,7 @@ def update_user_config(updates: dict[str, str] | None = None, removals: Iterable
         old_text: str | None = None
         if target.exists():
             try:
-                old_text = target.read_text(encoding="utf-8")
+                old_text = target.read_text(encoding="utf-8-sig")  # W3R-8: a BOM is not part of the first key
             except (OSError, UnicodeDecodeError) as exc:
                 raise OSError(
                     f"{target} exists but cannot be read ({type(exc).__name__}: {exc}); the setting was "
@@ -277,8 +278,9 @@ def is_configured() -> bool:
 # secrets live only in these files or the shell env — never hardcoded
 # (Rule 2.6). override=False so the first file found wins and a dev
 # checkout never silently overrides an installed user's settings.
-load_dotenv(user_env_path(), override=False)
-load_dotenv(Path(__file__).resolve().parent.parent / ".env", override=False)
+# utf-8-sig: a file saved with a byte order mark still loads its first key (W3R-8).
+load_dotenv(user_env_path(), override=False, encoding="utf-8-sig")
+load_dotenv(Path(__file__).resolve().parent.parent / ".env", override=False, encoding="utf-8-sig")
 
 
 def _migrate_legacy_env() -> None:
@@ -1145,7 +1147,7 @@ def _read_user_config_file() -> dict[str, str]:
     if not path.exists():
         return {}
     try:
-        parsed = dotenv_values(path, interpolate=False)
+        parsed = dotenv_values(path, interpolate=False, encoding="utf-8-sig")
     except (OSError, UnicodeDecodeError):
         return {}
     return {str(k): str(v) for k, v in parsed.items() if v is not None}

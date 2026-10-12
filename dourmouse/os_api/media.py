@@ -39,6 +39,8 @@ import urllib.parse
 from pathlib import Path
 from typing import Any
 
+from dourmouse.state_file import load_json_or_aside, set_aside
+
 from . import ApiError, Request, route
 
 AUDIO_EXTS = {".mp3", ".m4a", ".aac", ".wav", ".oga", ".ogg", ".opus", ".weba"}
@@ -135,13 +137,39 @@ def _recent_file() -> Path:
     return workspace_dir() / "media_recent.json"
 
 
+def _paths_of(data: Any, cap: int) -> list[str]:
+    items = data.get("paths") if isinstance(data, dict) else None
+    return [p for p in items if isinstance(p, str)][:cap] if isinstance(items, list) else []
+
+
 def _read_recent() -> list[str]:
     try:
         data = json.loads(_recent_file().read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return []
-    items = data.get("paths") if isinstance(data, dict) else None
-    return [p for p in items if isinstance(p, str)][:RECENT_CAP] if isinstance(items, list) else []
+    return _paths_of(data, RECENT_CAP)
+
+
+def _load_for_update(path: Path, *, list_field: str | None = None) -> tuple[dict[str, Any], str]:
+    """The saved value a write starts from, and a note when the saved file had to be kept aside.
+
+    H-FIXW2-5 (same class as P4-32): the display readers above may show nothing for a file they
+    cannot read, but a write must never replace that file with an empty list. A file that is not
+    valid JSON, or not the shape this module writes, is kept as ``<name>.corrupt-<time>``
+    (state_file) and the write starts fresh. A file that cannot be read right now, or could not be
+    moved aside, raises OSError and is left exactly as it is, so the caller refuses its write."""
+    value, note = load_json_or_aside(path, dict)  # StateUnreadable is an OSError
+    if value is not None and list_field is not None and not isinstance(value.get(list_field, []), list):
+        try:
+            note = f"{path.name} has no list of {list_field}; it was kept as {set_aside(path).name} and not overwritten."
+        except OSError as exc:
+            note = f"{path.name} has no list of {list_field} and could not be moved aside ({exc}); left untouched."
+        value = None
+    if note:
+        logging.getLogger(__name__).error("media: %s", note)
+        if path.exists():
+            raise OSError(note)
+    return (value or {}), note
 
 
 def _write_recent(paths: list[str]) -> None:
@@ -271,10 +299,15 @@ def open_file(req: Request) -> tuple[int, dict[str, Any]]:
     if row["kind"] == "pdf":
         extra = _pdf_facts(target)
     with _lock:
-        paths = [p for p in _read_recent() if p != row["path"]]
-        paths.insert(0, row["path"])
-        with contextlib.suppress(OSError):  # the recent list is a convenience; playing does not depend on it
+        # The recent list is a convenience: playing never depends on it, but a saved list that
+        # cannot be read is left alone rather than replaced (H-FIXW2-5).
+        try:
+            stored, _note = _load_for_update(_recent_file(), list_field="paths")
+            paths = [p for p in _paths_of(stored, RECENT_CAP) if p != row["path"]]
+            paths.insert(0, row["path"])
             _write_recent(paths)
+        except OSError as exc:
+            logging.getLogger(__name__).warning("media: the recent list was not updated: %s", exc)
     return 200, {"ok": True, **row, **extra, "needs_convert": needs_convert, "urls": _urls(target),
                  "subtitles": subtitles,
                  "probe": {k: info.get(k) for k in ("video", "audio", "duration")} if info.get("ok") else None,
@@ -384,7 +417,12 @@ def highlights_write(req: Request) -> tuple[int, dict[str, Any]]:
     if op not in ("add", "remove", "clear"):
         raise ApiError(400, "op must be add, remove or clear")
     with _lock:
-        everything = _read_highlights()
+        try:
+            stored, notice = _load_for_update(_highlights_file())
+        except OSError as exc:
+            raise ApiError(500, f"could not read the saved highlights, so nothing was changed: {exc}") from None
+        everything = {k: [h for h in v if isinstance(h, dict)] for k, v in stored.items()
+                      if isinstance(k, str) and isinstance(v, list)}
         mine = list(everything.get(key, []))
         if op == "add":
             try:
@@ -419,7 +457,7 @@ def highlights_write(req: Request) -> tuple[int, dict[str, Any]]:
             _write_json(_highlights_file(), everything, ".media_highlights.")
         except OSError as exc:
             raise ApiError(500, f"could not save the highlights: {exc.strerror or exc}") from None
-    return 200, {"ok": True, "path": key, "highlights": mine}
+    return 200, {"ok": True, "path": key, "highlights": mine, **({"notice": notice} if notice else {})}
 
 
 # ---------------------------------------------------------------------------
@@ -439,8 +477,7 @@ def _read_queue() -> list[str]:
         data = json.loads(_queue_file().read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return []
-    items = data.get("paths") if isinstance(data, dict) else None
-    return [p for p in items if isinstance(p, str)][:QUEUE_CAP] if isinstance(items, list) else []
+    return _paths_of(data, QUEUE_CAP)
 
 
 def _queue_rows(paths: list[str]) -> list[dict[str, Any]]:
@@ -467,7 +504,11 @@ def queue_write(req: Request) -> tuple[int, dict[str, Any]]:
     if op not in ("add", "remove", "move", "clear"):
         raise ApiError(400, "op must be add, remove, move or clear")
     with _lock:
-        paths = [r["path"] for r in _queue_rows(_read_queue())]
+        try:
+            stored, notice = _load_for_update(_queue_file(), list_field="paths")
+        except OSError as exc:
+            raise ApiError(500, f"could not read the saved queue, so it was not changed: {exc}") from None
+        paths = [r["path"] for r in _queue_rows(_paths_of(stored, QUEUE_CAP))]
         if op == "add":
             target = check_path(body.get("path"))
             if kind_of(target.suffix) not in ("audio", "video"):
@@ -497,7 +538,7 @@ def queue_write(req: Request) -> tuple[int, dict[str, Any]]:
             _write_json(_queue_file(), {"paths": paths}, ".media_queue.")
         except OSError as exc:
             raise ApiError(500, f"could not save the queue: {exc.strerror or exc}") from None
-    return 200, {"ok": True, "queue": _queue_rows(paths)}
+    return 200, {"ok": True, "queue": _queue_rows(paths), **({"notice": notice} if notice else {})}
 
 
 # ---------------------------------------------------------------------------

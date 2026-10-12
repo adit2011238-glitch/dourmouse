@@ -14,7 +14,7 @@ Usage (all print a single JSON object to stdout):
   python -m dourmouse.mt5_probe status
   python -m dourmouse.mt5_probe universe
   python -m dourmouse.mt5_probe quote CODE
-  python -m dourmouse.mt5_probe order CODE SIDE VOLUME PAPER_CONFIRM
+  python -m dourmouse.mt5_probe order CODE SIDE VOLUME PAPER_CONFIRM [POSITION_TICKET]
 """
 
 from __future__ import annotations
@@ -30,6 +30,8 @@ from dourmouse.mt5_ops import (
     _find_symbol,
     _is_demo,
     _quote,
+    _ticket,
+    _tick_price,
 )
 
 
@@ -119,20 +121,27 @@ def cmd_quote(code: str) -> dict[str, Any]:
 
 
 def cmd_order(code: str, side: str, volume: float,
-              paper_confirm: bool) -> dict[str, Any]:
+              paper_confirm: bool, position: Any = None) -> dict[str, Any]:
 
-    if not paper_confirm:
+    if paper_confirm is not True:
         return {"error": "paper confirmation required: pass paper_confirm="
                 "true to place an order (paper-first, Rule 2.1)"}
-    side = side.upper()
+    code = str(code).strip().upper()
+    side = str(side).strip().upper()
     if side not in ("BUY", "SELL"):
         return {"error": f"side must be BUY or SELL, got {side!r}"}
+    if isinstance(volume, bool):
+        return {"error": f"volume must be a number, got {volume!r}"}
     try:
         volume = float(volume)
     except (TypeError, ValueError):
         return {"error": f"volume must be a number, got {volume!r}"}
-    if volume <= 0:
-        return {"error": f"volume must be positive, got {volume}"}
+    if volume != volume or volume <= 0 or volume == float("inf"):
+        return {"error": f"volume must be a positive number, got {volume}"}
+    try:
+        ticket = _ticket(position)
+    except ValueError as exc:
+        return {"error": str(exc)}
     if not mt5.initialize():
         return {"error": "MT5 terminal not ready — log into a demo account"}
     if not _is_demo():
@@ -146,14 +155,13 @@ def cmd_order(code: str, side: str, volume: float,
     name = _find_symbol(mt5, code)
     if name is None:
         return {"error": f"{code} not listed on this server — cannot order"}
-    tick = mt5.symbol_info_tick(name)
-    price = tick.ask if side == "BUY" else tick.bid
-    if price is None or price != price:
+    price = _tick_price(mt5, name, side)
+    if price is None:
         return {"error": f"no valid price for {name} yet"}
     # P4-24: the trading guardrails run before anything is sent (same check as mt5_ops.mt5_order).
     from dourmouse import order_guard
     try:
-        order_guard.check_mt5_order(mt5, name, side, volume, price)
+        order_guard.check_mt5_order(mt5, name, side, volume, price, position=ticket)
     except order_guard.OrderRefused as exc:
         return {"error": str(exc)}
     request = {
@@ -169,6 +177,8 @@ def cmd_order(code: str, side: str, volume: float,
         "type_time": mt5.ORDER_TIME_GTC,
         "type_filling": mt5.ORDER_FILLING_IOC,
     }
+    if ticket is not None:
+        request["position"] = ticket
     result = mt5.order_send(request)
     if result is None:
         return {"error": f"order_send failed ({mt5.last_error()})"}
@@ -197,8 +207,8 @@ def main(argv: list[str] | None = None) -> int:
             _emit(cmd_quote(rest[0].upper()))
         elif cmd == "order" and len(rest) >= 3:
             _emit(cmd_order(rest[0].upper(), rest[1].upper(),
-                            float(rest[2]), rest[3].lower() == "true"
-                            if len(rest) > 3 else False))
+                            float(rest[2]), len(rest) > 3 and rest[3].lower() == "true",
+                            rest[4] if len(rest) > 4 else None))
         else:
             _emit({"error": f"bad command: {args!r}"})
             return 1

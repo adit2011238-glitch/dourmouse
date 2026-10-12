@@ -48,6 +48,7 @@ from pathlib import Path
 from typing import Any
 
 from dourmouse.http_server import DourmouseHTTPServer
+from dourmouse.state_file import atomic_write_text
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _WORKSPACE_ENV = "DOURMOUSE_WORKSPACE"
@@ -60,7 +61,7 @@ _WORKSPACE_ENV = "DOURMOUSE_WORKSPACE"
 try:
     from dotenv import load_dotenv
 
-    load_dotenv(_PROJECT_ROOT / ".env")
+    load_dotenv(_PROJECT_ROOT / ".env", encoding="utf-8-sig")  # a BOM must not hide the first key (W3R-8)
 except Exception:  # noqa: BLE001 - dotenv missing = env/secrets still work
     pass
 
@@ -120,16 +121,16 @@ def _load_tokens() -> dict[str, Any]:
     if not path.is_file():
         return {}
     try:
-        data = json.loads(path.read_text())
+        data = json.loads(path.read_text(encoding="utf-8"))
         return data if isinstance(data, dict) else {}
     except (json.JSONDecodeError, OSError):
         return {}
 
 
 def _save_tokens(tokens: dict[str, Any]) -> None:
-    path = _tokens_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(tokens, indent=2))
+    """The refresh token is a credential (H-FIXW2-4): 0600 from the first byte, and a temp file
+    moved into place, so a crash leaves the old tokens or the new ones, never a truncated file."""
+    atomic_write_text(_tokens_path(), json.dumps(tokens, indent=2), mode=0o600)
 
 
 def _clear_tokens() -> None:

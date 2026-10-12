@@ -501,8 +501,21 @@ function gPollClaim(){
         clearInterval(gClaimTimer);
         const body = await r.json();
         gShowConnected(body.me || {});
+        return;
       }
-      // A non-ok response (404: not claimed yet) is expected while waiting.
+      // W3R-7: 403 (not the app window) and 400 (no claim cookie on this page) never change
+      // by waiting, so stop and say what to do. A 404 (not claimed yet) is expected while waiting.
+      if(r.status === 403 || r.status === 400){
+        clearInterval(gClaimTimer);
+        const m = $("gMsg");
+        m.className = "msg bad";
+        m.textContent = r.status === 403
+          ? "This page cannot finish the sign-in: only the Dourmouse app window can. Open Dourmouse and run setup from there."
+          : "No sign-in was started from this page. Press Try again.";
+        const btn = $("gSigninBtn");
+        btn.disabled = false; $("gSigninLabel").textContent = "Try again";
+        return;
+      }
     }catch(e){ /* transient network hiccup — keep polling */ }
   }, 2000);
 }

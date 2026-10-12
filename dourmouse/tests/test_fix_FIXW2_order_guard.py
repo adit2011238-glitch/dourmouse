@@ -329,11 +329,15 @@ def test_the_guard_state_is_private_and_pruned(t212):
     assert stat.S_IMODE(order_guard.state_path().stat().st_mode) == 0o600
 
 
-def test_rearm_cli(t212, capsys):
+def test_rearm_cli(t212, capsys, monkeypatch):
     _order()
     t212.equity = 5000.0
     _order()
     assert order_guard.main(["status"]) == 0
     assert '"tripped": true' in capsys.readouterr().out
+    # FIX-R3 (W3R-1): rearm now needs a person at a terminal who types REARM.
+    monkeypatch.setattr(order_guard.sys.stdin, "isatty", lambda: True, raising=False)
+    monkeypatch.setattr(order_guard.sys.stdout, "isatty", lambda: True, raising=False)
+    monkeypatch.setattr("builtins.input", lambda prompt="": "REARM")
     assert order_guard.main(["rearm"]) == 0
     assert order_guard._load_state().get("tripped") is None

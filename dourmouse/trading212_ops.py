@@ -21,8 +21,13 @@ Honest rules (2.1 / 2.2 / 2.8):
   finding P4-24) right before it sends: position size, sector (each ticker
   its own sector here), daily-loss kill switch with a persisted latch. A
   breach, or an account that cannot be read, means NO request reaches the
-  order endpoint. A MARKET order for a ticker you do not hold has no known
-  price and is refused: use a LIMIT order (its limit price sizes the check).
+  order endpoint. An order that only reduces a position the broker reports
+  (a sell of at most what is held) still goes through when the kill switch
+  is tripped or other account data is missing (W3R-2). The check is sized
+  with the highest price the order could fill at: the held position's
+  current price and the order's own limit / stop price; a MARKET order
+  takes no price of its own (W3R-3), so a MARKET order for a ticker you do
+  not hold has no known price and is refused: use a LIMIT order.
 
 Scope honesty: the official API covers Invest/ISA *equity* accounts
 (stocks/ETFs) — it does NOT expose CFDs, so the commodity-seasonal CFD
@@ -37,6 +42,7 @@ from __future__ import annotations
 import http.client
 import json
 import os
+import re
 import urllib.error
 import urllib.request
 from typing import Any
@@ -200,18 +206,37 @@ def _number(obj: Any, names: tuple[str, ...]) -> float | None:
     return None
 
 
-def _account_state(base: str, key: str) -> tuple[float, dict[str, tuple[float, float]]]:
-    """(account equity, {ticker: (signed market value, current price)}) from the broker.
+_ORDER_TYPES = frozenset({"MARKET", "LIMIT", "STOP", "STOP_LIMIT"})
+#: Which price fields each order type takes; anything else is refused rather than sent.
+_PRICE_FIELDS = {
+    "MARKET": (False, False),
+    "LIMIT": (True, False),
+    "STOP": (False, True),
+    "STOP_LIMIT": (True, True),
+}
+_TICKER_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 
-    The key names tried are the ones the T212 account and positions payloads use;
-    anything that cannot be read raises, because the order must then not be sent."""
-    info = _request(base, key, "/api/v0/equity/account/info")
-    equity = _number(info, ("totalValue", "total", "equity", "accountValue"))
-    if equity is None:
-        cash = _request(base, key, "/api/v0/equity/account/cash")
-        equity = _number(cash, ("total", "totalValue"))
-    if equity is None:
-        raise RuntimeError("no account total (totalValue / total / equity) in the T212 account response")
+
+def _account_state(base: str, key: str) -> tuple[float | None, dict[str, tuple[float, float | None]], list[str]]:
+    """(account equity or None, {ticker: (quantity, current price or None)}, problems) from the broker.
+
+    The key names tried are the ones the T212 account and positions payloads use. A positions
+    response that cannot be read at all raises (no order can then be judged, not even a close);
+    anything narrower (no equity, one position without a price) is returned as a problem, so a
+    pure reduction of a position the broker does report can still go ahead (W3R-2) while every
+    other order is refused."""
+    problems: list[str] = []
+    equity: float | None = None
+    try:
+        info = _request(base, key, "/api/v0/equity/account/info")
+        equity = _number(info, ("totalValue", "total", "equity", "accountValue"))
+        if equity is None:
+            cash = _request(base, key, "/api/v0/equity/account/cash")
+            equity = _number(cash, ("total", "totalValue"))
+        if equity is None:
+            problems.append("no account total (totalValue / total / equity) in the T212 account response")
+    except RuntimeError as exc:
+        problems.append(f"the account total could not be read ({exc})")
     raw = _request(base, key, "/api/v0/equity/positions")
     if isinstance(raw, dict):
         raw = raw.get("items", raw.get("positions"))
@@ -219,62 +244,130 @@ def _account_state(base: str, key: str) -> tuple[float, dict[str, tuple[float, f
         raw = []
     if not isinstance(raw, list):
         raise RuntimeError("the T212 positions response is not a list")
-    held: dict[str, tuple[float, float]] = {}
+    held: dict[str, tuple[float, float | None]] = {}
     for item in raw:
         if not isinstance(item, dict):
-            raise RuntimeError("a T212 position entry is not an object")
+            problems.append("a T212 position entry is not an object")
+            continue
         nested = item.get("instrument")
         instrument: dict[str, Any] = nested if isinstance(nested, dict) else {}
         ticker = str(item.get("ticker") or instrument.get("ticker") or "").strip()
         qty = _number(item, ("quantity",))
         price = _number(item, ("currentPrice",))
-        if not ticker or qty is None or price is None:
-            raise RuntimeError(f"cannot value the position {ticker or item!r} (ticker, quantity or currentPrice missing)")
-        value, _ = held.get(ticker, (0.0, price))
-        held[ticker] = (value + qty * price, price)
-    return equity, held
+        if not ticker or qty is None:
+            problems.append(f"cannot read the position {ticker or item!r} (ticker or quantity missing)")
+            continue
+        if price is None:
+            problems.append(f"cannot value the position {ticker} (currentPrice missing)")
+        old_qty, old_price = held.get(ticker, (0.0, None))
+        held[ticker] = (old_qty + qty, price if price is not None else old_price)
+    return equity, held, problems
 
 
-def _guard_order(
-    base: str, key: str, ticker: str, quantity: Any, order_type: str,
-    limit_price: float | None, stop_price: float | None,
-) -> None:
-    """Run the trading guardrails (P4-24). Raises order_guard.OrderRefused; returns when approved."""
+def _order_number(value: Any, name: str, *, positive: bool) -> float | None:
+    """A model-supplied number as a finite float (None stays None); strings such as "5" are read,
+    booleans, NaN, infinities and anything else are refused."""
+    from dourmouse import order_guard
+
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        raise order_guard.OrderRefused(f"order not placed: {name} must be a number, got {value!r}")
+    try:
+        number = float(value)
+    except ValueError:
+        raise order_guard.OrderRefused(f"order not placed: {name} must be a number, got {value!r}") from None
+    if number != number or abs(number) == float("inf"):
+        raise order_guard.OrderRefused(f"order not placed: {name} must be a finite number, got {value!r}")
+    if positive and number <= 0:
+        raise order_guard.OrderRefused(f"order not placed: {name} must be positive, got {value!r}")
+    if not positive and number == 0:
+        raise order_guard.OrderRefused(f"order not placed: {name} must be non-zero, got {value!r}")
+    return number
+
+
+def _normalise_order(
+    ticker: Any, quantity: Any, order_type: Any, limit_price: Any, stop_price: Any,
+) -> dict[str, Any]:
+    """Validate the model's order fields once; what is checked is exactly what is sent (W3R-3)."""
+    from dourmouse import order_guard
+
+    name = ticker.strip() if isinstance(ticker, str) else ""
+    if not _TICKER_RE.fullmatch(name):
+        raise order_guard.OrderRefused(f"order not placed: {ticker!r} is not a ticker (letters, digits, . _ -)")
+    kind = order_type.strip().upper() if isinstance(order_type, str) else ""
+    if kind not in _ORDER_TYPES:
+        raise order_guard.OrderRefused(
+            f"order not placed: order_type must be one of {', '.join(sorted(_ORDER_TYPES))}, got {order_type!r}"
+        )
+    qty = _order_number(quantity, "quantity", positive=False)
+    if qty is None:
+        raise order_guard.OrderRefused("order not placed: quantity is required (negative to sell)")
+    limit = _order_number(limit_price, "limit_price", positive=True)
+    stop = _order_number(stop_price, "stop_price", positive=True)
+    wants_limit, wants_stop = _PRICE_FIELDS[kind]
+    for given, wanted, field in ((limit, wants_limit, "limit_price"), (stop, wants_stop, "stop_price")):
+        if wanted and given is None:
+            raise order_guard.OrderRefused(f"order not placed: a {kind} order needs {field}")
+        if given is not None and not wanted:
+            raise order_guard.OrderRefused(
+                f"order not placed: a {kind} order does not take {field} (the broker would ignore it, so it "
+                "cannot size the risk check); leave it out or use an order type that uses it"
+            )
+    return {"ticker": name, "quantity": qty, "type": kind, "limitPrice": limit, "stopPrice": stop}
+
+
+def _broker_ticker(ticker: str, held: dict[str, tuple[float, float | None]]) -> str:
+    """The broker's own spelling of ``ticker`` when the account holds it under a case variant."""
+    from dourmouse import order_guard
+
+    if ticker in held:
+        return ticker
+    folded = [t for t in held if t.casefold() == ticker.casefold()]
+    if len(folded) > 1:
+        raise order_guard.OrderRefused(f"order not placed: {ticker!r} matches several held tickers {folded}")
+    return folded[0] if folded else ticker
+
+
+def _guard_order(base: str, key: str, order: dict[str, Any]) -> str:
+    """Run the trading guardrails (P4-24) on a normalised order. Raises order_guard.OrderRefused;
+    returns the ticker spelled as the broker spells it, which is what must be sent."""
     from dourmouse import order_guard
     from dourmouse.guardrails import Side
 
     try:
-        qty = float(quantity)
-    except (TypeError, ValueError):
-        raise order_guard.OrderRefused(f"order not placed: quantity must be a number, got {quantity!r}") from None
-    if qty == 0 or qty != qty:
-        raise order_guard.OrderRefused(f"order not placed: quantity must be non-zero, got {quantity!r}")
-    try:
-        equity, held = _account_state(base, key)
+        equity, held, problems = _account_state(base, key)
     except RuntimeError as exc:
         raise order_guard.OrderRefused(
             f"order not placed: could not read the account to check the risk limits ({exc})"
         ) from exc
-    # T212 sells are negative quantities. The price that sizes the check is the order's own limit /
-    # stop price, else the current price of a position already held; a MARKET order for a ticker
-    # that is not held has no known price and is refused.
-    price = None
-    for candidate in (limit_price, stop_price):
-        if candidate is not None:
-            price = candidate
-            break
-    if price is None and ticker in held:
-        price = held[ticker][1]
-    if price is None:
+    ticker = _broker_ticker(order["ticker"], held)
+    qty = order["quantity"]
+    side = Side.SELL if qty < 0 else Side.BUY  # T212 sells are negative quantities
+    env = "live" if base == _BASE_LIVE else "demo"
+    held_qty, held_price = held.get(ticker, (0.0, None))
+    if order_guard.is_pure_reduction(side, abs(qty), held_qty):
+        # W3R-2: closing or trimming what the broker says is held is allowed even with the kill
+        # switch tripped or other account data missing; nothing here can add exposure.
+        order_guard.approve_reduction(f"t212:{env}", ticker, side, abs(qty), held_qty, equity)
+        return ticker
+    if problems or equity is None:
         raise order_guard.OrderRefused(
-            f"order not placed: {ticker} is not held and the order has no limit or stop price, so its "
+            "order not placed: could not read the account to check the risk limits ("
+            + "; ".join(problems or ["no account total"]) + "). Only an order that reduces a position "
+            "the broker reports can go ahead without that."
+        )
+    # W3R-3: size with the highest price the order could fill at. A MARKET order takes no price of
+    # its own, so only the broker's current price of a held ticker can size it.
+    candidates = [p for p in (order["limitPrice"], order["stopPrice"], held_price) if p is not None]
+    if not candidates:
+        raise order_guard.OrderRefused(
+            f"order not placed: {ticker} is not held and a MARKET order has no price of its own, so its "
             "size cannot be checked against the risk limits. Place a LIMIT order with limit_price."
         )
-    env = "live" if base == _BASE_LIVE else "demo"
-    order_guard.enforce(
-        f"t212:{env}", ticker, Side.SELL if qty < 0 else Side.BUY, abs(qty), price, equity,
-        {t: v for t, (v, _) in held.items()},
-    )
+    held_values = {t: q * p for t, (q, p) in held.items() if p is not None}
+    order_guard.enforce(f"t212:{env}", ticker, side, abs(qty), max(candidates), equity, held_values)
+    return ticker
 
 
 def t212_order(
@@ -291,10 +384,13 @@ def t212_order(
     T212_ALLOW_LIVE=1 double gate. On demo this is genuine paper trading
     against T212's practice account — a real market order executes there.
 
-    Before anything is sent, ``order_guard.enforce`` runs the trading
-    guardrails against the live account; a breach (or an account that cannot
-    be read) raises ``order_guard.OrderRefused`` (a ValueError) and the order
-    endpoint is never contacted.
+    The order fields are validated first (order type in MARKET, LIMIT, STOP,
+    STOP_LIMIT; only the price fields that type uses; finite numbers). Then
+    ``order_guard`` runs the trading guardrails against the live account; a
+    breach (or an account that cannot be read, unless the order only reduces
+    a held position) raises ``order_guard.OrderRefused`` (a ValueError) and
+    the order endpoint is never contacted. The payload carries exactly the
+    normalised values the guard checked.
     """
     base, key = _config()
     # Literally True: the value is model-supplied, and a truthy string such as
@@ -312,16 +408,9 @@ def t212_order(
                 "live order blocked: set T212_CONFIRM_LIVE=1 as the final "
                 "explicit confirmation before real-money orders."
             )
-    _guard_order(base, key, ticker, quantity, order_type, limit_price, stop_price)
-    payload: dict[str, Any] = {
-        "ticker": ticker,
-        "quantity": quantity,
-        "type": order_type,
-    }
-    if limit_price is not None:
-        payload["limitPrice"] = limit_price
-    if stop_price is not None:
-        payload["stopPrice"] = stop_price
+    order = _normalise_order(ticker, quantity, order_type, limit_price, stop_price)
+    order["ticker"] = _guard_order(base, key, order)
+    payload = {k: v for k, v in order.items() if v is not None}
     return _request(base, key, "/api/v0/equity/orders", payload)
 
 
@@ -397,13 +486,14 @@ def build_t212_tool_specs() -> list[Any]:
             "paper_confirm=true, and live requires the double gate. Demo "
             "executes against the practice account. The trading guardrails "
             "(position size, daily-loss kill switch) are checked first and a "
-            "breach refuses the order; a MARKET order for a ticker not held "
-            "needs a limit_price (use LIMIT) so it can be sized. REQUIRES human "
-            "confirmation before it places any order.",
+            "breach refuses the order (an order that only reduces a held "
+            "position is still allowed). A MARKET order takes no limit_price or "
+            "stop_price, and for a ticker not held it cannot be sized: use LIMIT "
+            "with limit_price. REQUIRES human confirmation before it places any order.",
             _wrap(t212_order),
             {
                 "ticker": {"type": "string", "description": "Instrument ticker, e.g. AAPL, VOO"},
-                "quantity": {"type": "number", "description": "Number of shares"},
+                "quantity": {"type": "number", "description": "Number of shares; negative to sell"},
                 "order_type": {"type": "string", "description": "MARKET (default) | LIMIT | STOP | STOP_LIMIT"},
                 "limit_price": {"type": "number", "description": "Required for LIMIT/STOP_LIMIT"},
                 "stop_price": {"type": "number", "description": "Required for STOP/STOP_LIMIT"},
