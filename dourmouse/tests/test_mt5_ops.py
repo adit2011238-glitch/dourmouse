@@ -101,6 +101,9 @@ class _FakeMT5:
     def positions_get(self):
         return [_FakePosition()]
 
+    def orders_get(self):  # FIX-R4 (R4-1): the guard now reads pending orders; none here
+        return ()
+
     def order_send(self, request):
         return _FakeResult()
 

@@ -27,7 +27,16 @@ Honest rules (2.1 / 2.2 / 2.8):
   with the highest price the order could fill at: the held position's
   current price and the order's own limit / stop price; a MARKET order
   takes no price of its own (W3R-3), so a MARKET order for a ticker you do
-  not hold has no known price and is refused: use a LIMIT order.
+  not hold has no known price and is refused: use a LIMIT order. A plain
+  STOP order becomes a market order when it triggers, so it is treated the
+  same way (sized at the larger of its stop price and the held price, and
+  refused for a ticker not held: use STOP_LIMIT or LIMIT) (R4-3).
+- Orders the broker has accepted but not filled (queued market orders,
+  resting limit and stop orders) count as exposure before they fill and use
+  up the quantity a SELL may reduce; if the order list cannot be read, every
+  order that is not a plain reduction of a held position is refused (R4-1).
+- The check and the send run inside one lock (``order_guard.order_section``),
+  so two orders are never approved against the same account snapshot (R4-5).
 
 Scope honesty: the official API covers Invest/ISA *equity* accounts
 (stocks/ETFs) — it does NOT expose CFDs, so the commodity-seasonal CFD
@@ -45,7 +54,7 @@ import os
 import re
 import urllib.error
 import urllib.request
-from typing import Any
+from typing import Any, NamedTuple
 
 _API_KEY_ENV = "T212_API_KEY"
 _API_KEY_DEMO_ENV = "T212_API_KEY_DEMO"
@@ -202,7 +211,10 @@ def _number(obj: Any, names: tuple[str, ...]) -> float | None:
         for name in names:
             v = obj.get(name)
             if isinstance(v, (int, float)) and not isinstance(v, bool) and v == v and abs(v) != float("inf"):
-                return float(v)
+                try:
+                    return float(v)
+                except OverflowError:  # an integer too big for a float is not a usable number
+                    return None
     return None
 
 
@@ -217,18 +229,126 @@ _PRICE_FIELDS = {
 _TICKER_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 
 
-def _account_state(base: str, key: str) -> tuple[float | None, dict[str, tuple[float, float | None]], list[str]]:
-    """(account equity or None, {ticker: (quantity, current price or None)}, problems) from the broker.
+class _Pending(NamedTuple):
+    """The broker's queued orders for one ticker: quantities and the value they could fill at."""
+
+    buy_qty: float = 0.0
+    sell_qty: float = 0.0
+    buy_value: float = 0.0
+    sell_value: float = 0.0
+
+
+class _Account(NamedTuple):
+    equity: float | None
+    account_id: str
+    held: dict[str, tuple[float, float | None]]
+    pending: dict[str, _Pending]
+    problems: list[str]
+
+
+#: Order states that no longer rest at the broker; anything else (including an unknown word) still counts.
+_FINISHED_STATES = frozenset({"CANCELLED", "CANCELED", "REJECTED", "EXPIRED", "FILLED"})
+
+
+def _list_reply(raw: Any, what: str, keys: tuple[str, ...]) -> list[Any]:
+    """A broker list reply: a JSON list, or an object with an explicit list under one of ``keys``.
+    A missing body, ``null``, or any other object is an error, never "empty" (R4-2); only an empty
+    list means there is nothing."""
+    if isinstance(raw, list):
+        return raw
+    if isinstance(raw, dict):
+        for name in keys:
+            if isinstance(raw.get(name), list):
+                return raw[name]
+    kind = "no body" if raw is None else type(raw).__name__
+    raise RuntimeError(f"the T212 {what} response is not a list of {what} ({kind})")
+
+
+def _pending_orders(
+    raw: list[Any], held: dict[str, tuple[float, float | None]], problems: list[str],
+) -> dict[str, _Pending]:
+    """Fold the broker's open orders into per-ticker queued quantity and value (R4-1).
+
+    A queued BUY is exposure that has not filled yet. The price it could fill at is the highest of its
+    limit price, its stop price and the held position's current price; an order with none of those
+    (a queued MARKET order for a ticker not held) cannot be valued and is reported as a problem, which
+    refuses every order that is not a plain reduction. Cancelled, rejected, expired and filled orders
+    are skipped; a partly filled order counts only its unfilled rest."""
+    folded = {t.casefold(): t for t in held}
+    out: dict[str, _Pending] = {}
+    for item in raw:
+        if not isinstance(item, dict):
+            problems.append("a T212 pending order is not an object")
+            continue
+        nested = item.get("instrument")
+        instrument: dict[str, Any] = nested if isinstance(nested, dict) else {}
+        name = str(item.get("ticker") or instrument.get("ticker") or "").strip()
+        status = str(item.get("status") or "").strip().upper()
+        if status in _FINISHED_STATES:
+            continue
+        if not name:
+            problems.append(f"cannot read the pending order {item.get('id', '?')!r} (ticker missing)")
+            continue
+        ticker = folded.get(name.casefold(), name)
+        qty = _number(item, ("quantity",))
+        value = _number(item, ("value",))
+        side_word = str(item.get("side") or "").strip().upper()
+        if side_word in ("BUY", "SELL"):
+            sign = 1 if side_word == "BUY" else -1
+        elif qty is not None and qty != 0:
+            sign = 1 if qty > 0 else -1
+        elif value is not None and value != 0:
+            sign = 1 if value > 0 else -1
+        else:
+            problems.append(f"cannot tell whether the pending order for {ticker} buys or sells")
+            continue
+        _held_qty, held_price = held.get(ticker, (0.0, None))
+        prices = [p for p in (_number(item, ("limitPrice",)), _number(item, ("stopPrice",)), held_price)
+                  if p is not None and p > 0]
+        if qty is not None and qty != 0:
+            left = abs(qty)
+            filled = _number(item, ("filledQuantity",))
+            if filled is not None and 0 < abs(filled) < left:
+                left -= abs(filled)
+            elif filled is not None and abs(filled) >= left:
+                continue  # nothing left to fill
+            notional = left * max(prices) if prices else (abs(value) if value else None)
+        elif value:
+            left, notional = 0.0, abs(value)  # a value-based order: no share count, only an amount
+        else:
+            problems.append(f"cannot size the pending order for {ticker} (no quantity or value)")
+            continue
+        if notional is None:
+            problems.append(
+                f"cannot value the pending {'BUY' if sign > 0 else 'SELL'} order for {ticker} "
+                "(no limit price, stop price or held price)"
+            )
+            notional = 0.0
+        old = out.get(ticker, _Pending())
+        out[ticker] = (
+            old._replace(buy_qty=old.buy_qty + left, buy_value=old.buy_value + notional) if sign > 0
+            else old._replace(sell_qty=old.sell_qty + left, sell_value=old.sell_value + notional)
+        )
+    return out
+
+
+def _account_state(base: str, key: str) -> _Account:
+    """The account as the broker reports it: equity (or None), an account id, {ticker: (quantity, current
+    price or None)}, the queued orders per ticker, and a list of problems.
 
     The key names tried are the ones the T212 account and positions payloads use. A positions
-    response that cannot be read at all raises (no order can then be judged, not even a close);
-    anything narrower (no equity, one position without a price) is returned as a problem, so a
-    pure reduction of a position the broker does report can still go ahead (W3R-2) while every
-    other order is refused."""
+    response that cannot be read at all raises (no order can then be judged, not even a close); a
+    reply that is not a list of positions counts as unreadable, never as "no positions" (R4-2).
+    Anything narrower (no equity, one position without a price, an order list that cannot be read) is
+    returned as a problem, so a pure reduction of a position the broker does report can still go ahead
+    (W3R-2) while every other order is refused."""
     problems: list[str] = []
     equity: float | None = None
+    account_id = ""
     try:
         info = _request(base, key, "/api/v0/equity/account/info")
+        if isinstance(info, dict) and isinstance(info.get("id"), (int, str)) and not isinstance(info.get("id"), bool):
+            account_id = str(info["id"]).strip()
         equity = _number(info, ("totalValue", "total", "equity", "accountValue"))
         if equity is None:
             cash = _request(base, key, "/api/v0/equity/account/cash")
@@ -237,13 +357,7 @@ def _account_state(base: str, key: str) -> tuple[float | None, dict[str, tuple[f
             problems.append("no account total (totalValue / total / equity) in the T212 account response")
     except RuntimeError as exc:
         problems.append(f"the account total could not be read ({exc})")
-    raw = _request(base, key, "/api/v0/equity/positions")
-    if isinstance(raw, dict):
-        raw = raw.get("items", raw.get("positions"))
-    if raw is None:
-        raw = []
-    if not isinstance(raw, list):
-        raise RuntimeError("the T212 positions response is not a list")
+    raw = _list_reply(_request(base, key, "/api/v0/equity/positions"), "positions", ("items", "positions"))
     held: dict[str, tuple[float, float | None]] = {}
     for item in raw:
         if not isinstance(item, dict):
@@ -261,7 +375,13 @@ def _account_state(base: str, key: str) -> tuple[float | None, dict[str, tuple[f
             problems.append(f"cannot value the position {ticker} (currentPrice missing)")
         old_qty, old_price = held.get(ticker, (0.0, None))
         held[ticker] = (old_qty + qty, price if price is not None else old_price)
-    return equity, held, problems
+    pending: dict[str, _Pending] = {}
+    try:
+        orders = _list_reply(_request(base, key, "/api/v0/equity/orders"), "orders", ("items", "orders"))
+        pending = _pending_orders(orders, held, problems)
+    except RuntimeError as exc:
+        problems.append(f"the pending orders could not be read ({exc})")
+    return _Account(equity, account_id, held, pending, problems)
 
 
 def _order_number(value: Any, name: str, *, positive: bool) -> float | None:
@@ -275,7 +395,7 @@ def _order_number(value: Any, name: str, *, positive: bool) -> float | None:
         raise order_guard.OrderRefused(f"order not placed: {name} must be a number, got {value!r}")
     try:
         number = float(value)
-    except ValueError:
+    except (ValueError, OverflowError):  # OverflowError: an integer too big for a float
         raise order_guard.OrderRefused(f"order not placed: {name} must be a number, got {value!r}") from None
     if number != number or abs(number) == float("inf"):
         raise order_guard.OrderRefused(f"order not placed: {name} must be a finite number, got {value!r}")
@@ -317,13 +437,14 @@ def _normalise_order(
     return {"ticker": name, "quantity": qty, "type": kind, "limitPrice": limit, "stopPrice": stop}
 
 
-def _broker_ticker(ticker: str, held: dict[str, tuple[float, float | None]]) -> str:
-    """The broker's own spelling of ``ticker`` when the account holds it under a case variant."""
+def _broker_ticker(ticker: str, known: Any) -> str:
+    """The broker's own spelling of ``ticker`` when the account holds or has queued it under a case variant.
+    ``known`` is any collection of the broker's ticker names."""
     from dourmouse import order_guard
 
-    if ticker in held:
+    if ticker in known:
         return ticker
-    folded = [t for t in held if t.casefold() == ticker.casefold()]
+    folded = [t for t in known if t.casefold() == ticker.casefold()]
     if len(folded) > 1:
         raise order_guard.OrderRefused(f"order not placed: {ticker!r} matches several held tickers {folded}")
     return folded[0] if folded else ticker
@@ -336,20 +457,27 @@ def _guard_order(base: str, key: str, order: dict[str, Any]) -> str:
     from dourmouse.guardrails import Side
 
     try:
-        equity, held, problems = _account_state(base, key)
+        account = _account_state(base, key)
     except RuntimeError as exc:
         raise order_guard.OrderRefused(
             f"order not placed: could not read the account to check the risk limits ({exc})"
         ) from exc
-    ticker = _broker_ticker(order["ticker"], held)
+    equity, held, pending, problems = account.equity, account.held, account.pending, account.problems
+    ticker = _broker_ticker(order["ticker"], set(held) | set(pending))
     qty = order["quantity"]
     side = Side.SELL if qty < 0 else Side.BUY  # T212 sells are negative quantities
     env = "live" if base == _BASE_LIVE else "demo"
+    account_key = f"t212:{env}:{account.account_id}" if account.account_id else f"t212:{env}"
     held_qty, held_price = held.get(ticker, (0.0, None))
-    if order_guard.is_pure_reduction(side, abs(qty), held_qty):
-        # W3R-2: closing or trimming what the broker says is held is allowed even with the kill
-        # switch tripped or other account data missing; nothing here can add exposure.
-        order_guard.approve_reduction(f"t212:{env}", ticker, side, abs(qty), held_qty, equity)
+    queued = pending.get(ticker, _Pending())
+    # R4-1: what is already queued in the closing direction is spoken for, so two resting SELL LIMITs of
+    # the whole holding are not each a reduction. (An order list that could not be read adds nothing here:
+    # a reduction cannot add exposure by itself, and closing a loser must stay possible.)
+    reducible = order_guard.reducible_quantity(held_qty, queued.buy_qty, queued.sell_qty)
+    if order_guard.is_pure_reduction(side, abs(qty), reducible):
+        # W3R-2: closing or trimming what the broker says is held is allowed even with the kill switch
+        # tripped or other account data missing; nothing here can add exposure.
+        order_guard.approve_reduction(account_key, ticker, side, abs(qty), reducible, equity)
         return ticker
     if problems or equity is None:
         raise order_guard.OrderRefused(
@@ -360,13 +488,31 @@ def _guard_order(base: str, key: str, order: dict[str, Any]) -> str:
     # W3R-3: size with the highest price the order could fill at. A MARKET order takes no price of
     # its own, so only the broker's current price of a held ticker can size it.
     candidates = [p for p in (order["limitPrice"], order["stopPrice"], held_price) if p is not None]
+    if order["type"] == "STOP" and held_price is None:
+        # R4-3: a STOP order turns into a market order when it triggers, and the stop price does not
+        # bound the price it fills at (a buy stop below the market may fill at once at the market).
+        raise order_guard.OrderRefused(
+            f"order not placed: a STOP order for {ticker} becomes a market order when it triggers, and "
+            f"{ticker} is not held so its market price is unknown; the stop price cannot size the risk. "
+            "Use a STOP_LIMIT or LIMIT order with limit_price."
+        )
     if not candidates:
         raise order_guard.OrderRefused(
             f"order not placed: {ticker} is not held and a MARKET order has no price of its own, so its "
             "size cannot be checked against the risk limits. Place a LIMIT order with limit_price."
         )
-    held_values = {t: q * p for t, (q, p) in held.items() if p is not None}
-    order_guard.enforce(f"t212:{env}", ticker, side, abs(qty), max(candidates), equity, held_values)
+    sizing_price = max(candidates)
+    trade_value = abs(qty) * sizing_price * (1 if side == Side.BUY else -1)
+    held_values: dict[str, float] = {}
+    for name in set(held) | set(pending):
+        held_qty_n, price_n = held.get(name, (0.0, None))
+        if price_n is None and held_qty_n:
+            continue  # reported as a problem above, so never reached
+        q = pending.get(name, _Pending())
+        held_values[name] = order_guard.worst_case_value(
+            held_qty_n * (price_n or 0.0), q.buy_value, q.sell_value, trade_value if name == ticker else 0.0,
+        )
+    order_guard.enforce(account_key, ticker, side, abs(qty), sizing_price, equity, held_values)
     return ticker
 
 
@@ -409,9 +555,14 @@ def t212_order(
                 "explicit confirmation before real-money orders."
             )
     order = _normalise_order(ticker, quantity, order_type, limit_price, stop_price)
-    order["ticker"] = _guard_order(base, key, order)
-    payload = {k: v for k, v in order.items() if v is not None}
-    return _request(base, key, "/api/v0/equity/orders", payload)
+    from dourmouse import order_guard
+
+    # R4-5: the check and the send are one critical section; the next order reads the account only
+    # after this one's answer (or its unknown status) is in.
+    with order_guard.order_section():
+        order["ticker"] = _guard_order(base, key, order)
+        payload = {k: v for k, v in order.items() if v is not None}
+        return _request(base, key, "/api/v0/equity/orders", payload)
 
 
 # --------------------------------------------------------------------------- #
@@ -427,6 +578,26 @@ def _wrap(fn):
         except (ValueError, RuntimeError) as exc:
             return f"ERROR: {exc}"
     return tool
+
+
+def _confirm_prompt(a: dict[str, Any]) -> str:
+    """The question the owner answers before an order: environment, side, size, type and every price,
+    so an approval for one order text cannot be reused for another price (R4-9)."""
+    env = (os.environ.get(_ENV_ENV, "demo").strip().lower() or "demo").upper()
+    raw_qty = a.get("quantity", "?")
+    try:
+        number = float(raw_qty)
+        side, amount = ("SELL" if number < 0 else "BUY"), f"{abs(number):g}"
+    except (TypeError, ValueError, OverflowError):
+        side, amount = "?", str(raw_qty)
+    prices = "".join(
+        f", {label} {a[field]}" for label, field in (("limit", "limit_price"), ("stop", "stop_price"))
+        if a.get(field) is not None
+    )
+    return (
+        f"Place T212 {env} order: {side} {amount} shares of {a.get('ticker', '?')}, "
+        f"type {a.get('order_type') or 'MARKET'}{prices}?"
+    )
 
 
 def build_t212_tool_specs() -> list[Any]:
@@ -500,10 +671,6 @@ def build_t212_tool_specs() -> list[Any]:
                 "paper_confirm": {"type": "boolean", "description": "Must be true to place any order (paper-first)"},
             },
             permission=Permission.REQUIRES_CONFIRMATION,
-            confirm_prompt=lambda a: (
-                f"Place T212 order: {a.get('order_type', 'MARKET')} "
-                f"{a.get('quantity', '?')} shares of {a.get('ticker', '?')}? "
-                "(practice account unless T212 live is explicitly opened)"
-            ),
+            confirm_prompt=_confirm_prompt,
         ),
     ]

@@ -48,6 +48,23 @@ Honest limits, stated where they matter:
   command the owner approved through run_privileged_command.
 * Two instruments that are the same underlying under different broker
   symbols are counted as two positions.
+* Deposits and withdrawals are not seen: a mid-day deposit hides a loss
+  and a withdrawal can trip the switch falsely, because the baseline is
+  just the first equity the guard saw that day (R4-12).
+* The signed state carries a counter (``_seq``) that is also kept in
+  ``order_guard.seq``, so restoring only an older copy of the state file is
+  refused. Restoring the whole folder from a backup restores both and
+  cannot be told apart from the real thing (R4-12).
+
+Pending orders (R4-1). The callers add the orders the broker reports as
+open or queued to what the account holds: a pending BUY counts as exposure
+before it fills, a pending SELL is subtracted from what a new SELL may
+reduce, and an order list that cannot be read makes every non-reduction
+refuse (see :func:`worst_case_value` and :func:`reducible_quantity`).
+
+One order at a time (R4-5). :func:`order_section` is held by the callers
+from the check right through the broker's answer, across threads and
+processes, so two orders can never be approved against the same snapshot.
 """
 
 from __future__ import annotations
@@ -60,10 +77,12 @@ import logging
 import math
 import os
 import secrets
+import stat
 import sys
 import threading
+import time
 from collections.abc import Iterator
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -85,14 +104,18 @@ except ImportError:  # Windows: the MT5 terminal's home; msvcrt is used instead
     fcntl = None  # type: ignore[assignment]
 
 __all__ = [
+    "ORDER_LOCK_WAIT_SECONDS",
     "OrderRefused",
     "approve_reduction",
     "check_mt5_order",
     "enforce",
     "is_pure_reduction",
+    "order_section",
     "protected_paths",
+    "reducible_quantity",
     "rearm",
     "state_path",
+    "worst_case_value",
 ]
 
 _LOG = logging.getLogger(__name__)
@@ -102,6 +125,13 @@ _STATE_NAME = "order_guard_state.json"
 _KEY_NAME = "order_guard.key"
 _LOCK_NAME = "order_guard.lock"
 _MAC_FIELD = "_mac"
+_SEQ_NAME = "order_guard.seq"
+_SEND_LOCK_NAME = "order_guard.send.lock"
+#: How long an order waits for another order's check-and-send to finish before it refuses.
+ORDER_LOCK_WAIT_SECONDS = 30.0
+_LEGACY_MAX_BYTES = 64 * 1024
+_QTY_TOLERANCE = 1 + 1e-9
+_AUDIT_KEEP = 20
 _REARM_HINT = "re-arm from a terminal with `python -m dourmouse.order_guard rearm`"
 #: MetaTrader 5 ``account_info().margin_mode`` values where one symbol has one net
 #: position (ACCOUNT_MARGIN_MODE_RETAIL_NETTING, ACCOUNT_MARGIN_MODE_EXCHANGE).
@@ -129,6 +159,14 @@ def _lock_path() -> Path:
     return _guard_dir() / _LOCK_NAME
 
 
+def _send_lock_path() -> Path:
+    return _guard_dir() / _SEND_LOCK_NAME
+
+
+def _seq_path() -> Path:
+    return _guard_dir() / _SEQ_NAME
+
+
 def _legacy_state_path() -> Path:
     """Where wave 2b kept the state: the workspace, which the model's file tools can write."""
     return config.workspace_dir() / _STATE_NAME
@@ -136,7 +174,7 @@ def _legacy_state_path() -> Path:
 
 def protected_paths() -> tuple[Path, ...]:
     """The guard's own files. The model's file tools must never write, edit or delete them."""
-    return (state_path(), _key_path(), _lock_path(), _legacy_state_path())
+    return (state_path(), _key_path(), _lock_path(), _send_lock_path(), _seq_path(), _legacy_state_path())
 
 
 @contextlib.contextmanager
@@ -164,6 +202,76 @@ def _locked() -> Iterator[None]:
             os.close(fd)  # closing the descriptor releases the flock / msvcrt lock
 
 
+_SEND_LOCK = threading.Lock()
+
+
+@contextlib.contextmanager
+def order_section(timeout: float | None = None) -> Iterator[None]:
+    """Hold this around the whole check-and-send of one order (R4-5).
+
+    Two orders checked at the same moment would each pass against the same account snapshot and then
+    both be sent (two BUYs each under the limit, two SELLs that are each "the whole long"). The caller
+    takes this lock before it reads the account and keeps it until the broker has answered, so the
+    next order sees what this one did. It works across threads and processes (a lock file in the
+    settings folder) and gives up after ``timeout`` seconds, refusing the order instead of waiting
+    for ever: the other order may still be in flight, so the message says to look before retrying.
+    Not re-entrant: the check functions inside take their own short state lock, a different file."""
+    wait = ORDER_LOCK_WAIT_SECONDS if timeout is None else timeout
+    deadline = time.monotonic() + wait
+    busy = (
+        f"order not placed: another order is being checked or sent (waited {wait:g}s). Nothing was sent by "
+        "this call. If that order's result is unknown, look at the broker's positions and open orders before "
+        "trying again."
+    )
+    if not _SEND_LOCK.acquire(timeout=max(wait, 0)):
+        raise OrderRefused(busy)
+    fd = -1
+    try:
+        path = _send_lock_path()
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+        except OSError as exc:
+            raise OrderRefused(f"order not placed: could not open the order lock {path} ({exc})") from exc
+        while True:
+            try:
+                if fcntl is not None:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                else:
+                    import msvcrt
+
+                    msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+                break
+            except OSError as exc:
+                if time.monotonic() >= deadline:
+                    raise OrderRefused(busy) from exc
+                time.sleep(0.05)
+        yield
+    finally:
+        if fd >= 0:
+            os.close(fd)  # closing the descriptor releases the lock
+        _SEND_LOCK.release()
+
+
+def _fresh_key_file(path: Path) -> bytes:
+    """Create the key at ``path`` so that a half-written key never exists under its final name:
+    write a temp file, fsync it, then ``os.link`` it into place (which fails if the key appeared meanwhile)."""
+    key = secrets.token_bytes(32)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.{secrets.token_hex(4)}.tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(key.hex().encode("ascii") + b"\n")
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.link(tmp, path)
+    finally:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+    return key
+
+
 def _read_key(create: bool) -> bytes | None:
     """The HMAC key, or None when it does not exist and ``create`` is False."""
     path = _key_path()
@@ -172,17 +280,12 @@ def _read_key(create: bool) -> bytes | None:
     except FileNotFoundError:
         if not create:
             return None
-        path.parent.mkdir(parents=True, exist_ok=True)
-        key = secrets.token_bytes(32)
         try:
-            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            return _fresh_key_file(path)
         except FileExistsError:
             return _read_key(create=False)
-        with os.fdopen(fd, "wb") as fh:
-            fh.write(key.hex().encode("ascii") + b"\n")
-            fh.flush()
-            os.fsync(fh.fileno())
-        return key
+        except OSError as exc:
+            raise OrderRefused(f"order not placed: the guardrail key {path} cannot be created ({exc})") from exc
     except OSError as exc:
         raise OrderRefused(f"order not placed: the guardrail key {path} cannot be read ({exc})") from exc
     try:
@@ -199,17 +302,40 @@ def _mac(key: bytes, state: dict[str, Any]) -> str:
     return hmac.new(key, body.encode("utf-8"), hashlib.sha256).hexdigest()
 
 
+def _read_legacy_text(path: Path) -> str:
+    """The old workspace file's text, read without ever blocking or growing without bound (R4-11).
+
+    The path is writable by the model's sandbox, so it may be a FIFO, a symlink to /dev/zero or a huge
+    file: open it non-blocking and without following a symlink, accept only a regular file of at most
+    64 KB, and read at most that much. Raises OSError for anything else."""
+    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(path, flags)
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
+            raise OSError(f"{path} is not a regular file")
+        if info.st_size > _LEGACY_MAX_BYTES:
+            raise OSError(f"{path} is larger than {_LEGACY_MAX_BYTES} bytes")
+        raw = os.read(fd, _LEGACY_MAX_BYTES + 1)
+    finally:
+        os.close(fd)
+    if len(raw) > _LEGACY_MAX_BYTES:
+        raise OSError(f"{path} is larger than {_LEGACY_MAX_BYTES} bytes")
+    return raw.decode("utf-8")
+
+
 def _legacy_state() -> dict[str, Any]:
     """First run after the move out of the workspace: carry over a latched switch, nothing else.
 
     The old file was writable by the model's tools, so its baselines are not trusted; an unreadable
-    old file counts as latched (it may have been broken on purpose to forget a latch)."""
+    old file (a FIFO, a symlink, an oversized or non-text file included) counts as latched, since it
+    may have been broken on purpose to forget a latch. Remove this read one release after wave 2c."""
     path = _legacy_state_path()
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(_read_legacy_text(path))
     except FileNotFoundError:
         return {}
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):  # ValueError covers bad JSON and bad UTF-8
         return {"tripped": True, "tripped_reason": f"the old guardrail state {path} could not be read"}
     if not isinstance(data, dict):
         return {"tripped": True, "tripped_reason": f"the old guardrail state {path} is not a JSON object"}
@@ -250,7 +376,24 @@ def _load_state() -> dict[str, Any]:
             f"order not placed: the guardrail state file {path} failed its integrity check (it was changed "
             f"outside the order guard); {_REARM_HINT} after checking why."
         )
+    anchor = _read_seq()
+    seq = data.get("_seq")
+    if anchor and (isinstance(seq, bool) or not isinstance(seq, int) or seq < anchor):
+        raise OrderRefused(
+            f"order not placed: the guardrail state file {path} is an older copy than the last one this "
+            f"computer wrote (counter {seq!r}, expected at least {anchor}); a restored backup could bring back "
+            f"an unlatched switch, so {_REARM_HINT} after checking why."
+        )
     return data
+
+
+def _read_seq() -> int:
+    """The highest state counter this computer has written (0 when none yet). A damaged file reads as 0:
+    the signed state is still checked, and the counter is only an extra guard against an old copy."""
+    try:
+        return max(int(_seq_path().read_text(encoding="ascii").strip()), 0)
+    except (OSError, ValueError):
+        return 0
 
 
 def _save_state(state: dict[str, Any]) -> None:
@@ -262,27 +405,96 @@ def _save_state(state: dict[str, Any]) -> None:
         key = _read_key(create=True)
         if key is None:
             raise OSError(f"the guardrail key {_key_path()} disappeared while it was being created")
+        previous = state.get("_seq")
+        seq = max(previous if isinstance(previous, int) and not isinstance(previous, bool) else 0, _read_seq()) + 1
+        state["_seq"] = seq
+        state.setdefault("_created", datetime.now().isoformat(timespec="seconds"))
         signed = dict(state)
         signed[_MAC_FIELD] = _mac(key, state)
         atomic_write_text(state_path(), json.dumps(signed, indent=1, sort_keys=True) + "\n", mode=0o600)
+        atomic_write_text(_seq_path(), f"{seq}\n", mode=0o600)
     except OSError as exc:
         raise OrderRefused(f"order not placed: could not record the guardrail state ({exc})") from exc
 
 
-def rearm() -> None:
-    """Manual re-arm of the kill switch: the only way to clear a latched one.
+def _aside(path: Path) -> Path:
+    """Move ``path`` to ``<name>.bad-<stamp>`` (never onto an existing file) and return the new path."""
+    stamp = time.strftime("%Y%m%dT%H%M%S")
+    aside = path.with_name(f"{path.name}.bad-{stamp}")
+    n = 1
+    while aside.exists():
+        aside = path.with_name(f"{path.name}.bad-{stamp}-{n}")
+        n += 1
+    os.replace(path, aside)
+    return aside
 
-    A state file that is damaged, unsigned or missing is replaced by a fresh signed one (its
-    baselines are not trusted); a valid one keeps its baselines."""
+
+def _audit(state: dict[str, Any], what: str) -> None:
+    """Add one line to the signed audit trail inside the state (and to the log)."""
+    _LOG.warning("order guard audit: %s", what)
+    trail = state.get("audit")
+    trail = list(trail) if isinstance(trail, list) else []
+    trail.append({"at": datetime.now().isoformat(timespec="seconds"), "what": what})
+    state["audit"] = trail[-_AUDIT_KEEP:]
+
+
+def rearm(*, reset_baseline: bool = False) -> list[str]:
+    """Manual re-arm of the kill switch: the only way to clear a latched one. Returns lines to show the owner.
+
+    A valid state keeps its baselines, so a loss that already tripped the switch trips it again on the
+    next order unless the limit is raised or a new day starts; ``reset_baseline`` (an explicit, audited
+    choice) forgets today's baseline instead. A state file that is damaged, unsigned or missing is replaced
+    by a fresh signed one, and a key file that is empty, short or unreadable is moved aside
+    (``order_guard.key.bad-<time>``) and replaced, because nothing signed with it can be trusted (R4-4).
+    That also loses today's baseline, which is said out loud and written to the audit trail (R4-8)."""
+    notes: list[str] = [f"state file: {state_path()}"]
     with _locked():
         try:
             state = _load_state()
+            usable = True
         except OrderRefused as exc:
             _LOG.warning("order guard re-armed over an unusable state file: %s", exc)
-            state = {}
+            state, usable = {}, False
+            notes.append(f"the old state was unusable and is replaced: {exc}")
+        if not usable:
+            try:
+                _read_key(create=False)
+            except OrderRefused as exc:
+                try:
+                    moved = _aside(_key_path())
+                except OSError as err:
+                    raise OrderRefused(
+                        f"the guardrail key {_key_path()} is unusable and could not be moved aside ({err}); "
+                        "move or delete it by hand, then run rearm again"
+                    ) from err
+                notes.append(f"the key was unusable ({exc}); moved aside to {moved} and replaced")
+            if state_path().exists():
+                try:
+                    notes.append(f"the damaged state file was moved aside to {_aside(state_path())}")
+                except OSError as err:
+                    _LOG.warning("could not move the damaged guard state aside (%s); it is overwritten", err)
+            _audit(state, "re-armed over an unusable guard state; today's start-of-day baseline was lost "
+                          "and restarts from the next order's equity")
+            notes.append("today's start-of-day baseline was lost: the daily loss limit now counts from the "
+                         "equity of the next order, not from this morning")
+        else:
+            was_tripped = bool(state.get("tripped"))
+            if reset_baseline:
+                state.get("day", {}).pop(date.today().isoformat(), None)
+                _audit(state, "re-armed with --reset-baseline: today's start-of-day baseline was dropped on "
+                              "the owner's request")
+                notes.append("today's baseline was reset: the daily loss limit now counts from the equity of "
+                             "the next order")
+            elif was_tripped:
+                notes.append("the baseline is unchanged: if today's loss still stands the next order trips the "
+                             "switch again. Raise DOURMOUSE_DAILY_LOSS_LIMIT_PCT, wait for tomorrow, or run "
+                             "`rearm --reset-baseline` (recorded in the audit trail) to restart today's baseline")
+            else:
+                notes.append("the kill switch was not tripped")
         state.pop("tripped", None)
         state.pop("tripped_reason", None)
         _save_state(state)
+    return notes
 
 
 def _finite(value: Any, what: str) -> float:
@@ -290,7 +502,7 @@ def _finite(value: Any, what: str) -> float:
         raise OrderRefused(f"order not placed: {what} must be a number, got {value!r}")
     try:
         number = float(value.strip() if isinstance(value, str) else value)
-    except (TypeError, ValueError, AttributeError):
+    except (TypeError, ValueError, AttributeError, OverflowError):
         raise OrderRefused(f"order not placed: {what} must be a number, got {value!r}") from None
     if not math.isfinite(number):
         raise OrderRefused(f"order not placed: {what} must be a finite number, got {value!r}")
@@ -306,9 +518,37 @@ def is_pure_reduction(side: Side, quantity: Any, held_quantity: Any) -> bool:
         return False
     if qty <= 0 or held == 0:
         return False
+    # Lots summed as floats can land a hair under the typed quantity (0.1 + 0.7 is 0.7999999999999999,
+    # a full close of 0.8 must still count), so the HELD side gets a tiny relative allowance (R4-10).
     if side == Side.SELL:
-        return held > 0 and qty <= held
-    return held < 0 and qty <= -held
+        return held > 0 and qty <= held * _QTY_TOLERANCE
+    return held < 0 and qty <= -held * _QTY_TOLERANCE
+
+
+def reducible_quantity(held: Any, pending_buy: Any = 0.0, pending_sell: Any = 0.0) -> float:
+    """What a new order may still shrink: the held quantity (signed) after the orders the broker already
+    has queued in the closing direction (R4-1). Two resting SELL LIMITs of the whole long are not each a
+    reduction: the second finds nothing left. Zero when nothing is left to reduce."""
+    h, buys, sells = _finite(held, "held quantity"), _finite(pending_buy, "pending buy"), _finite(pending_sell, "pending sell")
+    if h > 0:
+        return max(h - sells, 0.0)
+    if h < 0:
+        return min(h + buys, 0.0)
+    return 0.0
+
+
+def worst_case_value(
+    held_value: Any, pending_buy_value: Any = 0.0, pending_sell_value: Any = 0.0, trade_value: Any = 0.0,
+) -> float:
+    """The signed value of a holding if the broker's queued orders fill the way that increases exposure the
+    most (R4-1): queued BUYs fill and queued SELLs are cancelled, or the queued SELLs fill and the BUYs are
+    cancelled. ``trade_value`` is the signed value of the order being checked; the scenario in which that
+    order leaves the largest exposure is the one returned."""
+    held = _finite(held_value, "held value")
+    trade = _finite(trade_value, "trade value")
+    up = held + _finite(pending_buy_value, "pending buy value")
+    down = held - _finite(pending_sell_value, "pending sell value")
+    return up if abs(up + trade) >= abs(down + trade) else down
 
 
 def _note_baseline(account_key: str, equity: Any) -> tuple[bool, str]:
@@ -423,6 +663,26 @@ def _mt5_signed_volume(p: Any) -> float:
     return volume if getattr(p, "type", None) == 0 else -volume
 
 
+#: MetaTrader 5 order types that buy (BUY, BUY_LIMIT, BUY_STOP, BUY_STOP_LIMIT) and sell (the odd ones).
+_MT5_BUY_ORDER_TYPES = frozenset({0, 2, 4, 6})
+_MT5_SELL_ORDER_TYPES = frozenset({1, 3, 5, 7})
+
+
+def _mt5_pending_orders(mt5mod: Any) -> tuple[list[Any] | None, str]:
+    """(orders the terminal reports as pending, "") or (None, why they cannot be listed) (R4-1).
+    None is "unknown", never "none": a non-reduction must refuse on it."""
+    getter = getattr(mt5mod, "orders_get", None)
+    if getter is None:
+        return None, "the terminal module cannot list pending orders"
+    raw = getter()
+    if raw is None:
+        return None, f"the terminal could not read the pending orders ({mt5mod.last_error()})"
+    try:
+        return list(raw), ""
+    except TypeError:
+        return None, "the terminal's pending order list is not a list"
+
+
 def check_mt5_order(
     mt5mod: Any, symbol: str, side: str, volume: Any, price: Any, *, position: int | None = None,
 ) -> RiskDecision:
@@ -432,10 +692,16 @@ def check_mt5_order(
     lots x contract size x price; anything that cannot be sized refuses.
 
     Reductions (W3R-2, W3R-4): an order that names a ``position`` ticket closes (part of) that one
-    position and passes as risk-reducing when it is the opposite side and at most its volume. Without
-    a ticket only a NETTING account can reduce (one net position per symbol); on a hedging account,
-    or when the margin mode is unknown, a plain deal opens a separate position, so every such order
-    counts as adding gross exposure."""
+    position and passes as risk-reducing when it is the opposite side, at most its volume, and does
+    not leave the symbol's NET exposure larger than before (R4-7: closing one leg of a hedge makes a
+    flat net a naked position). Without a ticket only a NETTING account can reduce (one net position
+    per symbol); on a hedging account, or when the margin mode is unknown, a plain deal opens a
+    separate position, so every such order counts as adding gross exposure.
+
+    Pending orders (R4-1): what the terminal reports as pending counts. Queued BUYs add to a symbol's
+    exposure before they fill, queued opposite-side orders use up the volume a reduction may close,
+    and a pending list that cannot be read makes every non-reduction refuse (a reduction still passes:
+    it cannot add exposure by itself)."""
     side_name = str(side).strip().upper()
     if side_name not in ("BUY", "SELL"):
         raise OrderRefused(f"order not placed: side must be BUY or SELL, got {side!r}")
@@ -451,6 +717,28 @@ def check_mt5_order(
     info = mt5mod.account_info()
     account_key = f"mt5:{getattr(info, 'login', '')}"
     equity = getattr(info, "equity", None) if info is not None else None
+    pending, pending_problem = _mt5_pending_orders(mt5mod)
+
+    def pending_volume(sym: str, kinds: frozenset[int], ticket: int | None = None) -> float:
+        total = 0.0
+        for o in pending or []:
+            if getattr(o, "symbol", None) != sym or getattr(o, "type", None) not in kinds:
+                continue
+            if ticket is not None and getattr(o, "position_id", 0) != ticket:
+                continue
+            total += _finite(getattr(o, "volume_current", getattr(o, "volume_initial", None)),
+                             f"the volume of the pending {sym} order")
+        return total
+
+    def reducible(held_lots: float, sym: str, ticket: int | None = None) -> float:
+        # A pending order in the closing direction will use up part of what is left to close.
+        try:
+            return reducible_quantity(held_lots, pending_volume(sym, _MT5_BUY_ORDER_TYPES, ticket),
+                                      pending_volume(sym, _MT5_SELL_ORDER_TYPES, ticket))
+        except OrderRefused:
+            return 0.0  # a pending order that cannot be read: nothing is treated as safely reducible
+
+    net_before = sum(_mt5_signed_volume(p) for p in positions if p.symbol == symbol)
 
     if position is not None:
         pos = next((p for p in positions if getattr(p, "ticket", None) == position), None)
@@ -464,19 +752,30 @@ def check_mt5_order(
                 f"order not placed: an order on position {position} must be the opposite side and at most "
                 f"its volume ({abs(held_lots)} lots, {'long' if held_lots > 0 else 'short'})"
             )
-        return approve_reduction(account_key, symbol, trade_side, lots, held_lots, equity)
+        net_after = net_before + (-lots if held_lots > 0 else lots)
+        leaves_net_larger = abs(net_after) > abs(net_before) * _QTY_TOLERANCE + 1e-12
+        if not leaves_net_larger and is_pure_reduction(trade_side, lots, reducible(held_lots, symbol, position)):
+            return approve_reduction(account_key, symbol, trade_side, lots, held_lots, equity)
+        # Closing one leg of a hedge (R4-7), or volume already spoken for by a pending order (R4-1):
+        # this order is judged like any other and counts as adding exposure.
 
     netting = info is not None and getattr(info, "margin_mode", None) in _MT5_NETTING_MODES
-    if netting:
-        net = sum(_mt5_signed_volume(p) for p in positions if p.symbol == symbol)
-        if is_pure_reduction(trade_side, lots, net):
-            return approve_reduction(account_key, symbol, trade_side, lots, net, equity)
+    if netting and position is None and is_pure_reduction(trade_side, lots, reducible(net_before, symbol)):
+        return approve_reduction(account_key, symbol, trade_side, lots, net_before, equity)
     if info is None:
         raise OrderRefused("order not placed: no MT5 account to check risk limits against")
+    if pending is None:
+        raise OrderRefused(
+            f"order not placed: {pending_problem}, so queued orders cannot be counted against the risk limits. "
+            "Only an order that reduces an open position can go ahead without that."
+        )
 
     def contract_size(name: str) -> float:
         sym = mt5mod.symbol_info(name)
-        size = float(getattr(sym, "trade_contract_size", 0) or 0)
+        try:
+            size = float(getattr(sym, "trade_contract_size", 0) or 0)
+        except (TypeError, ValueError, OverflowError):
+            size = 0.0
         if not math.isfinite(size) or size <= 0:
             raise OrderRefused(f"order not placed: cannot size {name}: the terminal reports no contract size")
         return size
@@ -489,6 +788,30 @@ def check_mt5_order(
         value = _mt5_signed_volume(p) * contract_size(p.symbol) * _finite(px, f"the {p.symbol} price")
         # Hedging: a long and a short in one symbol are two exposures, not a net.
         held[p.symbol] = held.get(p.symbol, 0.0) + (value if netting else abs(value))
+    queued_buy: dict[str, float] = {}
+    queued_sell: dict[str, float] = {}
+    for o in pending:
+        sym = str(getattr(o, "symbol", ""))
+        kind = getattr(o, "type", None)
+        if not sym or kind not in _MT5_BUY_ORDER_TYPES | _MT5_SELL_ORDER_TYPES:
+            raise OrderRefused(f"order not placed: cannot read the pending order on {sym or '?'} (type {kind!r})")
+        px = getattr(o, "price_open", None) or getattr(o, "price_current", None)
+        if not px:
+            raise OrderRefused(f"order not placed: cannot value the pending {sym} order (no price)")
+        vol = _finite(getattr(o, "volume_current", getattr(o, "volume_initial", None)),
+                      f"the volume of the pending {sym} order")
+        value = vol * contract_size(sym) * _finite(px, f"the pending {sym} order price")
+        bucket = queued_buy if kind in _MT5_BUY_ORDER_TYPES else queued_sell
+        bucket[sym] = bucket.get(sym, 0.0) + value
+    trade_value = lots * contract_size(symbol) * _finite(price, "price") * (1 if trade_side == Side.BUY else -1)
+    for sym in set(queued_buy) | set(queued_sell):
+        if netting:
+            held[sym] = worst_case_value(
+                held.get(sym, 0.0), queued_buy.get(sym, 0.0), queued_sell.get(sym, 0.0),
+                trade_value if sym == symbol else 0.0,
+            )
+        else:  # hedging: any queued order may open its own position
+            held[sym] = held.get(sym, 0.0) + queued_buy.get(sym, 0.0) + queued_sell.get(sym, 0.0)
     return enforce(
         account_key,
         symbol,
@@ -501,7 +824,7 @@ def check_mt5_order(
     )
 
 
-def _confirm_rearm_interactively() -> str | None:
+def _confirm_rearm_interactively(reset_baseline: bool = False) -> str | None:
     """None when a person at a terminal typed REARM, else why the re-arm was refused."""
     if not (sys.stdin.isatty() and sys.stdout.isatty()):
         return (
@@ -509,7 +832,8 @@ def _confirm_rearm_interactively() -> str | None:
             "clear the kill switch. Open Terminal and run `python -m dourmouse.order_guard rearm` yourself."
         )
     try:
-        answer = input("This clears the trading kill switch. Type REARM to confirm: ")
+        extra = " AND restarts today's daily-loss baseline" if reset_baseline else ""
+        answer = input(f"This clears the trading kill switch{extra}. Type REARM to confirm: ")
     except EOFError:
         answer = ""
     if answer.strip() != "REARM":
@@ -519,23 +843,36 @@ def _confirm_rearm_interactively() -> str | None:
 
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
-    if args == ["rearm"]:
-        refusal = _confirm_rearm_interactively()
+    if args in (["rearm"], ["rearm", "--reset-baseline"]):
+        reset = len(args) == 2
+        print(f"guard state folder: {state_path().parent}")
+        refusal = _confirm_rearm_interactively(reset)
         if refusal:
             print(refusal)
             return 1
-        rearm()
+        try:
+            notes = rearm(reset_baseline=reset)
+        except OrderRefused as exc:
+            print(f"not re-armed: {exc}")
+            return 1
         print("kill switch re-armed")
+        for note in notes:
+            print(f"  {note}")
         return 0
     if args == ["status"]:
         try:
             state = _load_state()
         except OrderRefused as exc:
-            print(json.dumps({"tripped": None, "error": str(exc)}))
+            print(json.dumps({"tripped": None, "error": str(exc), "state_path": str(state_path())}))
             return 1
-        print(json.dumps({"tripped": bool(state.get("tripped")), "reason": state.get("tripped_reason", "")}))
+        print(json.dumps({
+            "tripped": bool(state.get("tripped")),
+            "reason": state.get("tripped_reason", ""),
+            "state_path": str(state_path()),
+            "audit": state.get("audit", []),
+        }))
         return 0
-    print("usage: python -m dourmouse.order_guard status|rearm")
+    print("usage: python -m dourmouse.order_guard status|rearm [--reset-baseline]")
     return 2
 
 

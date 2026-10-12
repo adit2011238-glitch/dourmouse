@@ -275,7 +275,10 @@ def _tick_price(mt5mod: Any, name: str, side: str) -> float | None:
     price = tick.ask if side == "BUY" else tick.bid
     if not isinstance(price, (int, float)) or isinstance(price, bool) or price != price or price <= 0:
         return None
-    return float(price)
+    try:
+        return float(price)
+    except OverflowError:  # an integer too big for a float
+        return None
 
 
 def mt5_order(code: str, side: str, volume: float = 0.01,
@@ -305,7 +308,7 @@ def mt5_order(code: str, side: str, volume: float = 0.01,
         return {"error": f"volume must be a number, got {volume!r}"}
     try:
         volume = float(volume)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):  # OverflowError: an integer too big for a float
         return {"error": f"volume must be a number, got {volume!r}"}
     if volume != volume or volume <= 0 or volume == float("inf"):
         return {"error": f"volume must be a positive number, got {volume}"}
@@ -323,43 +326,72 @@ def mt5_order(code: str, side: str, volume: float = 0.01,
     name = _find_symbol(mt5mod, code)
     if name is None:
         return {"error": f"{code} not listed on this server — cannot order"}
+    # R4-5: one order at a time. The check and the send share one critical section, so a second order
+    # cannot be approved against the positions this one is about to change.
+    return _guarded_send(mt5mod, name, code, side, volume, ticket, magic=20260801)
+
+
+#: order_send retcodes that do NOT say the order was refused: placed (10008), partly filled (10010),
+#: request timed out (10012), no connection (10031). The order may be live.
+_MT5_UNKNOWN_RETCODES = frozenset({10008, 10010, 10012, 10031})
+
+
+def order_status_unknown(why: object) -> dict[str, Any]:
+    """The reply for an order that may or may not have been executed (R4-6, like T212's W2R-5)."""
+    return {
+        "error": f"order status UNKNOWN: {why}. The order may have been executed. Check the open positions and "
+                 "pending orders in the MT5 terminal (mt5_status shows the account) before retrying; do not "
+                 "place the order again until you have.",
+        "status_unknown": True,
+    }
+
+
+def _guarded_send(mt5mod: Any, name: str, code: str, side: str, volume: float, ticket: int | None,
+                  *, magic: int) -> dict[str, Any]:
+    """Check an order against the guardrails and send it, holding the order lock through the answer."""
     from dourmouse import order_guard
 
-    # W3R-5: one tick, read once; the guard and the request use the same price.
-    price = _tick_price(mt5mod, name, side)
-    if price is None:
-        return {"error": f"no valid price for {name} yet ({mt5mod.last_error()})"}
     try:
-        order_guard.check_mt5_order(mt5mod, name, side, volume, price, position=ticket)
+        with order_guard.order_section():
+            # W3R-5: one tick, read once; the guard and the request use the same price.
+            price = _tick_price(mt5mod, name, side)
+            if price is None:
+                return {"error": f"no valid price for {name} yet ({mt5mod.last_error()})"}
+            order_guard.check_mt5_order(mt5mod, name, side, volume, price, position=ticket)
+            # Engineering audit, 2026-09-17: this used to fetch mt5mod.symbol_info(name)
+            # here and never use it (dead code -- volume_min/volume_max/volume_step/
+            # digits were never checked). Client-side validation against those
+            # constraints, and price rounding to the symbol's real tick size, is a
+            # real, deferred improvement, NOT added here: getting MT5's own rounding
+            # semantics wrong for live order placement is worse than relying on the
+            # broker's own honest rejection (handled below via result.retcode) until
+            # someone can verify the exact behavior against a real MT5 server.
+            request = {
+                "action": mt5mod.TRADE_ACTION_DEAL,
+                "symbol": name,
+                "volume": volume,
+                "type": mt5mod.ORDER_TYPE_BUY if side == "BUY"
+                else mt5mod.ORDER_TYPE_SELL,
+                "price": price,
+                "deviation": 20,
+                "magic": magic,
+                "comment": "dourmouse seasonal paper",
+                "type_time": mt5mod.ORDER_TIME_GTC,
+                "type_filling": mt5mod.ORDER_FILLING_IOC,
+            }
+            if ticket is not None:
+                request["position"] = ticket
+            try:
+                result = mt5mod.order_send(request)
+            except Exception as exc:  # noqa: BLE001 -- anything after the request left is "unknown", not "refused"
+                return order_status_unknown(f"order_send raised {exc!r}")
     except order_guard.OrderRefused as exc:
         return {"error": str(exc)}
-    # Engineering audit, 2026-09-17: this used to fetch mt5mod.symbol_info(name)
-    # here and never use it (dead code -- volume_min/volume_max/volume_step/
-    # digits were never checked). Client-side validation against those
-    # constraints, and price rounding to the symbol's real tick size, is a
-    # real, deferred improvement, NOT added here: getting MT5's own rounding
-    # semantics wrong for live order placement is worse than relying on the
-    # broker's own honest rejection (handled below via result.retcode) until
-    # someone can verify the exact behavior against a real MT5 server.
-    request = {
-        "action": mt5mod.TRADE_ACTION_DEAL,
-        "symbol": name,
-        "volume": volume,
-        "type": mt5mod.ORDER_TYPE_BUY if side == "BUY"
-        else mt5mod.ORDER_TYPE_SELL,
-        "price": price,
-        "deviation": 20,
-        "magic": 20260801,
-        "comment": "dourmouse seasonal paper",
-        "type_time": mt5mod.ORDER_TIME_GTC,
-        "type_filling": mt5mod.ORDER_FILLING_IOC,
-    }
-    if ticket is not None:
-        request["position"] = ticket
-    result = mt5mod.order_send(request)
     if result is None:
-        return {"error": f"order_send failed ({mt5mod.last_error()})"}
+        return order_status_unknown(f"order_send returned nothing ({mt5mod.last_error()})")
     if result.retcode != mt5mod.TRADE_RETCODE_DONE:
+        if result.retcode in _MT5_UNKNOWN_RETCODES:
+            return order_status_unknown(f"retcode {result.retcode} ({result.comment})")
         return {"error": f"order rejected: retcode {result.retcode} "
                 f"({result.comment})"}
     return {
@@ -385,22 +417,35 @@ from pathlib import Path  # noqa: E402
 _ROSTER_ROOT = Path(__file__).resolve().parent.parent
 
 
+#: The order worker may wait up to ORDER_LOCK_WAIT_SECONDS for another order, then talks to the terminal.
+_ORDER_WORKER_TIMEOUT = 60.0
+
+
 def _run_worker(args: list[str], timeout: float = 12.0) -> dict[str, Any]:
+    # An "order" worker that times out, dies or prints no JSON may have sent the order before it did:
+    # that is "status UNKNOWN", never a refusal (R4-6). Every other command only reads.
+    is_order = bool(args) and args[0] == "order"
     cmd = [sys.executable, "-m", "dourmouse.mt5_probe", *args]
     try:
         out = subprocess.run(
-            cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout,
-            cwd=str(_ROSTER_ROOT),
+            cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=_ORDER_WORKER_TIMEOUT if is_order else timeout, cwd=str(_ROSTER_ROOT),
         )
     except subprocess.TimeoutExpired:
+        if is_order:
+            return order_status_unknown("the MT5 worker did not answer in time and was stopped")
         return {"configured": False, "error": "MT5 probe timed out — "
                 "terminal not ready (log into a demo account)"}
     if out.returncode != 0:
-        return {"configured": False,
-                "error": (out.stdout or out.stderr or "worker failed").strip()}
+        detail = (out.stdout or out.stderr or "worker failed").strip()
+        if is_order:
+            return order_status_unknown(f"the MT5 worker failed ({detail[:300]})")
+        return {"configured": False, "error": detail}
     try:
         return json.loads(out.stdout)
     except json.JSONDecodeError:
+        if is_order:
+            return order_status_unknown("the MT5 worker returned no readable answer")
         return {"configured": False, "error": "MT5 worker returned no JSON"}
 
 
@@ -488,7 +533,7 @@ def _mt5_order_tool(arguments: dict[str, Any]) -> str:
         if isinstance(raw_volume, bool):
             raise ValueError
         volume = float(raw_volume)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):  # OverflowError: an integer too big for a float
         return f"MT5 ORDER: volume must be a number, got {raw_volume!r}"
     # Literally True: a model-supplied "false" string is truthy and must not confirm.
     confirm = arguments.get("paper_confirm") is True
@@ -500,6 +545,8 @@ def _mt5_order_tool(arguments: dict[str, Any]) -> str:
         return "MT5 ORDER: need code (e.g. ZC) and side BUY|SELL"
     r = _run_worker(["order", code, side, repr(volume),
                      "true" if confirm else "false"] + ([str(ticket)] if ticket is not None else []))
+    if r.get("status_unknown"):
+        return f"MT5 ORDER {code} {side}: STATUS UNKNOWN, NOT A REFUSAL — {r['error']}"
     if "error" in r:
         return f"MT5 ORDER {code} {side}: REFUSED — {r['error']}"
     return (f"MT5 ORDER FILLED: {r['side']} {r['volume']} {r['code']} "

@@ -28,10 +28,10 @@ import MetaTrader5 as mt5  # noqa: PLC0415
 from dourmouse.mt5_ops import (
     SEASONAL_SYMBOLS,
     _find_symbol,
+    _guarded_send,
     _is_demo,
     _quote,
     _ticket,
-    _tick_price,
 )
 
 
@@ -134,7 +134,7 @@ def cmd_order(code: str, side: str, volume: float,
         return {"error": f"volume must be a number, got {volume!r}"}
     try:
         volume = float(volume)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):  # OverflowError: an integer too big for a float
         return {"error": f"volume must be a number, got {volume!r}"}
     if volume != volume or volume <= 0 or volume == float("inf"):
         return {"error": f"volume must be a positive number, got {volume}"}
@@ -155,39 +155,9 @@ def cmd_order(code: str, side: str, volume: float,
     name = _find_symbol(mt5, code)
     if name is None:
         return {"error": f"{code} not listed on this server — cannot order"}
-    price = _tick_price(mt5, name, side)
-    if price is None:
-        return {"error": f"no valid price for {name} yet"}
-    # P4-24: the trading guardrails run before anything is sent (same check as mt5_ops.mt5_order).
-    from dourmouse import order_guard
-    try:
-        order_guard.check_mt5_order(mt5, name, side, volume, price, position=ticket)
-    except order_guard.OrderRefused as exc:
-        return {"error": str(exc)}
-    request = {
-        "action": mt5.TRADE_ACTION_DEAL,
-        "symbol": name,
-        "volume": volume,
-        "type": mt5.ORDER_TYPE_BUY if side == "BUY"
-        else mt5.ORDER_TYPE_SELL,
-        "price": price,
-        "deviation": 20,
-        "magic": 20260802,
-        "comment": "dourmouse seasonal paper",
-        "type_time": mt5.ORDER_TIME_GTC,
-        "type_filling": mt5.ORDER_FILLING_IOC,
-    }
-    if ticket is not None:
-        request["position"] = ticket
-    result = mt5.order_send(request)
-    if result is None:
-        return {"error": f"order_send failed ({mt5.last_error()})"}
-    if result.retcode != mt5.TRADE_RETCODE_DONE:
-        return {"error": f"order rejected: retcode {result.retcode} "
-                f"({result.comment})"}
-    return {"filled": True, "code": code, "symbol": name, "side": side,
-            "volume": volume, "order": result.order, "deal": result.deal,
-            "price": result.price}
+    # P4-24 and R4-5: the trading guardrails run, under the order lock, right before anything is sent
+    # (same check and send as mt5_ops.mt5_order).
+    return _guarded_send(mt5, name, code, side, volume, ticket, magic=20260802)
 
 
 def main(argv: list[str] | None = None) -> int:

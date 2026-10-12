@@ -66,6 +66,8 @@ class FakeT212:
             return _Resp(json.dumps({"totalValue": self.equity}).encode())
         if req.full_url.endswith("/account/cash"):
             return _Resp(b"{}")
+        if req.full_url.endswith("/equity/orders"):  # FIX-R4 (R4-1): the guard now reads the queued orders
+            return _Resp(json.dumps(getattr(self, "orders", [])).encode())
         return _Resp(json.dumps(self.positions).encode())
 
 
@@ -355,6 +357,9 @@ class FakeMT5:
 
     def positions_get(self):
         return list(self._positions)
+
+    def orders_get(self):  # FIX-R4 (R4-1): the guard now reads pending orders; none here
+        return ()
 
     def order_send(self, request):
         self.sent.append(request)
