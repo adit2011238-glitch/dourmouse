@@ -1,8 +1,6 @@
 """dourmouse/backend_fallback.py -- pre-flight reachability fallback
-(load_llm_config_with_fallback) plus the mid-call pool-exhaustion path
-(probe_ollama_fallback) that closes the gap: the pre-flight probe only ever
-runs once, at config-load, and never reacts to a backend that answered fine
-at startup and then rate-limited every account mid-conversation.
+(load_llm_config_with_fallback). The mid-call local fallback (probe_ollama_fallback) was removed by FIX-P
+H-PRIV-5: cloud models only.
 """
 
 from __future__ import annotations
@@ -79,15 +77,16 @@ class TestLoadLlmConfigWithFallback:
         cfg = backend_fallback.load_llm_config_with_fallback()
         assert cfg.base_url != "http://127.0.0.1:11434"
 
-    def test_nvidia_unreachable_falls_back_to_local_ollama(self, monkeypatch):
+    def test_nvidia_unreachable_does_not_fall_back_to_a_local_model(self, monkeypatch):
+        """FIX-P H-PRIV-5: cloud models only. The old test pinned a silent switch to local Ollama (phi:2b)."""
         monkeypatch.delenv("DOURMOUSE_FALLBACK_DISABLED", raising=False)
         monkeypatch.setenv("DOURMOUSE_LLM_BACKEND", "nvidia")
         monkeypatch.setenv("NVIDIA_API_KEY", "key1")
         monkeypatch.delenv("OLLAMA_MODEL", raising=False)
         _unreachable(monkeypatch)
         cfg = backend_fallback.load_llm_config_with_fallback()
-        assert cfg.base_url == "http://127.0.0.1:11434/v1"
-        assert cfg.model == "phi:2b"
+        assert "127.0.0.1" not in cfg.base_url and "11434" not in cfg.base_url
+        assert not hasattr(backend_fallback, "probe_ollama_fallback")
 
     def test_omniroute_is_unaffected(self, monkeypatch):
         monkeypatch.delenv("DOURMOUSE_FALLBACK_DISABLED", raising=False)
@@ -95,51 +94,3 @@ class TestLoadLlmConfigWithFallback:
         _unreachable(monkeypatch)  # must not even be consulted
         cfg = backend_fallback.load_llm_config_with_fallback()
         assert cfg.base_url != "http://127.0.0.1:11434"
-
-
-class TestProbeOllamaFallback:
-    """The NEW mid-call path: dispatch.py's _nvidia_rotation_factory calls
-    this when model_router.pool_exhausted() says every NVIDIA account is
-    cooling down mid-conversation."""
-
-    def test_disabled_flag_returns_none_without_probing(self, monkeypatch):
-        monkeypatch.setenv("DOURMOUSE_FALLBACK_DISABLED", "1")
-
-        def _boom(*a, **k):  # pragma: no cover - must never be called
-            raise AssertionError("probe ran despite DOURMOUSE_FALLBACK_DISABLED=1")
-
-        monkeypatch.setattr("urllib.request.urlopen", _boom)
-        assert backend_fallback.probe_ollama_fallback() is None
-
-    def test_ollama_reachable_returns_its_config(self, monkeypatch):
-        monkeypatch.delenv("DOURMOUSE_FALLBACK_DISABLED", raising=False)
-        monkeypatch.delenv("OLLAMA_MODEL", raising=False)
-        _reachable(monkeypatch)
-        cfg = backend_fallback.probe_ollama_fallback()
-        assert cfg is not None
-        assert cfg.base_url == "http://127.0.0.1:11434/v1"
-        assert cfg.model == "phi:2b"
-
-    def test_honors_ollama_model_env_override(self, monkeypatch):
-        monkeypatch.delenv("DOURMOUSE_FALLBACK_DISABLED", raising=False)
-        monkeypatch.setenv("OLLAMA_MODEL", "qwen3:8b")
-        _reachable(monkeypatch)
-        cfg = backend_fallback.probe_ollama_fallback()
-        assert cfg is not None
-        assert cfg.model == "qwen3:8b"
-
-    def test_ollama_unreachable_returns_none(self, monkeypatch):
-        monkeypatch.delenv("DOURMOUSE_FALLBACK_DISABLED", raising=False)
-        _unreachable(monkeypatch)
-        assert backend_fallback.probe_ollama_fallback() is None
-
-    def test_does_not_construct_a_client(self, monkeypatch):
-        """Deliberate: client construction stays dispatch.py's job
-        (_build_client/OllamaNativeClient) so this module never needs to
-        import dispatch, which already imports this module."""
-        monkeypatch.delenv("DOURMOUSE_FALLBACK_DISABLED", raising=False)
-        _reachable(monkeypatch)
-        cfg = backend_fallback.probe_ollama_fallback()
-        from dourmouse.config import OllamaConfig
-
-        assert isinstance(cfg, OllamaConfig)

@@ -566,17 +566,6 @@ def _security_self_audit(_a: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _security_privacy_mode(a: dict[str, Any]) -> str:
-    from .privacy import set_privacy_mode
-
-    on = bool(a.get("on"))
-    set_privacy_mode(on)
-    return ("Privacy mode ON: the analyst will not send findings to the cloud model, and the security tools "
-            "will not show the chat findings, download sources, hostnames, process lists, file names or "
-            "browser history; those stay on this Mac (the console still shows them)." if on
-            else "Privacy mode OFF.")
-
-
 #: Tools whose output is evidence about this Mac. The chat model is in the
 #: cloud, so in privacy mode these answer with a note instead (browser history
 #: has its own, finer-grained handling, and the analyst its own guard).
@@ -598,8 +587,8 @@ def _withhold_in_privacy_mode(spec: ToolSpec) -> ToolSpec:
 
         if privacy_mode():
             return (f"Withheld in privacy mode: {spec.name} would return security evidence from this Mac (file names, "
-                    "addresses, download sources, processes), and that stays on this Mac. Turn privacy mode off "
-                    "(security_privacy_mode) or open the Security console to see it.")
+                    "addresses, download sources, processes), and that stays on this Mac. Private mode can be turned off "
+                    "by the owner in SETTINGS, PRIVACY, or in the Security console, where the evidence is shown.")
         return inner(arguments)
 
     return dataclasses.replace(spec, handler=handler)
@@ -890,7 +879,7 @@ def _build_security_subagent() -> Subagent:
                 description=(
                     "Browsing history and the exact queries typed into Chrome (all profiles), Arc, Brave, Edge, "
                     "Safari (needs Full Disk Access) and Firefox, read locally, with visits to blocked domains "
-                    "flagged. Honours privacy mode."
+                    "flagged. Honours Private mode."
                 ),
                 parameters={"type": "object", "properties": {"hours": {"type": "number", "default": 24}}},
                 handler=_security_browser_history,
@@ -903,14 +892,6 @@ def _build_security_subagent() -> Subagent:
                 ),
                 parameters={"type": "object", "properties": {}},
                 handler=_security_self_audit,
-            ),
-            ToolSpec(
-                name="security_privacy_mode",
-                description="Turn privacy mode on or off: when on, security data about this Mac is not sent to the cloud model.",
-                parameters={"type": "object", "properties": {"on": {"type": "boolean"}}, "required": ["on"]},
-                handler=_security_privacy_mode,
-                permission=Permission.REQUIRES_CONFIRMATION,
-                confirm_prompt=lambda a: f"Turn privacy mode {'on' if a.get('on') else 'off'}?",
             ),
             ToolSpec(
                 name="security_unblock_domain",

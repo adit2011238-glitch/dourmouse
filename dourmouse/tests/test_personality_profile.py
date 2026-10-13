@@ -126,6 +126,13 @@ class TestExtractJson:
 
 
 class TestGenerateProfile:
+    @pytest.fixture(autouse=True)
+    def _memory_allowed(self):
+        """FIX-P R5-12: the profile sends Memory to a cloud model, so these tests run with Memory allowed."""
+        from dourmouse import privacy
+
+        privacy.PrivacyStore().set_consent("memory", "allow")
+
     def test_runs_once_and_refuses_a_second_time(self, store):
         _seed_history(store)
         client = _FakeClient(content=_GOOD_JSON)

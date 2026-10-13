@@ -159,6 +159,8 @@ OWNER_ONLY_POST: frozenset[str] = frozenset({
     "/api/os/goals/create",
     "/api/os/browser/history/clear",
     "/api/os/browser/bookmarks/remove",
+    # Sends the owner's remembered work history to a cloud model (R5-12).
+    "/api/profile/generate",
     # Destructive housekeeping.
     "/api/projects/delete",
     "/api/artifacts/clear",

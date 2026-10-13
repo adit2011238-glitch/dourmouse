@@ -152,6 +152,9 @@ def generate_image(
     # end up in a server access log or a proxy's history, a header is
     # not).
     headers = {"Content-Type": "application/json", "x-goog-api-key": key}
+    from dourmouse import privacy
+
+    privacy.record_egress(backend="gemini", model=model, text=body.decode("utf-8", "replace"), origin="image_gen")
     raw = transport(url, data=body, headers=headers, timeout=120.0)
     try:
         data = json.loads(raw.decode("utf-8") if isinstance(raw, bytes) else raw)

@@ -210,7 +210,7 @@ def _project_root() -> Path:
 #: file tools refuse: general_roster._PROTECTED_WORKSPACE_TOP).
 _PROTECTED_WORKSPACE_DIRS = (
     "self_extensions", "auth", "state", "security", "memory", "sessions", "librarian", "office",
-    "research_pipeline", "compute", "atlas_lab", "device_wiki", "neuro",
+    "research_pipeline", "compute", "atlas_lab", "device_wiki", "neuro", "privacy",
 )
 
 

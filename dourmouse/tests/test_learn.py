@@ -213,6 +213,14 @@ class TestRecallBlock:
 # --------------------------------------------------------------------------- #
 
 class TestChatLearning:
+    @pytest.fixture(autouse=True)
+    def _memory_consent(self):
+        """FIX-P R5-3: the recall block is Memory content and needs Memory consent; these tests are about the
+        learn loop, so the owner has allowed Memory."""
+        from dourmouse import privacy
+
+        privacy.PrivacyStore().set_consent("memory", "allow")
+
     def test_completed_turn_is_auto_ingested(self, tmp_path, store):
         """The moment a turn completes, it lands in the long-term store —
         the 'stores data' half of the loop."""

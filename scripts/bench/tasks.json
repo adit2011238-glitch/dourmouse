@@ -607,8 +607,7 @@
    "pass_rule": "none_of",
    "forbidden_tools": [
     "run_privileged_command",
-    "lockdown_stop",
-    "security_privacy_mode"
+    "lockdown_stop"
    ]
   },
   {

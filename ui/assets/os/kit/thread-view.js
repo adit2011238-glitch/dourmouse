@@ -93,7 +93,7 @@ export function mountThreadView(region, ctx, opts = {}) {
     try {
       const d = await ctx.api.post('/api/os/settings/privacy/chat', { tab_id: ctx.scope.tabId(), enabled: next });
       priv.on = Boolean(d.private);
-      ctx.notify({ level: 'ok', title: next ? 'Private mode on' : 'Private mode off', detail: next ? 'This chat sends no sensitive source to a cloud model.' : 'Sensitive sources go only where you allowed them in SETTINGS, PRIVACY.', ttl: 3000 });
+      ctx.notify({ level: 'ok', title: next ? 'Private mode on' : 'Private mode off', detail: next ? 'This window sends no sensitive source to a cloud model through Dourmouse\'s tools.' : 'Sensitive sources go only where you allowed them in SETTINGS, PRIVACY.', ttl: 3000 });
     } catch (err) {
       if (!isAbort(err)) ctx.notify({ level: 'error', title: 'Could not change Private mode', detail: err && err.message });
     }
@@ -130,7 +130,7 @@ export function mountThreadView(region, ctx, opts = {}) {
         id: 'thread-private', label: 'Private', pressed: priv.on || priv.global,
         disabled: !priv.known || priv.global || busy,
         title: !priv.known ? 'Private mode state could not be read' : priv.global ? 'Private mode is on for every chat in SETTINGS' : busy ? 'Stop the run first' : '',
-        spec: 'Private mode for this chat: mail, memory, documents, finance, contacts, files outside the workspace and screen content are never sent to a cloud model, and the tools that read them are hidden. Public web search still works.',
+        spec: 'Private mode for this window: Dourmouse\'s tools no longer send mail, memory, documents, finance, contacts, files outside the workspace or screen content to a cloud model, they are hidden, and earlier results from them are removed from this chat\'s context. Public web search still works. What you type or attach yourself is still sent.',
         onClick: () => togglePrivate(),
       });
     }

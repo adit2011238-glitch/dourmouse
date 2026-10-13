@@ -214,13 +214,13 @@ def test_g_no_ui_text_claims_model_content_stays_local():
 
 def test_g_storage_claims_stay_true():
     """The vault and the egress ledger are files on this Mac: the ledger is
-    written under the workspace and never holds content."""
+    written under the settings folder (FIX-P R5-18 moved it out of the workspace) and never holds content."""
     privacy.record_egress(backend="gemini", model="m", text="secret words")
     path = privacy.egress_path()
     assert path.exists() and "secret words" not in path.read_text(encoding="utf-8")
-    from dourmouse.config import workspace_dir
+    from dourmouse.config import user_config_dir
 
-    assert path.resolve().is_relative_to(workspace_dir().resolve())
+    assert path.resolve().is_relative_to(user_config_dir().resolve())
 
 
 def test_g_the_privacy_screen_says_the_honest_limit():

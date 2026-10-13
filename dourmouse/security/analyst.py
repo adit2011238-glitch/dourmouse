@@ -129,6 +129,23 @@ def effective_worry(model_worry: Any, findings: list[dict[str, Any]]) -> str:
     return WORRIES[max(WORRIES.index(floor), min(model, ceiling))]
 
 
+def _pv_redact(block: str, mapping: Any) -> tuple[str, dict[str, int]]:
+    from dourmouse import privacy
+    from dourmouse.governance import PiiRedactor
+
+    return PiiRedactor(privacy.owner_emails()).redact(block, mapping)
+
+
+def _restore_strings(value: Any, mapping: Any) -> Any:
+    if isinstance(value, str):
+        return mapping.restore_text(value)
+    if isinstance(value, list):
+        return [_restore_strings(v, mapping) for v in value]
+    if isinstance(value, dict):
+        return {k: _restore_strings(v, mapping) for k, v in value.items()}
+    return value
+
+
 def analyze(findings: list[dict[str, Any]], complete: Complete | None = None) -> dict[str, Any]:
     if not findings:
         return {"ok": True, "summary": "Nothing to analyze: no findings.", "worry": "none", "points": [], "dropped": 0}
@@ -137,14 +154,31 @@ def analyze(findings: list[dict[str, Any]], complete: Complete | None = None) ->
 
         if privacy_mode():  # finding #112: the default model is in the cloud
             return {"ok": False, "skipped": True,
-                    "error": "privacy mode is on: findings are not sent to the cloud model"}
+                    "error": "privacy mode is on (the same switch as Private mode): findings are not sent to the cloud model"}
+        # R5-19: process names, paths, hosts and download names are "files" content. The default cloud model gets
+        # them only when the owner allowed that source, and only with identifiers swapped for placeholders.
+        from dourmouse import privacy as _pv
+
+        if _pv.PrivacyStore().consent("files") != "allow":
+            return {"ok": False, "skipped": True,
+                    "error": "the owner has not allowed Files to be shared with a cloud model "
+                             "(SETTINGS, PRIVACY): findings are not sent"}
+    mapping = _pv.placeholder_map("security_analyst") if complete is None else None
+    block = evidence_block(findings)
+    if mapping is not None:
+        try:
+            block, _ = _pv_redact(block, mapping)
+        except _pv.PlaceholderMapFull:
+            return {"ok": False, "skipped": True, "error": "too many distinct identifiers in the findings to swap safely"}
     messages = [{"role": "system", "content": SYSTEM},
-                {"role": "user", "content": evidence_block(findings)}]
+                {"role": "user", "content": block}]
     try:
         raw = (complete or default_complete())(messages)
     except Exception as exc:  # noqa: BLE001 -- any backend failure is reported, never papered over
         return {"ok": False, "error": f"the analyst model is unavailable: {exc}"}
     parsed = _extract_json(raw)
+    if mapping is not None and isinstance(parsed, dict):
+        parsed = _restore_strings(parsed, mapping)  # the owner's own console shows the real names
     if parsed is None or not isinstance(parsed.get("summary"), str):
         return {"ok": False, "error": "the analyst model did not return an analysis", "raw": raw[:2000]}
     valid = set(range(1, len(findings) + 1))

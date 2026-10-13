@@ -514,6 +514,33 @@ def iban_valid(compact: str) -> bool:
     return int(number) % 97 == 1
 
 
+def card_issuer_valid(digits: str) -> bool:
+    """A number that fits a real issuer range and length (Visa, Mastercard, Amex, Discover, JCB, Diners,
+    UnionPay), on top of the Luhn check. Order, tracking and account ids pass Luhn about one time in ten but
+    seldom fit an issuer range (R5-14)."""
+    n = len(digits)
+    two, three, four = int(digits[:2]), int(digits[:3]), int(digits[:4])
+    if digits[0] == "4":
+        return n in (13, 16, 19)
+    if 51 <= two <= 55 or 2221 <= four <= 2720:
+        return n == 16
+    if two in (34, 37):
+        return n == 15
+    if four == 6011 or two == 65 or 644 <= three <= 649:
+        return n in (16, 19)
+    if 3528 <= four <= 3589:
+        return 16 <= n <= 19
+    if 300 <= three <= 305 or two in (36, 38):
+        return 14 <= n <= 19
+    if two == 62:
+        return 16 <= n <= 19
+    return False
+
+
+#: Words that say the digits that follow are an order, tracking or other reference number, not a card.
+_NOT_A_CARD_CONTEXT = re.compile(r"(?i)\b(?:order|tracking|track|ref|reference|invoice|serial|ticket|id|no|number|#)\W{0,3}$")
+
+
 # A card: 13 to 19 digits, single spaces or dashes allowed, first digit 2 to 6
 # (the issuer ranges of Visa, Mastercard, Amex, Discover, JCB, Diners and
 # UnionPay). A millisecond timestamp starts with 1 and is left alone.
@@ -526,22 +553,29 @@ _PII_IDS = (
     re.compile(r"\b(?!BG|GB|NK|KN|TN|NT|ZZ)[A-CEGHJ-PR-TW-Z][A-CEGHJ-NPR-TW-Z] ?\d{2} ?\d{2} ?\d{2} ?[A-D]\b"),
     # India PAN (the fourth letter is the holder type) and Aadhaar (spaced).
     re.compile(r"\b[A-Z]{3}[PCHFATBLJG][A-Z]\d{4}[A-Z]\b"),
-    re.compile(r"(?<!\d)(?<!\d )[2-9]\d{3} \d{4} \d{4}(?! ?\d)"),
+)
+# Aadhaar (twelve digits, spaced): only after its own label, since an unlabelled 4-4-4 group is just as often a
+# build number or a part of a longer one (R5-14).
+_PII_LABELLED_AADHAAR = re.compile(
+    r"(?i)\baadh?aar\b(?:\s*(?:no\.?|number|card|#))?\s*[:#]?\s*(?P<value>[2-9]\d{3} ?\d{4} ?\d{4})(?!\d)"
 )
 # Any value after an identity label, when the value holds a digit.
+# The label is a whole word followed by a separator ("tinder2024" is not "tin 2024"), the value holds at least
+# four digits, and a date is not an ID (R5-14).
 _PII_LABELLED_ID = re.compile(
     r"(?i)\b(?:passport|tax\s*id|tin|national\s*id|id\s*card|driver'?s?\s*licen[cs]e|driving\s*licen[cs]e"
-    r"|vat\s*(?:no|number)|ssn|social\s*security)(?:\s*(?:no\.?|number|#))?\s*[:#]?\s*"
-    r"(?P<value>(?=[A-Z0-9-]*\d)[A-Z0-9][A-Z0-9-]{5,19})\b"
+    r"|vat\s*(?:no|number)|ssn|social\s*security)\b(?:\s*(?:no\.?|number|#))?[ \t]*[:#]?[ \t]*"
+    r"(?P<value>(?!\d{4}-\d{2}-\d{2}\b)(?=(?:[A-Z-]*\d){4})[A-Z0-9][A-Z0-9-]{5,19})\b"
 )
 _PII_EMAIL = re.compile(r"(?<![\w.+-])[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,24}\b")
 _PII_PHONES = (
     # International: a plus, a country code and 8 to 15 digits in groups.
     re.compile(r"(?<![\w+])\+\d{1,3}(?:[ .-]?\(?\d{1,4}\)?){2,5}(?!\w)"),
     # North American: (415) 555-0132, 415-555-0132, 415.555.0132.
-    re.compile(r"(?<![\w-])(?:\(\d{3}\) ?|\d{3}[-. ])\d{3}[-. ]\d{4}(?![\w-])"),
-    # National with a leading 0: 020 7946 0958, 07700 900123.
-    re.compile(r"(?<![\w-])0\d{2,4}[ -]\d{3,4}(?:[ -]?\d{3,4})?(?![\w-])"),
+    # Not inside a longer dotted or dashed number such as an IP address (R5-14).
+    re.compile(r"(?<![\w-])(?<!\d\.)(?:\(\d{3}\) ?|\d{3}[-. ])\d{3}[-. ]\d{4}(?![\w-])(?!\.\d)"),
+    # National with a leading 0: 020 7946 0958, 07700 900123. Not the tail of a longer group of digits.
+    re.compile(r"(?<![\w-])(?<!\d )(?<!\d-)(?<!\d\.)0\d{2,4}[ -]\d{3,4}(?:[ -]?\d{3,4})?(?![\w-])(?!\.\d)"),
 )
 _PII_ADDRESS = re.compile(
     r"\b\d{1,5}[A-Za-z]?\s+(?:[A-Z][A-Za-z'.-]+\s+){1,4}"
@@ -578,7 +612,11 @@ class PiiRedactor:
         def card(m: re.Match[str]) -> str:
             raw = m.group(0)
             digits = re.sub(r"[ -]", "", raw)
-            return put("CARD", raw) if 13 <= len(digits) <= 19 and luhn_valid(digits) else raw
+            if not (13 <= len(digits) <= 19 and luhn_valid(digits) and card_issuer_valid(digits)):
+                return raw
+            if _NOT_A_CARD_CONTEXT.search(m.string[max(0, m.start() - 24):m.start()]):
+                return raw
+            return put("CARD", raw)
 
         def labelled(m: re.Match[str]) -> str:
             start, end = m.span("value")
@@ -588,7 +626,12 @@ class PiiRedactor:
 
         def email(m: re.Match[str]) -> str:
             raw = m.group(0)
-            return raw if raw.lower() in self._owner else put("EMAIL", raw)
+            if raw.lower() in self._owner:
+                return raw
+            after = m.string[m.end():m.end() + 2]
+            if raw.split("@", 1)[0].lower() in ("git", "hg", "ssh") and after[:1] in (":", "/"):
+                return raw  # git@github.com:owner/repo.git is a remote, not a person
+            return put("EMAIL", raw)
 
         def phone(m: re.Match[str]) -> str:
             raw = m.group(0)
@@ -598,6 +641,7 @@ class PiiRedactor:
         out = _PII_IBAN.sub(iban, text)
         out = _PII_CARD.sub(card, out)
         out = _PII_LABELLED_ID.sub(labelled, out)
+        out = _PII_LABELLED_AADHAAR.sub(labelled, out)
         for pattern in _PII_IDS:
             out = pattern.sub(lambda m: put("ID", m.group(0)), out)
         out = _PII_EMAIL.sub(email, out)

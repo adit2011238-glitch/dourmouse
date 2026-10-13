@@ -47,12 +47,22 @@ def _load() -> tuple[dict[str, Any], str]:
 def privacy_mode() -> bool:
     """On when switched on, and also when the file that says so cannot be
     read: the guarantee is that evidence stays on this Mac, so a damaged
-    setting must not turn it off (finding P5-52)."""
+    setting must not turn it off (finding P5-52). It is the same switch as
+    the app's global Private mode (H-PRIV-7, R5-19): either one on means on."""
     data, state = _load()
-    return state == "unusable" or bool(data.get("privacy_mode"))
+    if state == "unusable" or bool(data.get("privacy_mode")):
+        return True
+    from dourmouse.privacy import PrivacyStore
+
+    return PrivacyStore().private_mode()
 
 
 def set_privacy_mode(on: bool) -> dict[str, Any]:
+    """Owner only (the security console route and SETTINGS; no chat tool). Sets this module's flag and the app's
+    global Private mode together, so there is one switch."""
+    from dourmouse.privacy import PrivacyStore
+
+    PrivacyStore().set_private_mode(bool(on))
     data, state = _load()
     path = settings_path()
     if state == "unusable" and path.exists():

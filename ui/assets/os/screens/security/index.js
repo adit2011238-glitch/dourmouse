@@ -128,7 +128,7 @@ export default {
     function paintEgress(d) {
       const rows = Array.isArray(d && d.rows) ? d.rows.map(egressRow) : [];
       egressEl.dataset.state = rows.length ? 'populated' : 'empty';
-      setHtml(egressEl, html`<div class="muted sec-help">${egressSummary(d)} Every model Dourmouse uses runs in the cloud. This list records each request: never its content, only its size, a fingerprint and what kinds of data it carried.</div>
+      setHtml(egressEl, html`<div class="muted sec-help">${egressSummary(d)} Every model Dourmouse uses runs in the cloud. This list shows the requests Dourmouse recorded: never their content, only size, a fingerprint and what kinds of data they carried. Requests the Claude or Codex program makes on its own are not listed.</div>
         ${rows.map((r) => html`<div class="os-row sec-egress"><span class="rt"><b>${r.provider}</b>${r.model ? html` <span class="muted mono">${r.model}</span>` : ''}
           <span class="muted sec-block">${r.when} &middot; ${r.size} &middot; ${r.tiers}${r.sources ? ' (' + r.sources + ')' : ''}${r.redactions ? ' · ' + r.redactions : ''}</span></span>
           ${r.sensitive ? html`<span class="tag warn">sensitive</span>` : ''}${r.private ? html`<span class="tag ok">private</span>` : ''}</div>`)}`);

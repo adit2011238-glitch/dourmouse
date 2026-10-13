@@ -296,6 +296,11 @@ def _llm_chat(prompt: str, system: str) -> str:
     # value. Converted to the same honest-failure convention every other
     # path in this module already uses, as _LLMUnavailable specifically
     # (not plain RuntimeError) so the retry loop below doesn't retry it.
+    from dourmouse import privacy
+
+    privacy.record_client_request(client, NVIDIA_MODEL,
+                                  [{"role": "system", "content": system}, {"role": "user", "content": prompt}],
+                                  "atlas_proposals", NVIDIA_BASE_URL)
     try:
         response = client.chat.completions.create(
             model=NVIDIA_MODEL,

@@ -111,6 +111,18 @@ def _confirmation_gate_for(approved_prompts: Any = (), declined: list[str] | Non
             declined.append(prompt_text)
         return False
 
+    def ask_owner(prompt_text: str) -> bool | None:
+        """R5-4: a privacy consent question. Auto approve and a ticket for some other action never answer it.
+        Only the exact consent prompt the human was shown on the GOALS screen (it is parked below as a pending
+        prompt) counts as a yes; anything else parks the task with this prompt and answers nothing."""
+        if prompt_text in remaining:
+            remaining.remove(prompt_text)
+            return True
+        if declined is not None:
+            declined.append(prompt_text)
+        return None
+
+    gate.ask_owner = ask_owner  # type: ignore[attr-defined]
     return gate
 
 
@@ -364,6 +376,9 @@ class GoalRuntime:
                 )
                 if text.startswith("DECLINED BY USER:"):
                     blocked_reason.append(f"a gated action needs approval: {text}")
+                elif text.startswith("NOT SENT: the owner has not allowed") and pending_prompts:
+                    # R5-4: a privacy question no unattended run may answer; parked with the question itself.
+                    blocked_reason.append(f"a privacy question needs your answer: {pending_prompts[-1]}")
                 tool_trace.append(f"RESULT ({entry.get('name')}): {text[:300]}")
 
         report = session.ask(

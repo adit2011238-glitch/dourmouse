@@ -212,6 +212,14 @@ def _run_roster(task: DelegationTask, timeout: float) -> DelegationResult:
         job_id = caller.jobs.spawn(
             task=task.prompt, subagent=task.agent, depth=caller.depth + 1, parent_id=caller.current_job_id
         )
+    if caller is None:
+        # R5-6: a task started from the MCP bridge runs on the app's own cloud backend, a different company
+        # from the CLI that wrote it; once that CLI has read a sensitive source it cannot be forwarded.
+        from dourmouse import privacy
+
+        refusal = privacy.forward_refusal("roster")
+        if refusal is not None:
+            return DelegationResult(task=task, ok=False, error=refusal, model_used=ROSTER, seconds=0.0)
     try:
         registry = build_general_registry()
         # A delegated turn gets a short capability note of its own. It already

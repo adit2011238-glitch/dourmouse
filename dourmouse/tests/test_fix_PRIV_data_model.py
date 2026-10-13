@@ -97,8 +97,11 @@ def test_same_value_same_placeholder_and_restore():
 def test_cards_are_not_restored_into_tool_arguments():
     _, _, mapping = _redact("card 4111 1111 1111 1111 for alice@example.org")
     args = {"to": "[EMAIL_1]", "body": "use [CARD_1]", "nested": ["[EMAIL_1]"]}
-    restored = mapping.restore_arguments(args)
-    assert restored == {"to": "alice@example.org", "body": "use [CARD_1]", "nested": ["alice@example.org"]}
+    # FIX-P R5-5: only recipient fields of the mail tools get real values back (the old test pinned "everywhere").
+    restored = mapping.restore_arguments(args, "gmail_send")
+    assert restored == {"to": "alice@example.org", "body": "use [CARD_1]", "nested": ["[EMAIL_1]"]}
+    assert mapping.restore_arguments({"body": "to [EMAIL_1] card [CARD_1]"}, "write_note") == {
+        "body": "to alice@example.org card [CARD_1]"}
     # The owner's reply text gets everything back.
     assert mapping.restore_text("[CARD_1]") == "4111 1111 1111 1111"
 

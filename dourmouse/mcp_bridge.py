@@ -343,22 +343,34 @@ class McpBridgeServer:
                 raise TypeError("arguments must be a JSON object")
             # PRIV-2: placeholders Claude wrote become the real values here,
             # on this Mac, before the tool runs (never cards or IBANs).
-            arguments = privacy_turn.placeholders.restore_arguments(arguments)
-            result_text = _execute_tool(tool, arguments, confirmation_gate=gate,
-                                        policy=self._policy, actor="mcp_bridge")
+            arguments = privacy_turn.placeholders.restore_arguments(arguments, name)
+            with privacy.use_turn(privacy_turn):
+                # R5-6, R5-7: a delegated run started from here joins this chat's gate (Private mode, stored
+                # consent, sources already read) instead of an empty default one.
+                result_text = _execute_tool(tool, arguments, confirmation_gate=gate,
+                                            policy=self._policy, actor="mcp_bridge")
         except Exception as exc:  # noqa: BLE001 - Rule 2.2: a real failure is reported, never fabricated
             result_text = self._scrub(f"ERROR: tool '{name}' failed: {exc}")
+            # R5-17: an error can echo restored arguments or content; same T3 and placeholder pass as a result.
+            result_text = privacy.gate_tool_result(
+                name, arguments if isinstance(arguments, dict) else {}, result_text, turn=privacy_turn,
+                agent=self._owner.get(name), ask=None, own_text=True,
+            )
             self._log_toolcall(name, arguments, result_text)
             return {
                 "content": [{"type": "text", "text": result_text}],
                 "isError": True,
             }
+        from dourmouse.privacy import DispatcherText
+
+        own = isinstance(result_text, DispatcherText)
         result_text = self._scrub(str(result_text))
         # PRIV-1: the same gate as a chat run. Nobody can be asked from this
         # process, so an undecided T2 source is refused with the SETTINGS note.
         result_text = privacy.gate_tool_result(
-            name, arguments, result_text, turn=privacy_turn, agent=self._owner.get(name), ask=None,
+            name, arguments, result_text, turn=privacy_turn, agent=self._owner.get(name), ask=None, own_text=own,
         )
+        privacy_turn.served_bytes += len(str(result_text).encode("utf-8", "replace"))
         privacy.bridge_save(privacy_turn)
         self._log_toolcall(name, arguments, result_text)
         return {"content": [{"type": "text", "text": str(result_text)}], "isError": False}

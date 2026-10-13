@@ -65,6 +65,10 @@ def _run_turns(tmp_path, monkeypatch, prompts):
 
     monkeypatch.setattr(chat_mod, "run_dispatch_messages", fake_dispatch)
     monkeypatch.setattr(chat_mod, "learn_enabled", lambda: True)
+    # FIX-P R5-3: recall needs Memory consent now; this test is about the block's lifecycle, not consent.
+    from dourmouse import privacy
+
+    privacy.PrivacyStore().set_consent("memory", "allow")
     monkeypatch.setattr(chat_mod, "recall_block", lambda memory, prompt: f"REMEMBERED CONTEXT\n- fact about {prompt}")
     monkeypatch.setattr("dourmouse.skills.skill_context_block", lambda prompt: f"[SKILL: s]\nskill for {prompt}")
     from dourmouse.memory_store import MemoryStore

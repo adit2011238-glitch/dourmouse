@@ -186,7 +186,8 @@ def test_asker_stores_only_owner_answers():
     t = _answer_soon(gate, events, True)
     assert ask("q") == (True, True)
     t.join()
-    assert privacy.asker_for(lambda p: True)("q") == (True, False)
+    # FIX-P R5-4: a plain callable (auto approve, a stub) is never asked; the old assertion pinned that bug.
+    assert privacy.asker_for(lambda p: True) is None
     assert privacy.asker_for(None) is None
 
 

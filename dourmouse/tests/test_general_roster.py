@@ -536,8 +536,8 @@ class TestRosterShape:
             "security_restore",
             "security_block_domain",
             "security_unblock_domain",
-            # finding #112: privacy mode decides what leaves the Mac.
-            "security_privacy_mode",
+            # finding #112 / FIX-P H-PRIV-7: privacy mode decides what leaves the Mac, so it is no longer a
+            # chat tool at all (the owner changes it in SETTINGS or the Security console).
             # finding #115: the librarian moves files only when the owner
             # approves a proposal, and putting them back is gated the same.
             "librarian_apply",

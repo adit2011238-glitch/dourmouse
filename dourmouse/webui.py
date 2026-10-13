@@ -447,7 +447,7 @@ _AUTONOMOUS_MAX_TURNS = 24
 
 
 class _PendingConfirmation:
-    __slots__ = ("confirm_id", "prompt_text", "_event", "_approved", "answered")
+    __slots__ = ("confirm_id", "prompt_text", "_event", "_approved", "answered", "kind")
 
     def __init__(self, confirm_id: str, prompt_text: str) -> None:
         self.confirm_id = confirm_id
@@ -457,6 +457,8 @@ class _PendingConfirmation:
         # PRIV: False when the card closed without the owner answering (no
         # window to show it in, a timeout): a consent question then stores nothing.
         self.answered = False
+        #: "privacy_consent" for a consent question: only a click answers it (R5-20)
+        self.kind = "action"
 
     def resolve(self, approved: bool, answered: bool = True) -> None:
         self._approved = approved
@@ -549,6 +551,7 @@ class WebConfirmationGate:
             self._next_id += 1
             confirm_id = f"confirm-{self._next_id}"
             pending = _PendingConfirmation(confirm_id, prompt_text)
+            pending.kind = "privacy_consent"
             self._pending[confirm_id] = pending
         event = {
             "type": "confirmation_requested",
@@ -578,7 +581,12 @@ class WebConfirmationGate:
         awaiting a response — used by the "just say send" chat intercept to
         decide whether a short affirm phrase is unambiguous."""
         with self._lock:
-            return [(p.confirm_id, p.prompt_text) for p in self._pending.values()]
+            return [(p.confirm_id, p.prompt_text) for p in self._pending.values() if p.kind != "privacy_consent"]
+
+    def consent_pending(self) -> bool:
+        """True while a privacy consent card waits for its click. A typed "yes" never answers it (R5-20)."""
+        with self._lock:
+            return any(p.kind == "privacy_consent" for p in self._pending.values())
 
 
 def _decline_confirmations(gate: "WebConfirmationGate") -> Callable[[dict[str, Any]], None]:
@@ -5844,6 +5852,13 @@ class _Handler(BaseHTTPRequestHandler):
         # "yes" as an ordinary message instead of approving anything.
         if _is_imperative_affirm(raw_prompt) and self._is_owner():
             pending = gate.pending_items()
+            if not pending and gate.consent_pending():
+                # R5-20: a privacy consent card is answered by clicking it, never by a stray "yes".
+                sink({"type": "done", "final_text": (
+                    "A privacy question is waiting for your click on its card (Allow or Do not send). "
+                    "A typed yes does not answer it.")})
+                self.close_connection = True
+                return
             if len(pending) == 1:
                 confirm_id, prompt_text = pending[0]
                 ok = self._resolve_confirmation(confirm_id, True, tab_id=tab_id)
@@ -6131,11 +6146,19 @@ class _Handler(BaseHTTPRequestHandler):
         claude_prompt = prompt
         try:
             if session is not None and hasattr(session, "messages"):
-                history = [m for m in session.messages if m.get("role") in ("user", "assistant")]
+                from dourmouse import privacy
+
+                # R5-9, R5-10: what Private mode or a NEVER no longer allows leaves the history first, and the
+                # recap is swapped for placeholders like any other text that goes to a cloud model.
+                with session_lock:
+                    privacy.scrub_history(
+                        session.messages, private=privacy.PrivacyStore().private_for(privacy.current_chat() or "default"))
+                    history = [m for m in session.messages if m.get("role") in ("user", "assistant")]
                 recent = history[-6:]
                 if recent:
+                    recap_map = privacy.mapping_for_current_chat()
                     lines = [
-                        f"{m['role'].upper()}: {str(m.get('content', ''))[:1000]}"
+                        f"{m['role'].upper()}: {privacy.history_safe(str(m.get('content', ''))[:1000], recap_map)}"
                         for m in recent
                     ]
                     claude_prompt = (
@@ -6203,9 +6226,17 @@ class _Handler(BaseHTTPRequestHandler):
         # tab can never interleave with it mid-write.
         try:
             if session is not None and hasattr(session, "messages"):
+                from dourmouse import privacy
+
+                # R5-10: the owner saw the real values; the model's history keeps placeholders, as in the
+                # dispatch loop. The answer carries the sources Claude read through the bridge (R5-9).
+                kept: dict[str, Any] = {"role": "assistant",
+                        "content": privacy.history_safe(final_text, privacy.mapping_for_current_chat())}
+                if privacy.chat_sources():
+                    kept[privacy.PRIV_TAG] = privacy.chat_sources()
                 with session_lock:
                     session.messages.append({"role": "user", "content": prompt})
-                    session.messages.append({"role": "assistant", "content": final_text})
+                    session.messages.append(kept)
         except Exception:  # noqa: BLE001 -- a memory-sync failure never breaks chat
             pass
 

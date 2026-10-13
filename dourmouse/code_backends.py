@@ -172,7 +172,15 @@ _CLAUDE_MCP_CONNECTION_FAILED_RE = re.compile(
 # Write and Edit would run with no approval and no secret scrubbing; --allowedTools
 # only adds to what is allowed. This turns them off for the chat backend, so every
 # action goes through Dourmouse's gated tools.
-_DISALLOWED_NATIVE_TOOLS = "Bash,Write,Edit,MultiEdit,NotebookEdit,WebFetch,WebSearch"
+#: R5-1: the CLI's own file readers are denied too. Anything Claude reads with Read, Glob, Grep or LS
+#: goes to Anthropic without passing the privacy gate (.env, ~/.ssh, any document), so in front mode the
+#: only way to touch the disk is through Dourmouse's own gated tools. ToolSearch stays: it loads the
+#: bridge's tools. The claude_code tool keeps the native tools (the owner approves each call), see
+#: general_roster._claude_code_mcp_args, which drops this whole list.
+_DISALLOWED_NATIVE_TOOLS = "Bash,Write,Edit,MultiEdit,NotebookEdit,WebFetch,WebSearch," + (
+    "PowerShell,NotebookRead,Read,Glob,Grep,LS,Task,Agent,TodoWrite,SlashCommand,Skill,REPL,Monitor,"
+    "EnterWorktree,ExitWorktree"
+)
 _MCP_ALLOWED_TOOLS = "mcp__dourmouse__*"
 
 #: Phase J: told to a CODE chat once per session so it knows the shared desk
@@ -295,6 +303,22 @@ def _toolcall_log_size(path: str) -> int:
         return 0
 
 
+def _scratch_cwd(cwd: str | None) -> str | None:
+    """R5-1: the folder the Claude CLI process runs in. An empty scratch folder under the workspace, never the
+    project root, so a native file tool that slipped past the deny list finds nothing. The logical ``cwd`` still
+    names the session. A caller with no cwd keeps none."""
+    if cwd is None:
+        return None
+    try:
+        from dourmouse.config import workspace_dir
+
+        path = workspace_dir() / "claude_scratch"
+        path.mkdir(parents=True, exist_ok=True)
+        return str(path)
+    except OSError as exc:
+        raise RuntimeError(f"could not prepare the scratch folder for the claude CLI: {exc}") from exc
+
+
 def _claude_session_key(cwd: str | None, tab: str | None = None) -> str:
     """The key a Claude conversation is tracked under.
 
@@ -319,6 +343,12 @@ def _claude_session_args(key: str, *, fresh: bool = False) -> list[str]:
     wasn't actually handed back by a real ``claude`` invocation — the first
     call for a key mints one via ``--session-id`` and every later call
     resumes that exact id via ``--resume``."""
+    # R5-9: a session that already holds results this chat may no longer send (Private mode was turned on, or a
+    # source it read went to NEVER) is dropped, so Claude's own resumed history cannot replay them.
+    from dourmouse import privacy
+
+    if not fresh and privacy.session_must_restart():
+        fresh = True
     with _CLAUDE_SESSIONS_LOCK:
         session_id = None if fresh else _CLAUDE_SESSIONS.get(key)
         if session_id is None:
@@ -606,7 +636,7 @@ def _run_claude_once(
     # call, read back and removed after it), and the request is recorded.
     from dourmouse import privacy
 
-    privacy_env, privacy_map = privacy.bridge_handoff() if bridge_wired else ({}, None)
+    privacy_env, privacy_map = privacy.bridge_handoff("claude_cli") if bridge_wired else ({}, None)
     env.update(privacy_env)
     privacy.record_egress(backend="claude_cli", model="claude", text=task, origin="claude_cli")
     try:
@@ -619,7 +649,7 @@ def _run_claude_once(
                 cli, "-p", "--permission-mode", "bypassPermissions",
                 *session_args, *mcp_args,
             ],
-            cwd=cwd,
+            cwd=_scratch_cwd(cwd),
             env=env,
             input=task,
             capture_output=True,
@@ -963,7 +993,7 @@ def stream_claude(
     # streamed reply are shown to the owner as the real values.
     from dourmouse import privacy
 
-    privacy_env, privacy_map = privacy.bridge_handoff() if _bridge_wired else ({}, None)
+    privacy_env, privacy_map = privacy.bridge_handoff("claude_cli") if _bridge_wired else ({}, None)
     privacy_mapping = privacy.mapping_for_current_chat()
     restorer = privacy.StreamRestorer(privacy_mapping, on_delta) if on_delta is not None else None
     if restorer is not None:
@@ -985,7 +1015,7 @@ def stream_claude(
                 "--permission-mode", "bypassPermissions",
                 *session_args, *mcp_args,
             ],
-            cwd=cwd,
+            cwd=_scratch_cwd(cwd),
             env=cli_env,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
@@ -1158,6 +1188,27 @@ def stream_claude(
     return final_result[-_OUTPUT_CAP:]
 
 
+#: R5-2: the permission profile Codex front mode runs under. ``:minimal`` is Codex's own set of system paths a
+#: command needs to start; the only other readable folder is the empty scratch folder. Nothing under the home
+#: folder (.env, ~/.ssh, documents) can be read. Checked with `codex sandbox` (no model call) on codex-cli 0.144.
+_CODEX_PROFILE = "dourmouse_front"
+
+
+def _codex_front_args(scratch: str, bridge_env: dict[str, str]) -> list[str]:
+    """The ``-c`` overrides for one Codex front-mode run: the deny-by-default profile, and the bridge's
+    per-call privacy environment (``mcp_servers.dourmouse.env`` merges into the registered server's env)."""
+    import json as _json
+
+    fs = "{" + f'":minimal"="read",{_json.dumps(scratch)}="read"' + "}"
+    args = [
+        "-c", f'default_permissions="{_CODEX_PROFILE}"',
+        "-c", f"permissions.{_CODEX_PROFILE}.filesystem={fs}",
+    ]
+    for key, value in bridge_env.items():
+        args += ["-c", f"mcp_servers.dourmouse.env.{key}={_json.dumps(value)}"]
+    return args
+
+
 def _run_codex(task: str, *, cwd: str | None, timeout: int) -> str:
     """Run a coding task through the user's real Codex CLI (headless).
 
@@ -1189,14 +1240,19 @@ def _run_codex(task: str, *, cwd: str | None, timeout: int) -> str:
     from dourmouse import privacy
 
     privacy.record_egress(backend="codex_cli", model="codex", text=task, origin="codex_cli")
+    # R5-2: Codex runs under a permission profile that can read nothing but an empty scratch folder
+    # (its own shell and file reads reach OpenAI without passing the privacy gate), and its Dourmouse
+    # bridge is handed this chat's Private flag and placeholder map for this one call.
+    scratch = _scratch_cwd(cwd or ".")
+    privacy_env, privacy_map = privacy.bridge_handoff("codex_cli")
     try:
         proc = subprocess.run(
             # The task goes on stdin, never argv (finding #088): on Windows the
             # npm-installed CLI is a .cmd shim run through cmd.exe, whose 8191-char
             # limit and newline handling broke every first turn (the orchestrator
             # preamble alone is ~16.5 KB), and Linux caps one argument at 128 KB.
-            [cli, "exec", "-", "--skip-git-repo-check"],
-            cwd=cwd,
+            [cli, "exec", *_codex_front_args(str(scratch), privacy_env), "-", "--skip-git-repo-check"],
+            cwd=scratch,
             input=task,
             capture_output=True,
             text=True, encoding="utf-8", errors="replace",
@@ -1206,6 +1262,8 @@ def _run_codex(task: str, *, cwd: str | None, timeout: int) -> str:
         raise RuntimeError(f"codex timed out after {timeout}s (task still running).") from None
     except OSError as exc:
         raise RuntimeError(f"could not run the codex CLI: {exc}") from exc
+    finally:
+        privacy.bridge_collect(privacy_map, backend="codex_cli")
     out = (proc.stdout or "").strip()
     err = (proc.stderr or "").strip()
     if proc.returncode != 0:
@@ -1254,6 +1312,22 @@ def run_code_task(
     if not task:
         raise RuntimeError("run_code_task requires a non-empty 'task'.")
     name = (backend or "").strip().lower()
+    # R5-6: the task is model-written and may quote what this request read; it goes only to the request's own
+    # backend once a sensitive source has been read.
+    from dourmouse import privacy
+
+    if name == "claude":
+        target = "claude_cli"
+    elif name in ("codex", "openai_codex"):
+        target = "codex_cli"
+    else:
+        try:
+            target = privacy.backend_for_base_url(load_backend(name)[0])
+        except RuntimeError:
+            target = name  # not configured: the run below reports that; nothing is sent
+    refusal = privacy.forward_refusal(target)
+    if refusal is not None:
+        raise RuntimeError(refusal)
     if name == "claude":
         # v8.31: inject real shared-memory context before the CLI ever
         # sees the task — see _inject_shared_context's own docstring for

@@ -88,6 +88,9 @@ def dispatch(
     extra_body = {"enable_thinking": False} if isinstance(config, OllamaConfig) else None
 
     for _ in range(max_turns):
+        from dourmouse import privacy
+
+        privacy.record_client_request(client, model, messages, "orchestrator", getattr(config, "base_url", ""))
         response = client.chat.completions.create(
             model=model,
             messages=messages,

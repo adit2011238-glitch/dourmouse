@@ -337,7 +337,12 @@ class ChatSession:
         # system message, so the model actually uses what it learned from past
         # sessions. No matches -> the base system message is left exactly as
         # is (never a stale recall block from a previous turn).
-        if self.memory is not None and learn_enabled():
+        from dourmouse import privacy as _privacy
+
+        # R5-3: stored notes, imported history summaries and earlier answers are the
+        # owner's Memory. Added without a tool call, so it follows the same rule as
+        # the other automatic blocks: Memory allowed and Private mode off, never asks.
+        if self.memory is not None and learn_enabled() and _privacy.auto_injection_allowed("memory"):
             block = recall_block(self.memory, prompt)
             if block:
                 # PRIV (H-PRIV-4): past turns are T1 (the owner's own
@@ -347,9 +352,12 @@ class ChatSession:
                 from dourmouse import privacy
                 from dourmouse.governance import PiiRedactor
 
-                block, _ = PiiRedactor(privacy.owner_emails()).redact(
-                    block, privacy.placeholder_map(privacy.current_chat() or self.session_file.stem)
-                )
+                try:
+                    block, _ = PiiRedactor(privacy.owner_emails()).redact(
+                        block, privacy.placeholder_map(privacy.current_chat() or self.session_file.stem)
+                    )
+                except privacy.PlaceholderMapFull:
+                    block = ""  # R5-13: more identifiers than the map keeps; the block is left out, not sent raw
                 # KV-cache stability (v4.2 speed): messages[0] stays the
                 # immutable base prompt, so the stable prefix (system +
                 # history) is reused between turns instead of re-prefilling
@@ -357,9 +365,10 @@ class ChatSession:
                 # injected as its OWN trailing system message, just before
                 # the new directive — the model reads it as context, and the
                 # bounded window in dispatch.py always keeps it.
-                recall_msg = {"role": "system", "content": block}
-                self.messages.insert(-1, recall_msg)
-                self._turn_blocks.append(recall_msg)
+                if block:
+                    recall_msg = {"role": "system", "content": block}
+                    self.messages.insert(-1, recall_msg)
+                    self._turn_blocks.append(recall_msg)
         # Domain H piece 3 (Skills-as-modular-capability-packages): same
         # trailing-system-message pattern as the memory recall block just
         # above, for the same reason (KV-cache stability: messages[0] never

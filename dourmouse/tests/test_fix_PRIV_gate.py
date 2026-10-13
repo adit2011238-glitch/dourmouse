@@ -144,8 +144,8 @@ def test_b_identifiers_are_placeholders_and_map_back_in_reply_and_arguments(allo
     for raw in ("alice@example.org", "4111 1111 1111 1111", "+44 20 7946 0958", "221B Baker Street"):
         assert raw not in wire
     assert "[EMAIL_1]" in wire and "[CARD_1]" in wire
-    # Tool arguments: the real address and phone, never the card.
-    assert sent == [{"to": "alice@example.org", "body": "Paid with [CARD_1], call +44 20 7946 0958"}]
+    # Tool arguments: the real address in the recipient field only (FIX-P R5-5), never the card or the phone.
+    assert sent == [{"to": "alice@example.org", "body": "Paid with [CARD_1], call [PHONE_1]"}]
     # The owner's reply shows everything.
     assert report["final_text"] == "Replied to alice@example.org about the card 4111 1111 1111 1111."
     # The model's own history keeps the placeholders.
@@ -205,10 +205,19 @@ def test_c_no_is_remembered_and_unanswered_is_not():
 
 
 def test_c_a_plain_callable_approves_one_request_only():
+    # FIX-P R5-4: only a gate marked interactive_consent (the terminal prompt) may approve one request;
+    # a plain callable (auto approve, a stub) is never asked. The old version pinned the bug.
+    def terminal(_p: str) -> bool:
+        return True
+
+    terminal.interactive_consent = True  # type: ignore[attr-defined]
     provider = ScriptedProvider([_Msg(tool_calls=[_Tc(1, "gmail_read", {"id": "m1"})]), _Msg(content="ok")])
-    _run(provider, _registry([]), gate=lambda _p: True)
+    _run(provider, _registry([]), gate=terminal)
     assert "merger" in provider.sent_text()
     assert privacy.PrivacyStore().consent("mail") is None
+    provider = ScriptedProvider([_Msg(tool_calls=[_Tc(1, "gmail_read", {"id": "m1"})]), _Msg(content="ok")])
+    _run(provider, _registry([]), gate=lambda _p: True)
+    assert "merger" not in provider.sent_text()
 
 
 def test_d_ledger_row_from_a_real_ollama_client_has_no_content(allow_mail):
@@ -364,6 +373,8 @@ def test_h_priv4_recalled_past_turns_are_swapped_like_any_t1_result(tmp_path, mo
 
     monkeypatch.setattr(chat_mod, "run_dispatch_messages", fake_dispatch)
     monkeypatch.setattr(chat_mod, "learn_enabled", lambda: True)
+    # FIX-P R5-3: the recall block is Memory content, so it needs Memory consent (the old test pinned "T1, no consent").
+    privacy.PrivacyStore().set_consent("memory", "allow")
     monkeypatch.setattr(chat_mod, "recall_block",
                         lambda memory, prompt: "REMEMBERED CONTEXT\n- carol@example.org asked about the invoice")
     session = ChatSession(DispatchRegistry(), session_file=tmp_path / "s.jsonl", memory=MemoryStore(tmp_path / "m.db"))

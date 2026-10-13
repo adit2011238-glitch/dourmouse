@@ -142,9 +142,16 @@ def generate_profile(
     if has_profile(store) and not force:
         return {"ok": False, "reason": "already_generated"}
 
+    # R5-12: the source material is session summaries of the owner's coding conversations, which is Memory.
+    # It goes to a cloud model only when Memory is allowed and Private mode is off, with identifiers swapped.
+    from dourmouse import privacy
+
+    if not privacy.auto_injection_allowed("memory"):
+        return {"ok": False, "reason": "memory_not_allowed"}
     source_material = _gather_source_material(store)
     if not source_material.strip():
         return {"ok": False, "reason": "no_source_material"}
+    source_material = privacy.history_safe(source_material, privacy.placeholder_map("profile"))
 
     if client is None:
         config = config or load_llm_config()
@@ -174,6 +181,11 @@ def generate_profile(
         # as if it were the answer — genuinely on-topic content, just
         # never finished. This is a single one-time call, not a hot
         # path, so there is no real cost reason to cap it tight.
+        from dourmouse.dispatch import OllamaNativeClient
+
+        if not isinstance(client, OllamaNativeClient):  # that client writes its own ledger row
+            privacy.record_client_request(client, model, messages, "personality_profile",
+                                          getattr(config, "base_url", "") or "")
         response = client.chat.completions.create(
             model=model, messages=messages, max_tokens=4000,
         )

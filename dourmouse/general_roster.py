@@ -386,6 +386,11 @@ def _claude_code_tool(arguments: dict[str, Any]) -> str:
             f"REFUSED: the task is {len(task)} characters; claude_code takes at most {_MAX_CLI_TASK_CHARS} so "
             "the approval prompt can show all of it. Split it into smaller tasks."
         )
+    from dourmouse import privacy
+
+    refusal = privacy.forward_refusal("claude_cli")  # R5-6
+    if refusal is not None:
+        return refusal
     cli = _find_claude_cli()
     if cli is None:
         return (
@@ -559,6 +564,11 @@ def _codex_code_tool(arguments: dict[str, Any]) -> str:
             f"REFUSED: the task is {len(task)} characters; codex_code takes at most {_MAX_CLI_TASK_CHARS} so "
             "the approval prompt can show all of it. Split it into smaller tasks."
         )
+    from dourmouse import privacy
+
+    refusal = privacy.forward_refusal("codex_cli")  # R5-6
+    if refusal is not None:
+        return refusal
     cli = _find_codex_cli()
     if cli is None:
         return (
@@ -1335,7 +1345,7 @@ def _list_calendar_events_tool(arguments: dict[str, Any]) -> str:
 # the auth database), and run_python never copies from here.
 _PROTECTED_WORKSPACE_TOP = frozenset({
     "self_extensions", "auth", "state", "security", "memory", "sessions", "librarian", "office",
-    "research_pipeline", "compute", "atlas_lab", "device_wiki", "neuro",
+    "research_pipeline", "compute", "atlas_lab", "device_wiki", "neuro", "privacy",
 })
 _PROTECTED_FILE_RE = re.compile(
     r"(^\.env($|\.)|\.(db|sqlite|sqlite3|pem|key|p12)$|\.db-(wal|shm)$|^(schedules|world_history)\.jsonl$|^mcp_servers\.json$|^spotify_tokens\.json$|^order_guard(_state\.json|\.lock)$)", re.IGNORECASE

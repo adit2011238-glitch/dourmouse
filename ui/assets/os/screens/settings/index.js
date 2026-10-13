@@ -82,7 +82,7 @@ export default {
       const sources = Array.isArray(p.sources) ? p.sources : [];
       const providers = Array.isArray(p.providers) ? p.providers : [];
       privEl.dataset.state = 'populated';
-      setHtml(privEl, html`<div class="muted set-help">${p.limits || ''} Public web results and your own calendar, tasks and file names are never asked about.</div>
+      setHtml(privEl, html`<div class="muted set-help">${p.limits || ''} Public web results and your own calendar, tasks and file names are never asked about. Never sent in any mode: passwords, Keychain items, .env files, keys, cookies, tokens and card numbers.</div>
         ${p.note ? html`<div class="muted set-err">${p.note}</div>` : ''}
         <div class="kv set-tg"><span>Private mode for every chat${p.private_mode ? html` <span class="tag ok">on</span>` : ''}</span>
           ${sw('data-privmode', 'all', p.private_mode, 'Private mode for every chat', 'When on, no sensitive source is sent to a cloud model from any chat and the tools that read them are hidden. Each chat also has its own Private switch in its toolbar.', false)}</div>

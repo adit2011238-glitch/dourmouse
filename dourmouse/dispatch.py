@@ -54,7 +54,7 @@ from openai import OpenAI
 
 from dourmouse import model_router
 from dourmouse.agent_prompts import TOOL_USE_GUIDE as _TOOL_USE_GUIDE
-from dourmouse.backend_fallback import load_llm_config_with_fallback, probe_ollama_fallback
+from dourmouse.backend_fallback import load_llm_config_with_fallback
 from dourmouse.config import (
     NvidiaConfig,
     OllamaConfig,
@@ -62,8 +62,6 @@ from dourmouse.config import (
     backend_identity,
     brief_mode_enabled,
     fast_lane_enabled,
-    fast_lane_model,
-    fast_lane_model_swap_enabled,
 )
 from dourmouse.execution_policy import RunPolicy
 from dourmouse.governance import (
@@ -74,6 +72,7 @@ from dourmouse.governance import (
     validate_tool_arguments,
 )
 from dourmouse.planner import build_plan, looks_multi_step
+from dourmouse.privacy import DispatcherText
 
 
 # Transient API failures worth retrying (institutional self-correction):
@@ -669,6 +668,9 @@ def _call_with_retry(
     always followed by a genuine response or a genuine error — never a
     fabricated one.
     """
+    from dourmouse import privacy as _privacy
+
+    messages = _privacy.strip_tags(messages)  # R5-9: private bookkeeping keys never go to a provider
     start = time.perf_counter()
     ok = True
     stop_heartbeat = threading.Event()
@@ -966,6 +968,12 @@ def _call_with_retry_inner_impl(
                     client, model = switched
             time.sleep(_rate_limit_delay(exc, attempt, backoff) if limited else backoff * (2**attempt))
             attempt += 1
+    if client_factory is not None and getattr(client_factory, "exhausted", lambda: False)():
+        label = getattr(client_factory, "provider_label", "cloud")
+        raise RuntimeError(
+            f"RATE LIMITED: every {label} account is cooling down after a rate limit, and Dourmouse does not fall "
+            "back to a model on this Mac. Try again in a few minutes, or add another account key in SETTINGS."
+        ) from last_exc
     if fallback and fallback != model:
         if call_log is not None:
             call_log.append({"model": fallback, "attempt": "fallback"})
@@ -2144,18 +2152,7 @@ class OllamaNativeClient:
         self._headers = {"Content-Type": "application/json"}
         if config.api_key:
             self._headers["Authorization"] = f"Bearer {config.api_key}"
-        # Real, live-reproduced bug (2026-09-11): _fast_lane_model_is_servable
-        # special-cased "isinstance(client, OllamaNativeClient) -> True"
-        # unconditionally, so a fast-lane turn always swapped in
-        # fast_lane_model() (a small LOCAL-only model name, e.g.
-        # "qwen2.5:7b") even when THIS client was built against Ollama
-        # CLOUD (config.is_cloud, api_key set, base_url=ollama.com) — the
-        # exact "unconditional swap" failure mode the base_url heuristic
-        # right below already exists to prevent for every OTHER client
-        # type, just never applied here. Every fast-lane turn against a
-        # real BYOK Ollama Cloud account 404'd
-        # ("qwen2.5:7b" is not a real Ollama Cloud catalog entry) until this
-        # was recorded so the fast-lane check can tell the two apart.
+        # Recorded so callers can tell Ollama Cloud (is_cloud) from an explicit endpoint.
         self._is_cloud = bool(config.is_cloud)
         # Real bug found and fixed here (2026-08-30, live-caught while
         # debugging an unrelated 400): `self._post is self._default_post`
@@ -2451,15 +2448,10 @@ def _nvidia_rotation_factory(
     against the next available one — same provider, same ``model``, just
     a different account.
 
-    v_next: when the pool is EXHAUSTED (model_router.pool_exhausted —
-    every account cooling down mid-conversation), this closes the gap
-    backend_fallback.py always had: that module's own fallback only ever
-    probes at config-load, never reacts to a mid-call rate-limit signal.
-    Here, exhaustion instead probes local Ollama
-    (backend_fallback.probe_ollama_fallback) and, if it answers, switches
-    the turn to a DIFFERENT CONFIGURED BACKEND — which is why the factory
-    returns ``(client, model)`` rather than just a client: a backend switch
-    changes the model string too, not only the client.
+    When the pool is EXHAUSTED (model_router.pool_exhausted: every account
+    cooling down mid-conversation) there is no fallback to a model on this
+    Mac (H-PRIV-5, cloud models only): ``exhausted()`` turns true and the
+    retry loop ends the turn with a clear RATE LIMITED message.
 
     2026-09-14 (user-directed: "multiple api keys for multiple models and
     accounts at the same time as fallbacks"): extended from NVIDIA-only to
@@ -2492,7 +2484,7 @@ def _nvidia_rotation_factory(
     # key. Without this the first rotation marked nothing as cooling and
     # could hand the same exhausted account straight back (finding P2-6).
     in_use = next((a for a in pool.accounts() if a.api_key and a.api_key == getattr(config, "api_key", None)), None)
-    state: dict[str, model_router.Account | None] = {"current": in_use}
+    state: dict[str, Any] = {"current": in_use}
 
     def factory() -> tuple[Any, str] | None:
         previous = state["current"]
@@ -2507,20 +2499,11 @@ def _nvidia_rotation_factory(
             # isn't actually empty (shouldn't happen given select()'s own
             # relaxation, but never invent a fallback when one isn't real).
             return None
-        fallback_cfg = probe_ollama_fallback()
-        if fallback_cfg is None:
-            # Every account is cooling down AND no other configured
-            # backend answered either — keep serving on the client we
-            # already have rather than raising here; the caller's own
-            # retry/fallback machinery still runs against it and surfaces
-            # the real error if it genuinely can't succeed (Rule 2.2).
-            return None
-        print(
-            f"[BACKEND] {provider_label} account pool exhausted (all accounts "
-            f"cooling down) mid-conversation; switching to local Ollama "
-            f"({fallback_cfg.model}) for the rest of this turn."
-        )
-        return OllamaNativeClient(fallback_cfg), fallback_cfg.model
+        # H-PRIV-5: every account is cooling down. There is no local model to fall back to (cloud models only);
+        # the turn keeps the client it has and, after its retries, fails with the clear message built from
+        # ``exhausted()`` below.
+        state["exhausted"] = True
+        return None
 
     def start_on_available_account() -> tuple[Any, str] | None:
         """When the account the caller's client was built from is already in
@@ -2536,6 +2519,8 @@ def _nvidia_rotation_factory(
         return (_client_for(account), model)
 
     factory.start_on_available_account = start_on_available_account  # type: ignore[attr-defined]
+    factory.exhausted = lambda: bool(state.get("exhausted")) and model_router.pool_exhausted(pool)  # type: ignore[attr-defined]
+    factory.provider_label = provider_label  # type: ignore[attr-defined]
     return factory
 
 
@@ -3108,7 +3093,7 @@ def _execute_tool(
     )
     if decision is not None and decision[0] == "refuse":
         _ep.record("denied", spec.name, arguments, actor, reason=decision[1][:300])
-        return f"REFUSED: {decision[1]}"
+        return DispatcherText(f"REFUSED: {decision[1]}")
     if decision is not None:
         # Ask the human, through the same gate and the same ledger entries as
         # a tool that always asks. A call that was already gated keeps its own
@@ -3134,7 +3119,7 @@ def _execute_tool(
                                scope=scope)
         if reason:
             _ep.record("denied", spec.name, arguments, actor, reason=reason)
-            return f"REFUSED BY POLICY: {reason}"
+            return DispatcherText(f"REFUSED BY POLICY: {reason}")
     result = _execute_tool_inner(spec, arguments, confirmation_gate, ledger)
     if result.startswith("DECLINED BY USER") or result.startswith("CONFIRMATION REQUIRED"):
         _ep.record("declined", spec.name, arguments, actor)
@@ -3162,7 +3147,7 @@ def _execute_tool_inner(
     the gate itself is a black box to the engine.
     """
     if spec.permission is Permission.PROHIBITED:
-        return (
+        return DispatcherText(
             f"REFUSED: tool '{spec.name}' is prohibited by policy and will "
             "never execute."
         )
@@ -3174,7 +3159,7 @@ def _execute_tool_inner(
 
     denial = run_pre_tool_hooks(spec.name, arguments)
     if denial:
-        return f"BLOCKED BY HOOK: {denial}"
+        return DispatcherText(f"BLOCKED BY HOOK: {denial}")
     # Real, live-found gap (commercial-grade reliability pass, 2026-09-12):
     # calling a REQUIRES_CONFIRMATION tool with a required argument missing
     # (or explicitly null) built a confirm_prompt from a hole in its own
@@ -3187,7 +3172,7 @@ def _execute_tool_inner(
     required = spec.parameters.get("required") or []
     missing = [key for key in required if arguments.get(key) is None]
     if missing:
-        return (
+        return DispatcherText(
             f"ERROR: tool '{spec.name}' failed: missing required "
             f"argument(s) {', '.join(missing)}."
         )
@@ -3224,7 +3209,7 @@ def _execute_tool_inner(
             # real fix (ask again from a normal chat tab, not this direct
             # CLI toolchain) removes the guesswork instead of trusting the
             # model to invent a plausible-sounding but false next step.
-            return (
+            return DispatcherText(
                 f"CONFIRMATION REQUIRED: {prompt_text} — NOT executed. "
                 "This chat mode (the direct Claude CLI toolchain / MCP "
                 "connection) has no confirmation dialog at all — none will "
@@ -3252,7 +3237,7 @@ def _execute_tool_inner(
                 }
             )
         if not approved:
-            return f"DECLINED BY USER: {prompt_text}"
+            return DispatcherText(f"DECLINED BY USER: {prompt_text}")
     # Real, live-reproduced bug (full-day feature sweep, 2026-09-12): a
     # model call supplied its own FABRICATED extra fields (a made-up price/
     # day_range/timestamp) alongside stock_quote's real 'symbol' argument —
@@ -3305,7 +3290,7 @@ def _execute_tool_inner(
         # and the DLP boundary below key off an ERROR prefix, and the model
         # is trained on it. What changes is the tail: transport noise is
         # replaced by a sentence, while a genuine diagnostic survives.
-        error_result = (
+        error_result = DispatcherText(
             f"ERROR: tool '{spec.name}' failed: "
             + net_errors.friendly(exc, what=f"a result from {spec.name}")
         )
@@ -4098,41 +4083,6 @@ def system_message(
     return base
 
 
-def _fast_lane_model_is_servable(client: Any) -> bool:
-    """Whether DOURMOUSE_FAST_MODEL can actually be served by `client`.
-
-    The fast lane swaps in a small *local* model name (default qwen3:4b) to
-    get the first token out sooner. That is only meaningful when the client
-    is the local Ollama daemon. Against a hosted backend the name is simply
-    unknown, and the request comes back "404 page not found" — which is what
-    every short question did on a machine configured for NVIDIA, because the
-    swap happened unconditionally.
-
-    A hosted backend does not need the lane anyway: the measured p50 there is
-    ~1.1s, faster than the local small model. So when the client is not
-    local, keep the primary model and let the lane's other savings (the
-    compact system prompt) still apply.
-
-    Real, live-reproduced bug (2026-09-11): this used to return True for
-    EVERY OllamaNativeClient unconditionally, including one built against
-    real Ollama Cloud (api_key set, base_url=ollama.com) — the swap then
-    sent fast_lane_model()'s small LOCAL-only model name (e.g.
-    "qwen2.5:7b") to the cloud endpoint and got a real 404 on every
-    fast-lane turn. OllamaNativeClient now records its own config.is_cloud
-    at construction (see its __init__) so this can tell the two apart
-    exactly like the base_url heuristic below already does for every other
-    client type.
-    """
-    if isinstance(client, OllamaNativeClient):
-        return not getattr(client, "_is_cloud", False)
-    base_url = str(getattr(client, "base_url", "") or "").lower()
-    if not base_url:
-        # An unrecognised or test double: assume the historical behaviour so
-        # engine tests that assert the swap keep passing.
-        return True
-    return "127.0.0.1" in base_url or "localhost" in base_url or ":11434" in base_url
-
-
 def run_dispatch_messages(
     messages: list[dict[str, Any]],
     registry: DispatchRegistry,
@@ -4314,8 +4264,8 @@ def run_dispatch_messages(
         and fast_lane_enabled()
         and _is_pure_chat(str(last_user), registry)
     )
-    if fast_lane and _fast_lane_model_is_servable(client) and fast_lane_model_swap_enabled():
-        model = fast_lane_model()
+    # H-PRIV-5: the lane never swaps in a small model any more. Every model is a large cloud one (the owner's
+    # model policy); a pure-chat turn keeps the turn's own model and only gets the compact prompt and no tool loop.
     # world-monitor-expansion (UX pass item 1): real backend identity for
     # the console's per-response model/local indicator.
     backend_name, backend_local = backend_identity(config)
@@ -4465,8 +4415,16 @@ def run_dispatch_messages(
 
         with privacy.turn_scope(privacy.current_chat() or session_stem or "", query=str(last_user)) as _turn:
             if depth == 0 or _turn.provider == "the cloud model":
-                _turn.provider = privacy.provider_label(_backend_of_client(client))
+                _turn.backend = _backend_of_client(client)
+                _turn.provider = privacy.provider_label(_turn.backend)
+            _first_new = len(messages)
+            if depth == 0:
+                # R5-9: what Private mode or a NEVER no longer allows leaves the history first.
+                privacy.scrub_history(messages, private=_turn.private)
+                _first_new = len(messages)
             report = _run_dispatch_loop(messages, registry, max_turns, ctx)
+            if depth == 0:
+                privacy.tag_new_messages(messages, _first_new, _turn)
     finally:
         stack.pop()
         # Note: unlike the old shared-list version, there is no
@@ -5728,6 +5686,7 @@ def _run_dispatch_loop(
             _emit_event(event_sink, use_entry, ctx=ctx)
             spec = registry.lookup(name)
             gate_arguments: Any = {}
+            result_is_own = True  # R5-15: false only when a tool handler wrote the text
             if spec is None:
                 # v8.11 capability-denial guard: rule 10 of the system
                 # prompt names AGENTS ("system", "dev_coding", ...) in the
@@ -5808,7 +5767,7 @@ def _run_dispatch_loop(
                         # PRIV-2: placeholders the model wrote ("reply to
                         # [EMAIL_1]") become the real values on this Mac
                         # before the tool runs; cards and IBANs never do.
-                        arguments = turn.placeholders.restore_arguments(arguments)
+                        arguments = turn.placeholders.restore_arguments(arguments, name)
                         gate_arguments = arguments
                         dedup_key = (
                             (name, json.dumps(arguments, sort_keys=True, default=str))
@@ -5831,6 +5790,7 @@ def _run_dispatch_loop(
                                 "with the same arguments; reusing that result]\n"
                                 + prior_result
                             )
+                            result_is_own = isinstance(prior_result, DispatcherText)
                         else:
                             try:
                                 result_text = _execute_tool(
@@ -5844,6 +5804,7 @@ def _run_dispatch_loop(
                             except Exception as exc:  # surface handler errors honestly
                                 result_text = f"ERROR: tool '{name}' failed: {exc}"
                             else:
+                                result_is_own = isinstance(result_text, DispatcherText)
                                 if dedup_key:
                                     _seen_tool_calls[dedup_key] = result_text
 
@@ -5862,15 +5823,17 @@ def _run_dispatch_loop(
             if result_text:
                 result_text = privacy.gate_tool_result(
                     name, gate_arguments, result_text, turn=turn,
-                    agent=tool_owner.get(name), ask=privacy_ask,
+                    agent=tool_owner.get(name), ask=privacy_ask, own_text=result_is_own,
                 )
 
             result_entry = {"type": "tool_result", "name": name, "text": result_text}
             transcript.append(result_entry)
             _emit_event(event_sink, result_entry, ctx=ctx)
-            messages.append(
-                {"role": "tool", "tool_call_id": tool_call.id, "content": result_text}
-            )
+            tool_message = {"role": "tool", "tool_call_id": tool_call.id, "content": result_text}
+            _sources = privacy.result_sources(name, gate_arguments, result_text, tool_owner.get(name), turn)
+            if _sources:
+                tool_message[privacy.PRIV_TAG] = _sources
+            messages.append(tool_message)
 
         # v13 (real architecture fix, see _COMPLETE_ANSWER_TOOLS's own
         # comment): a single forced_agent call to one of the CLI-backed
@@ -6049,6 +6012,11 @@ def _cli_confirmation_gate(prompt_text: str) -> bool:
     except EOFError:
         return False
     return answer in {"y", "yes"}
+
+
+# R5-4: the owner types this answer at the terminal, so it may answer a privacy consent question
+# (for this one request only). No other plain gate may.
+_cli_confirmation_gate.interactive_consent = True  # type: ignore[attr-defined]
 
 
 if __name__ == "__main__":

@@ -19,7 +19,12 @@ from . import ApiError, Request, route
 _LIMITS = (
     "Every model Dourmouse uses runs in the cloud, so whatever a model reads leaves this Mac. "
     "Card and bank numbers, ID numbers, phone numbers, street addresses and other people's email "
-    "addresses are swapped for placeholders before sending; names and other free text are not."
+    "addresses are swapped for placeholders before sending; names and other free text are not. "
+    "Never sent in any mode: password vault entries, Keychain items, .env files and keys, SSH keys, browser "
+    "cookies and tokens, the owner secret. Not covered: what you type yourself, files you attach, and "
+    "names or free text inside a result. Claude and Codex can read nothing on this Mac by themselves in "
+    "chat mode; they only get what Dourmouse's own tools return. The requests listed in SECURITY are the "
+    "ones Dourmouse recorded."
 )
 
 
@@ -52,8 +57,9 @@ def summary(req: Request) -> tuple[int, dict[str, Any]]:
     if tab_id:
         payload["chat"] = {"tab_id": tab_id, "private": store.chat_private(tab_id),
                            "effective": store.private_for(tab_id)}
-    if store.note:
-        payload["note"] = store.note
+    note = store.note or str(store.snapshot().get("recovery_note") or "")
+    if note:
+        payload["note"] = note
     return 200, payload
 
 
@@ -135,6 +141,6 @@ def egress(req: Request) -> tuple[int, dict[str, Any]]:
         "ok": True,
         "rows": rows,
         "summary": {"requests": len(rows), "by_provider": by_provider, "with_sensitive": t2,
-                    "write_failures": privacy.egress_failures()},
+                    "write_failures": privacy.egress_failures(), "chain": privacy.egress_chain_status()},
         "path": str(privacy.egress_path()),
     }

@@ -255,6 +255,14 @@ def _read_path_tool(arguments: dict[str, Any]) -> str:
             f"REFUSED: {target} is inside a credential/system directory "
             "(Rule 2.6) — the agent never reads there."
         )
+    from dourmouse import privacy
+
+    if privacy.protected_workspace_source(str(target)) is not None:
+        # R5-8: the app's own memory, past chats and state are read through their own tools, not as a file.
+        return (
+            f"REFUSED: {target} is inside the app's own state folders (memory, sessions, device wiki, "
+            "state); use the tool made for that content instead."
+        )
     if not target.is_file():
         return f"ERROR: no such file: {target}"
     try:

@@ -460,6 +460,11 @@ class TestPrivilegedGate:
         return _FakeToolCall("c1", "run_privileged_command", json.dumps({"command": command}))
 
     def test_approved_executes(self, tmp_path, monkeypatch):
+        # FIX-P R5-4: a plain gate no longer answers the privacy question, so Files consent is set up front;
+        # this test is about the approved command running, not about consent.
+        from dourmouse import privacy
+
+        privacy.PrivacyStore().set_consent("files", "allow")
         marker = tmp_path / "ran.txt"
         client = FakeClient(
             [

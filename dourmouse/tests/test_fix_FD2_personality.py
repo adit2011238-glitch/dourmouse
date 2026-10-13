@@ -14,6 +14,15 @@ from dourmouse.tests.test_personality_profile import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _memory_consent(tmp_path, monkeypatch):
+    """The profile reads Memory, which needs the owner's consent (finding #179)."""
+    monkeypatch.setenv("DOURMOUSE_CONFIG_DIR", str(tmp_path / "cfg"))
+    from dourmouse import privacy
+
+    privacy.PrivacyStore().set_consent("memory", "allow")
+
+
 @pytest.fixture
 def store(tmp_path):
     s = MemoryStore(tmp_path / "mem" / "test.db")

@@ -150,7 +150,7 @@ export const CONSENT_CHOICES = [
 export function consentPrompt(source, next) {
   const what = source.label + ' (' + source.what + ')';
   if (next === 'allow') {
-    return 'Let Dourmouse send your ' + what + ' to the cloud model when a chat needs it? Card and bank numbers, ID numbers, phone numbers, street addresses and other people\'s email addresses are swapped for placeholders first; names and other text are not. You can change this here at any time.';
+    return 'Let Dourmouse send your ' + what + ' to the cloud model when a chat needs it? Card and bank numbers, ID numbers, phone numbers, street addresses and other people\'s email addresses are swapped for placeholders first; names and other text are not, and neither is anything you type or attach yourself. It is shared with cloud models, not only one. You can change this here at any time.';
   }
   if (next === 'deny') {
     return 'Never send your ' + what + ' to a cloud model? A chat that needs it is told it was not allowed, and the agent says so.';
@@ -160,7 +160,7 @@ export function consentPrompt(source, next) {
 
 export function privateModePrompt(next) {
   return next
-    ? 'Turn Private mode ON for every chat? Mail, memory, documents, finance, contacts, files outside the workspace and screen content are then never sent to a cloud model, and the tools that read them are hidden. Web search and everything public still work.'
+    ? 'Turn Private mode ON for every chat? Mail, memory, documents, finance, contacts, files outside the workspace and screen content are then never sent to a cloud model by Dourmouse\'s tools, the tools that read them are hidden, and earlier results from them are removed from each chat\'s context. Web search and everything public still work. What you type or attach yourself is still sent.'
     : 'Turn Private mode OFF for every chat? Sensitive sources are then sent only where you allowed them below. A chat you made private in its own toolbar stays private.';
 }
 

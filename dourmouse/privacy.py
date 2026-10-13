@@ -15,7 +15,7 @@ this Mac. This module is how Dourmouse sends less and keeps a record:
 * **Consent and Private mode.** ``PrivacyStore``: one small JSON in the
   settings folder. Only the owner's SETTINGS routes write it.
 * **Egress ledger.** ``record_egress``: one metadata line per model request
-  (never content), under ``<workspace>/privacy/egress.jsonl``.
+  (never content), under ``<settings folder>/privacy/egress.jsonl`` as a hash chain.
 
 ``gate_tool_result`` is the one function the dispatch loop and the MCP bridge
 call for every tool result. See ~/Documents/DOURMOUSE/PRIV_DESIGN_NOTE.md.
@@ -91,6 +91,9 @@ _T2_TOOLS: dict[str, str] = {
     "run_command": "files", "run_privileged_command": "files", "run_python_host": "files",
     "compute_run_python": "files", "freebuff_read_thread": "files", "freebuff_notes": "files",
     "freebuff_dispatch": "files",
+    # H-FIXP-1: these two run the Claude or Codex CLI with its own file and shell tools on (the owner approves
+    # each call), so their output can be anything those tools read.
+    "claude_code": "files", "codex_code": "files",
     # Apps, screen and browser pages
     "browser_snapshot": "screen", "browser_extract": "screen", "browser_screenshot": "screen",
     "browser_click": "screen", "browser_type": "screen", "browser_fill": "screen", "browser_fill_form": "screen",
@@ -99,6 +102,9 @@ _T2_TOOLS: dict[str, str] = {
     "app_driver_snapshot": "screen", "app_driver_click": "screen", "app_driver_type": "screen",
     "app_driver_press_key": "screen", "app_driver_scroll": "screen",
     "clipboard_get": "screen", "security_browser_history": "screen",
+    # Names of downloaded files, devices on the network and open ports (R5-16).
+    "security_downloads": "files", "security_known_devices": "files", "security_external_peers": "files",
+    "list_exposed_services": "files",
 }
 
 #: Tools whose tier depends on where the file is: T1 inside the workspace,
@@ -141,6 +147,7 @@ _T1_TOOLS = frozenset({
     "docs_append", "docs_insert_image", "slides_create", "drive_share",
     "t212_status", "t212_order", "mt5_order",
     "delegate_task", "delegate_parallel", "delegate_to_models", "query_desktop_vault",
+    "get_goal_status", "list_goals", "device_wiki_status", "device_wiki_scan",
 })
 
 #: Tools that read local files or run local code: their arguments are checked
@@ -152,14 +159,29 @@ _LOCAL_READERS = frozenset({
 })
 
 
+#: Agents whose tools not named above were looked at one by one and are T1 (the owner's own work items, file and
+#: device names, coding helpers). A test walks the real registry and fails when an agent has a tool that is in no
+#: tier map and whose agent is in neither this set nor SENSITIVE_AGENTS, so a new tool cannot be T1 by accident.
+#: At run time only the agents in _FAIL_CLOSED_AGENTS (external MCP servers) default to T2.
+_FAIL_CLOSED_AGENTS = frozenset({"mcp_tools"})
+_T1_AGENTS = frozenset({
+    "agent_smith", "code_claude", "code_codex", "code_deepseek", "code_nvidia", "code_ollama", "dev_coding",
+    "device_wiki", "goals", "music", "reviewer", "study", "security", "research_info", "rnd",
+})
+
+
 def classify(name: str, arguments: Any, agent: str | None = None) -> tuple[str, str | None]:
     """``(tier, source)`` of a tool's result. T3 is decided separately by
     ``t3_reason`` because it depends on the result's content too."""
     name = (name or "").strip()
     if name in _PATH_TOOLS:
         path = _first_path(arguments)
-        if path and _inside_workspace(path):
-            return "T1", None
+        if path:
+            protected = protected_workspace_source(path)
+            if protected is not None:
+                return "T2", protected
+            if _inside_workspace(path):
+                return "T1", None
         return "T2", _PATH_TOOLS[name]
     if name in _T2_TOOLS:
         return "T2", _T2_TOOLS[name]
@@ -170,6 +192,10 @@ def classify(name: str, arguments: Any, agent: str | None = None) -> tuple[str, 
     owner = (agent or "").strip().lower()
     if owner in SENSITIVE_AGENTS:
         return "T2", _AGENT_SOURCE.get(owner, "files")
+    if owner in _FAIL_CLOSED_AGENTS:
+        # R5-16: fail closed. The external "mcp_tools" servers (a filesystem or mail server, say) can read
+        # anything, so their results need the Files consent like a command's.
+        return "T2", "files"
     return "T1", None
 
 
@@ -187,6 +213,33 @@ def _first_path(arguments: Any) -> str:
         if isinstance(value, str) and value.strip():
             return value.strip()
     return ""
+
+
+#: The workspace folders that hold the app's own state, memory and past chats, and the consent source of each
+#: (R5-8). A path here is never "just a file inside the workspace".
+_PROTECTED_DIR_SOURCE = {
+    "memory": "memory", "sessions": "memory", "neuro": "memory",
+    "device_wiki": "documents", "librarian": "documents", "office": "documents",
+}
+
+
+def protected_workspace_source(path: str) -> str | None:
+    """The consent source of a path under one of the workspace's state folders (memory, sessions, device_wiki,
+    auth, state ...), or None for any other path."""
+    from dourmouse.config import workspace_dir
+    from dourmouse.path_identity import is_within
+    from dourmouse.sandbox import _PROTECTED_WORKSPACE_DIRS
+
+    raw = os.path.expanduser(path)
+    root = workspace_dir()
+    candidate = raw if os.path.isabs(raw) else os.path.join(str(root), raw)
+    for folder in _PROTECTED_WORKSPACE_DIRS:
+        try:
+            if is_within(candidate, root / folder):
+                return _PROTECTED_DIR_SOURCE.get(folder, "files")
+        except (OSError, ValueError):
+            continue
+    return None
 
 
 def _inside_workspace(path: str) -> bool:
@@ -223,8 +276,24 @@ _EXTRA_SECRET_NAMES = re.compile(
     r"|^login data|^web data|^local state)$"
 )
 
+#: Two or more KEY=value lines whose name says it is a secret: the content of a .env file, however it was read
+#: (R5-17: a command such as `grep -r KEY ~/proj` names no secret path).
+_DOTENV_SECRET_LINE = re.compile(
+    r"(?m)^[ \t]*(?:export[ \t]+)?[A-Za-z][A-Za-z0-9_]*(?:KEY|SECRET|TOKEN|PASSWORD|PASSWD|CREDENTIAL)[A-Za-z0-9_]*"
+    r"[ \t]*=[ \t]*['\"]?[^\s'\"]{6,}"
+)
+#: A credential folder or file spelled inside a longer string (a command, or code that builds the path).
+_SECRET_FRAGMENT = re.compile(
+    r"(?i)(?:^|[\s/\\\"'`(),=:])(?:\.ssh|\.aws|\.gnupg|\.kube|keychains|id_(?:rsa|ed25519|ecdsa|dsa)|"
+    r"\.netrc|\.git-credentials|\.pgpass|\.npmrc|login data|cookies\.sqlite|cookies\.binarycookies)(?=$|[\s/\\\"'`(),;:])"
+    r"|(?:^|[\s/\\\"'`(),=:])\.env(?:\.[\w.-]+)?(?=$|[\s/\\\"'`(),;:])"
+)
 _NEVER_SEND: set[str] = set()
+#: (length, sha256 hex) of never-send values. The MCP bridge process gets these instead of the values, so a
+#: Claude or Codex process never holds the secret itself (R5-17).
+_NEVER_HASHES: set[tuple[int, str]] = set()
 _never_lock = threading.Lock()
+BRIDGE_SECRET_ENV = "DOURMOUSE_PRIVACY_NEVER_SHA"  # noqa: S105 - an environment variable name, not a secret
 
 
 def register_never_send(value: str) -> None:
@@ -233,6 +302,32 @@ def register_never_send(value: str) -> None:
     if value and len(value) >= 16:
         with _never_lock:
             _NEVER_SEND.add(value)
+            _NEVER_HASHES.add((len(value), hashlib.sha256(value.encode("utf-8")).hexdigest()))
+
+
+def register_never_send_hash(length: int, digest: str) -> None:
+    if length >= 16 and re.fullmatch(r"[0-9a-f]{64}", digest or ""):
+        with _never_lock:
+            _NEVER_HASHES.add((length, digest))
+
+
+def _contains_hashed_secret(body: str) -> bool:
+    with _never_lock:
+        hashes = set(_NEVER_HASHES)
+        exact = tuple(_NEVER_SEND)
+    if any(s in body for s in exact):
+        return True
+    if not hashes:
+        return False
+    cap = 500_000
+    windows = [body] if len(body) <= cap else [body[: cap // 2], body[-cap // 2:]]
+    for text in windows:
+        for length in {n for n, _ in hashes}:
+            wanted = {h for n, h in hashes if n == length}
+            for i in range(len(text) - length + 1):
+                if hashlib.sha256(text[i:i + length].encode("utf-8")).hexdigest() in wanted:
+                    return True
+    return False
 
 
 def _is_secret_path(token: str) -> bool:
@@ -278,6 +373,9 @@ def t3_reason(name: str, arguments: Any, text: str) -> str | None:
         for token in _argument_tokens(arguments):
             if _is_secret_path(token):
                 return "a credential file (keys, .env, Keychain, browser cookies or tokens)"
+        for value in _strings_in_args(arguments):
+            if _SECRET_FRAGMENT.search(value):
+                return "a credential file (keys, .env, Keychain, browser cookies or tokens)"
     body = text or ""
     if _PRIVATE_KEY_BLOCK.search(body):
         return "a private key"
@@ -285,10 +383,10 @@ def t3_reason(name: str, arguments: Any, text: str) -> str | None:
         return "browser cookies"
     if _KEYCHAIN_DUMP.search(body):
         return "Keychain items"
-    with _never_lock:
-        secrets = tuple(_NEVER_SEND)
-    if any(s in body for s in secrets):
+    if _contains_hashed_secret(body):
         return "the owner secret"
+    if len(_DOTENV_SECRET_LINE.findall(body)) >= 2:
+        return "environment variables with secret names (a .env style file)"
     return None
 
 
@@ -306,18 +404,57 @@ _PLACEHOLDER = re.compile(r"\[(CARD|IBAN|ID|EMAIL|PHONE|ADDRESS)_(\d{1,5})\]")
 #: Never written back into a tool call: a card or bank number does not leave
 #: through the model's actions either. The owner's reply still shows it.
 _NOT_FOR_ARGUMENTS = frozenset({"CARD", "IBAN"})
+_KINDS = ("CARD", "IBAN", "ID", "EMAIL", "PHONE", "ADDRESS")
+
+_EVERYWHERE = frozenset({"*"})
+_RECIPIENT_FIELDS = frozenset({"to", "cc", "bcc", "recipient", "recipients", "email", "emails", "attendee",
+                               "attendees", "guest", "guests", "address", "share_with"})
+#: Tool -> the fields that get real values back (R5-5). A tool not listed gets nothing back.
+_RESTORE_FIELDS: dict[str, frozenset[str]] = {
+    **dict.fromkeys(("gmail_send", "email_own_send", "draft_message", "send_draft", "send_message",
+                     "drive_share", "create_calendar_event", "propose_time_slots", "gmail_search"),
+                    _RECIPIENT_FIELDS),
+    # Local stores on this Mac: the owner's own notes and tasks hold the real value.
+    **dict.fromkeys(("write_note", "remember", "add_task"), _EVERYWHERE),
+}
+
+
+class PlaceholderMapFull(RuntimeError):
+    """The chat holds as many distinct identifiers as one map keeps (R5-13): the value is not sent at all, since
+    a bare ``[EMAIL]`` could never be restored."""
 
 
 class PlaceholderMap:
-    """Value <-> placeholder for one chat, in memory only."""
+    """Value <-> placeholder for one chat. A chat's map is also kept in a 0600 file in the settings folder
+    (``persist``), so numbering survives a restart and the eviction of an old chat from memory: a
+    placeholder already in a saved chat can never point at a different person later (R5-13)."""
 
     MAX_VALUES = 2000
 
-    def __init__(self) -> None:
+    def __init__(self, persist: Path | None = None) -> None:
         self._lock = threading.RLock()
         self._by_value: dict[tuple[str, str], str] = {}
         self._by_placeholder: dict[str, tuple[str, str]] = {}
         self._next: Counter[str] = Counter()
+        self._persist = persist
+        if persist is not None:
+            try:
+                data = json.loads(persist.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                data = None
+            if isinstance(data, dict):
+                self.merge(data)
+
+    def _save(self) -> None:
+        if self._persist is None:
+            return
+        from dourmouse.state_file import atomic_write_text
+
+        try:
+            atomic_write_text(self._persist, json.dumps(self.export()), mode=0o600)
+        except OSError as exc:
+            # Not hidden: a map that cannot be kept only costs restart consistency, and says so.
+            print(f"[PRIVACY] the placeholder map could not be saved: {exc}")
 
     def placeholder(self, kind: str, value: str) -> str:
         with self._lock:
@@ -326,11 +463,12 @@ class PlaceholderMap:
             if found:
                 return found
             if len(self._by_placeholder) >= self.MAX_VALUES:
-                return f"[{kind}]"  # full: still never sent, just not restorable
+                raise PlaceholderMapFull(kind)
             self._next[kind] += 1
             ph = f"[{kind}_{self._next[kind]}]"
             self._by_value[key] = ph
             self._by_placeholder[ph] = key
+            self._save()
             return ph
 
     def _restore(self, text: str, skip: frozenset[str]) -> str:
@@ -350,16 +488,53 @@ class PlaceholderMap:
         """Every placeholder back to its value (the owner's own view)."""
         return self._restore(text, frozenset())
 
-    def restore_arguments(self, value: Any) -> Any:
-        """A tool call's arguments with placeholders filled in, at any depth,
-        except card and bank numbers."""
-        if isinstance(value, str):
-            return self._restore(value, _NOT_FOR_ARGUMENTS)
-        if isinstance(value, dict):
-            return {k: self.restore_arguments(v) for k, v in value.items()}
-        if isinstance(value, list):
-            return [self.restore_arguments(v) for v in value]
+    def restore_arguments(self, value: Any, tool: str = "") -> Any:
+        """A tool call's arguments with placeholders filled in (R5-5).
+
+        Only where the real value is needed and nothing leaves: the recipient
+        fields of the mail, calendar and sharing tools get email addresses
+        back, and a few local note tools get every kind except cards and bank
+        numbers. Every other tool keeps the placeholders, above all the tools
+        that fetch a URL, search, drive a page, run a command or hand text to
+        another model: a planted instruction cannot make Dourmouse put an ID
+        number or address into a URL or a delegated prompt."""
+        fields = _RESTORE_FIELDS.get((tool or "").strip())
+        if fields is _EVERYWHERE:
+            return self._restore_deep(value, _NOT_FOR_ARGUMENTS)
+        if fields:
+            return self._restore_fields(value, fields)
         return value
+
+    def _restore_deep(self, value: Any, skip: frozenset[str]) -> Any:
+        if isinstance(value, str):
+            return self._restore(value, skip)
+        if isinstance(value, dict):
+            return {k: self._restore_deep(v, skip) for k, v in value.items()}
+        if isinstance(value, list):
+            return [self._restore_deep(v, skip) for v in value]
+        return value
+
+    def _restore_fields(self, value: Any, fields: frozenset[str]) -> Any:
+        if not isinstance(value, dict):
+            return value
+        only_email = frozenset(_KINDS) - {"EMAIL"}
+        return {
+            k: (self._restore_deep(v, only_email) if str(k).lower() in fields else v)
+            for k, v in value.items()
+        }
+
+    def mask_text(self, text: str) -> str:
+        """The opposite of ``restore_text``: every known real value back to its placeholder. Used for text that
+        goes back into a chat's history after the owner's view restored it (R5-10)."""
+        if not text:
+            return text
+        with self._lock:
+            pairs = sorted(((val, ph) for ph, (_kind, val) in self._by_placeholder.items() if val),
+                           key=lambda p: -len(p[0]))
+        for value, ph in pairs:
+            if value in text:
+                text = text.replace(value, ph)
+        return text
 
     def export(self) -> dict[str, Any]:
         with self._lock:
@@ -387,13 +562,38 @@ _MAPS_LIMIT = 64
 _maps_lock = threading.Lock()
 
 
+_MAP_KEEP_DAYS = 90
+
+
+def _map_file(key: str) -> Path | None:
+    try:
+        from dourmouse.config import user_config_dir
+
+        folder = user_config_dir() / "privacy_maps"
+        folder.mkdir(parents=True, exist_ok=True)
+        _prune_map_files(folder)
+        return folder / (hashlib.sha256(("dourmouse-map:" + key).encode("utf-8")).hexdigest()[:32] + ".json")
+    except OSError:
+        return None
+
+
+def _prune_map_files(folder: Path) -> None:
+    cutoff = time.time() - _MAP_KEEP_DAYS * 86400
+    for old in folder.glob("*.json"):
+        try:
+            if old.stat().st_mtime < cutoff:
+                old.unlink()
+        except OSError:
+            continue
+
+
 def placeholder_map(chat: str) -> PlaceholderMap:
-    """The placeholder map of one chat (kept for the 64 most recent chats)."""
+    """The placeholder map of one chat (kept in memory for the 64 most recent chats, and in a file for 90 days)."""
     key = chat or "default"
     with _maps_lock:
         found = _MAPS.get(key)
         if found is None:
-            found = PlaceholderMap()
+            found = PlaceholderMap(persist=_map_file(key))
             _MAPS[key] = found
         _MAPS.move_to_end(key)
         while len(_MAPS) > _MAPS_LIMIT:
@@ -429,6 +629,26 @@ class StreamRestorer:
             self._buf = ""
 
 
+def history_safe(text: str, mapping: PlaceholderMap) -> str:
+    """Text that was shown to the owner (real values) made safe to put back into the model's history: known
+    values return to their placeholders and any other identifier is swapped like a tool result (R5-10)."""
+    if not text:
+        return text
+    from dourmouse.governance import PiiRedactor
+
+    try:
+        redacted, _ = PiiRedactor(owner_emails()).redact(mapping.mask_text(text), mapping)
+    except PlaceholderMapFull:
+        return "[PRIVACY: this text held more personal identifiers than the chat can swap and was left out.]"
+    return redacted
+
+
+def chat_sources() -> list[str]:
+    """The sensitive sources the active chat's Claude or Codex session has read through the bridge."""
+    with _chat_sources_lock:
+        return sorted(_CHAT_SOURCES.get(_active_chat()) or ())
+
+
 def owner_emails() -> set[str]:
     """The owner's own addresses, which are never swapped."""
     found = {e.strip().lower() for e in os.environ.get("DOURMOUSE_OWNER_EMAILS", "").split(",") if "@" in e}
@@ -445,7 +665,7 @@ def owner_emails() -> set[str]:
 # Consent, Private mode and the provider checklist (PRIV-1, PRIV-5)
 # --------------------------------------------------------------------------- #
 
-PRIVATE_CHATS_LIMIT = 500
+PRIVATE_CHATS_LIMIT = 5000
 _store_lock = threading.Lock()
 
 #: Every backend Dourmouse can send a request to.
@@ -490,9 +710,36 @@ class PrivacyStore:
             data, note = load_json_or_aside(self.path, dict)
         except StateUnreadable as exc:
             self.note = str(exc)
-            return {}
+            # R5-22: a file nobody can read says nothing about Private mode, so it stays on.
+            return {"private_mode": True}
         self.note = note
-        return data or {}
+        if note:
+            # The file was corrupt and has been set aside. Consent goes back to "ask", but Private mode must not
+            # silently turn off: the replacement file keeps it on until the owner changes it (SETTINGS shows the note).
+            data = {"private_mode": True, "recovery_note": note}
+            try:
+                self._write(data)
+            except OSError:
+                pass
+        return self._validated(data or {})
+
+    @staticmethod
+    def _validated(data: dict[str, Any]) -> dict[str, Any]:
+        """Wrong types never raise inside the gate: a bad consent table is empty (every source asks), and a bad
+        list of Private chats means Private mode is on for all of them."""
+        out = dict(data)
+        consent = out.get("consent")
+        out["consent"] = {k: v for k, v in consent.items() if isinstance(k, str) and v in ("allow", "deny")} \
+            if isinstance(consent, dict) else {}
+        chats = out.get("private_chats")
+        if chats is None:
+            out["private_chats"] = {}
+        elif not isinstance(chats, dict):
+            out["private_chats"], out["private_mode"] = {}, True
+        providers = out.get("providers")
+        out["providers"] = providers if isinstance(providers, dict) else {}
+        out["private_mode"] = bool(out.get("private_mode"))
+        return out
 
     def _write(self, data: dict[str, Any]) -> None:
         from dourmouse.state_file import atomic_write_text
@@ -529,6 +776,7 @@ class PrivacyStore:
         with _store_lock:
             data = self._read()
             data["private_mode"] = bool(enabled)
+            data.pop("recovery_note", None)  # the owner has now decided
             self._write(data)
 
     def chat_private(self, chat: str) -> bool:
@@ -546,10 +794,11 @@ class PrivacyStore:
             data = self._read()
             chats = dict(data.get("private_chats") or {})
             if enabled:
+                if chat not in chats and len(chats) >= PRIVATE_CHATS_LIMIT:
+                    # R5-22: never drop an older chat's Private flag to make room; say so instead.
+                    raise ValueError(f"{PRIVATE_CHATS_LIMIT} chats are already Private; turn some off first "
+                                     "or use the global Private mode")
                 chats[chat] = _utc_now()
-                if len(chats) > PRIVATE_CHATS_LIMIT:
-                    for old in sorted(chats, key=lambda k: chats[k])[: len(chats) - PRIVATE_CHATS_LIMIT]:
-                        chats.pop(old, None)
             else:
                 chats.pop(chat, None)
             data["private_chats"] = chats
@@ -641,6 +890,10 @@ class TurnPrivacy:
     #: one-call answers from a plain confirmation callable (not stored)
     once: dict[str, bool] = field(default_factory=dict)
     query: str = ""
+    #: bytes of gated tool results the MCP bridge served (bridge process only)
+    served_bytes: int = 0
+    #: the backend id requests of this turn go to (ollama_cloud, claude_cli ...); "" when unknown
+    backend: str = ""
 
 
 _TURN: contextvars.ContextVar[TurnPrivacy | None] = contextvars.ContextVar("dourmouse_privacy_turn", default=None)
@@ -704,6 +957,35 @@ def turn_scope(chat: str = "", *, private: bool | None = None, query: str = "") 
         _TURN.reset(token)
 
 
+@contextlib.contextmanager
+def use_turn(turn: TurnPrivacy) -> Iterator[TurnPrivacy]:
+    """Make ``turn`` the active privacy state (and its chat the active chat) for this block. The MCP bridge uses
+    it around each tool call, so a delegated run started from the bridge joins the bridge's gate (R5-6, R5-7)."""
+    token = _TURN.set(turn)
+    chat_token = _CHAT.set(turn.chat)
+    try:
+        yield turn
+    finally:
+        _CHAT.reset(chat_token)
+        _TURN.reset(token)
+
+
+def forward_refusal(target_backend: str) -> str | None:
+    """A refusal text when this request has read a sensitive source and the text would be handed to a different
+    company than the one the owner's consent was asked about (R5-6); None when it may go. Consent is given for
+    "a cloud model" in the prompt, but the model-written task of a code or delegate tool may quote what was read,
+    so it only goes to the request's own backend."""
+    turn = _TURN.get()
+    if turn is None or not turn.sources:
+        return None
+    if turn.backend and turn.backend == target_backend:
+        return None
+    return ("REFUSED: this request has already read "
+            + ", ".join(SOURCES[s]["label"] for s in sorted(turn.sources) if s in SOURCES)
+            + f", and a task for {provider_label(target_backend)} could carry it to a different company than "
+            "the one you allowed. Ask for it in a new chat, or do the step with this chat's own model.")
+
+
 def auto_injection_allowed(source: str = "memory") -> bool:
     """Context that is added without a tool call (shared memory before a
     Claude CLI task, global memory before a turn) is added only when the
@@ -726,12 +1008,13 @@ def mapping_for_current_chat() -> PlaceholderMap:
 BRIDGE_CHAT_ENV = "DOURMOUSE_PRIVACY_CHAT"
 BRIDGE_PRIVATE_ENV = "DOURMOUSE_PRIVACY_PRIVATE"
 BRIDGE_MAP_ENV = "DOURMOUSE_PRIVACY_MAP"
+BRIDGE_BACKEND_ENV = "DOURMOUSE_PRIVACY_BACKEND"
 #: A bridge started without a map (Codex starts its own) numbers from here,
 #: so its placeholders can never be read as one of a chat's own.
 _BRIDGE_UNMAPPED_START = 9000
 
 
-def bridge_handoff() -> tuple[dict[str, str], Path]:
+def bridge_handoff(backend: str = "") -> tuple[dict[str, str], Path]:
     """Environment for a CLI whose MCP bridge serves this chat, and the 0600
     temp file holding the chat's placeholder map for this one call."""
     import tempfile
@@ -744,18 +1027,66 @@ def bridge_handoff() -> tuple[dict[str, str], Path]:
     with os.fdopen(fd, "w", encoding="utf-8") as fh:  # mkstemp creates it 0600
         json.dump(mapping.export(), fh)
     env = {BRIDGE_CHAT_ENV: chat, BRIDGE_PRIVATE_ENV: "1" if private else "0", BRIDGE_MAP_ENV: name}
+    if backend:
+        env[BRIDGE_BACKEND_ENV] = backend
+    with _never_lock:
+        hashes = sorted(_NEVER_HASHES)
+    if hashes:
+        env[BRIDGE_SECRET_ENV] = ",".join(f"{n}:{h}" for n, h in hashes)
     return env, Path(name)
 
 
-def bridge_collect(path: Path) -> None:
-    """Merge what the bridge added to the map, then remove the file."""
+_CHAT_SOURCES: dict[str, set[str]] = {}
+_chat_sources_lock = threading.Lock()
+
+
+def _active_chat() -> str:
+    turn = _TURN.get()
+    return turn.chat if turn is not None else (_CHAT.get() or "default")
+
+
+def bridge_collect(path: Path, backend: str = "claude_cli") -> None:
+    """Merge what the bridge added to the map, the sources and tiers it served (R5-11), write one ledger row
+    for the results the bridge sent to the CLI's provider, then remove the file."""
     try:
         data = json.loads(Path(path).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         data = {}
     if isinstance(data, dict):
         mapping_for_current_chat().merge(data)
+        sources = [x for x in (data.get("sources") or []) if isinstance(x, str) and x in SOURCES]
+        tiers = {k: int(v) for k, v in (data.get("tiers") or {}).items() if k in TIERS and isinstance(v, int)}
+        served = int(data.get("served_bytes") or 0)
+        if sources:
+            with _chat_sources_lock:
+                _CHAT_SOURCES.setdefault(_active_chat(), set()).update(sources)
+        turn = _TURN.get()
+        if turn is not None:
+            turn.sources.update(sources)
+            for k, v in tiers.items():
+                turn.tiers[k] += v
+        if served or sources or any(tiers.values()):
+            record_egress(backend=backend, model="", text="", origin=f"{backend}_bridge_results",
+                          tiers=tiers, sources=sources, size=served)
     Path(path).unlink(missing_ok=True)
+
+
+def session_must_restart() -> bool:
+    """True when the Claude session of the active chat holds results it may no longer keep: the chat is Private
+    now, or a source it read has since been set to NEVER (R5-9). The caller starts a fresh session."""
+    chat = _active_chat()
+    with _chat_sources_lock:
+        sources = set(_CHAT_SOURCES.get(chat) or ())
+    if not sources:
+        return False
+    store = PrivacyStore()
+    turn = _TURN.get()
+    private = turn.private if turn is not None else store.private_for(chat)
+    if private or any(store.consent(src) == "deny" for src in sources):
+        with _chat_sources_lock:
+            _CHAT_SOURCES.pop(chat, None)
+        return True
+    return False
 
 
 def bridge_turn() -> TurnPrivacy:
@@ -765,6 +1096,13 @@ def bridge_turn() -> TurnPrivacy:
     mapping = PlaceholderMap()
     path = os.environ.get(BRIDGE_MAP_ENV, "")
     loaded = False
+    backend = os.environ.get(BRIDGE_BACKEND_ENV, "").strip()
+    for item in os.environ.get(BRIDGE_SECRET_ENV, "").split(","):
+        n, _, h = item.partition(":")
+        if n.isdigit():
+            register_never_send_hash(int(n), h)
+    turn = TurnPrivacy(chat=chat, private=private, placeholders=mapping, provider="the CLI's provider",
+                       backend=backend)
     if path:
         try:
             data = json.loads(Path(path).read_text(encoding="utf-8"))
@@ -773,10 +1111,14 @@ def bridge_turn() -> TurnPrivacy:
         if isinstance(data, dict):
             mapping.merge(data)
             loaded = True
+            turn.sources.update(x for x in (data.get("sources") or []) if x in SOURCES)
+            turn.tiers.update({k: int(v) for k, v in (data.get("tiers") or {}).items()
+                               if k in TIERS and isinstance(v, int)})
+            turn.served_bytes = int(data.get("served_bytes") or 0)
     if not loaded:
         for kind in ("CARD", "IBAN", "ID", "EMAIL", "PHONE", "ADDRESS"):
             mapping._next[kind] = _BRIDGE_UNMAPPED_START
-    return TurnPrivacy(chat=chat, private=private, placeholders=mapping, provider="the CLI's provider")
+    return turn
 
 
 def bridge_save(turn: TurnPrivacy) -> None:
@@ -784,12 +1126,22 @@ def bridge_save(turn: TurnPrivacy) -> None:
     if path and os.path.exists(path):
         from dourmouse.state_file import atomic_write_text
 
-        atomic_write_text(Path(path), json.dumps(turn.placeholders.export()), mode=0o600)
+        data = turn.placeholders.export()
+        data["sources"] = sorted(turn.sources)
+        data["tiers"] = {k: int(v) for k, v in turn.tiers.items()}
+        data["served_bytes"] = int(turn.served_bytes)
+        atomic_write_text(Path(path), json.dumps(data), mode=0o600)
 
 
 # --------------------------------------------------------------------------- #
 # The gate (one function for the dispatch loop and the MCP bridge)
 # --------------------------------------------------------------------------- #
+
+class DispatcherText(str):
+    """Text the dispatcher itself wrote (a refusal, a confirmation or an error line). A tool handler cannot make
+    one, so only this type is exempt from the consent and size checks; text that merely starts with "ERROR" or
+    "CONFIRMATION REQUIRED" is content like any other (R5-15)."""
+
 
 T2_MAX_CHARS = 12_000
 _NOT_CONTENT_PREFIXES = (
@@ -805,8 +1157,9 @@ Asker = Callable[[str], tuple[bool | None, bool]]
 
 def consent_prompt(source: str, provider: str) -> str:
     info = SOURCES[source]
-    return (f"Send your {info['label']} ({info['what']}) to {provider} to answer this and later requests "
-            f"(identifiers are swapped for placeholders first; change it any time in SETTINGS, PRIVACY)?")
+    return (f"Send your {info['label']} ({info['what']}) to {provider} to answer this and later requests? "
+            f"Identifiers are swapped for placeholders first; names and free text are not. It is shared with "
+            f"cloud models, not only this one, so change it any time in SETTINGS, PRIVACY.")
 
 
 def asker_for(confirmation_gate: Any) -> Asker | None:
@@ -814,8 +1167,11 @@ def asker_for(confirmation_gate: Any) -> Asker | None:
 
     The web gate's ``ask_owner`` shows a real card that auto approve never
     answers, and returns None when nobody could answer: that answer is
-    stored. A plain callable (the terminal, a background goal) approves this
-    one request only. No gate: nobody can be asked."""
+    stored. A gate that marks itself ``interactive_consent`` (the terminal
+    prompt, where the owner types the answer) approves this one request only.
+    Any other callable (a goal runner, a test stub, a gate that auto approves
+    or approves a ticket for one action) is never asked: consent is a privacy
+    choice, not an action approval (R5-4). No gate: nobody can be asked."""
     if confirmation_gate is None:
         return None
     ask_owner = getattr(confirmation_gate, "ask_owner", None)
@@ -824,6 +1180,8 @@ def asker_for(confirmation_gate: Any) -> Asker | None:
             answer = ask_owner(prompt)
             return answer, answer is not None
         return ask
+    if not getattr(confirmation_gate, "interactive_consent", False):
+        return None
 
     def ask_plain(prompt: str) -> tuple[bool | None, bool]:
         return bool(confirmation_gate(prompt)), False
@@ -877,8 +1235,10 @@ def gate_tool_result(
     agent: str | None = None,
     ask: Asker | None = None,
     store: PrivacyStore | None = None,
+    own_text: bool | None = None,
 ) -> str:
-    """The text of a tool result that may be sent to the cloud model."""
+    """The text of a tool result that may be sent to the cloud model. ``own_text`` says the dispatcher wrote the
+    text itself (default: the text is a ``DispatcherText``)."""
     if not text:
         return text
     reason = t3_reason(name, arguments, text)
@@ -889,8 +1249,9 @@ def gate_tool_result(
     # The dispatcher's own confirmation and refusal messages carry the action's prompt text and can
     # be long (finding #179: a long privileged-command prompt was replaced by "NOT SENT"); private
     # data does not start with these phrases, so they get a larger cap than a bare ERROR line.
-    long_ok = text.startswith(_LONG_STATUS_PREFIXES) and len(text) < 4000
-    is_status = (text.startswith(_NOT_CONTENT_PREFIXES) and len(text) < 600) or long_ok
+    trusted = isinstance(text, DispatcherText) if own_text is None else own_text
+    long_ok = trusted and text.startswith(_LONG_STATUS_PREFIXES) and len(text) < 4000
+    is_status = trusted and ((text.startswith(_NOT_CONTENT_PREFIXES) and len(text) < 600) or long_ok)
     if tier == "T2" and source is not None and not is_status:
         if turn.private:
             return _not_sent_private(source)
@@ -913,12 +1274,84 @@ def gate_tool_result(
     turn.tiers[tier] += 1
     from dourmouse.governance import PiiRedactor
 
-    redacted, counts = PiiRedactor(owner_emails()).redact(text, turn.placeholders)
+    try:
+        redacted, counts = PiiRedactor(owner_emails()).redact(text, turn.placeholders)
+    except PlaceholderMapFull:
+        turn.tiers["T3"] += 1
+        return ("NOT SENT: this chat already holds too many distinct personal identifiers to swap safely, so the "
+                "result stayed on this Mac. Start a new chat to continue.")
     if counts:
         turn.redactions.update(counts)
         redacted += ("\n[PRIVACY: personal identifiers were replaced by placeholders such as [EMAIL_1]. Use them "
                      "exactly as written; Dourmouse fills in the real values on this Mac.]")
     return redacted
+
+
+# --------------------------------------------------------------------------- #
+# History: what a chat already holds when Private mode or a NEVER arrives (R5-9)
+# --------------------------------------------------------------------------- #
+
+PRIV_TAG = "_priv_source"
+_DELEGATE_TOOLS = frozenset({"delegate_task", "delegate_parallel", "delegate_to_models"})
+
+
+def result_sources(name: str, arguments: Any, text: str, agent: str | None, turn: TurnPrivacy) -> list[str]:
+    """The consent sources a gated tool result (already passed to the model) carries, for tagging its message.
+    A T2 result carries its own source; a delegated run's answer carries every source this request has read."""
+    if not text or text.startswith("NOT SENT"):
+        return []
+    if (name or "") in _DELEGATE_TOOLS:
+        return sorted(turn.sources)
+    tier, source = classify(name, arguments, agent)
+    return [source] if tier == "T2" and source else []
+
+
+def strip_tags(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The messages as a provider should see them (no private bookkeeping keys)."""
+    if not any(PRIV_TAG in m for m in messages):
+        return messages
+    return [{k: v for k, v in m.items() if k != PRIV_TAG} for m in messages]
+
+
+def tag_new_messages(messages: list[dict[str, Any]], start: int, turn: TurnPrivacy) -> None:
+    """After a top-level request: the assistant text produced after the first sensitive result of this request
+    was written from it, so it carries the sources the request read."""
+    seen = False
+    for m in messages[start:]:
+        if m.get(PRIV_TAG):
+            seen = True
+        elif seen and m.get("role") == "assistant" and turn.sources:
+            m[PRIV_TAG] = sorted(turn.sources)
+
+
+def scrub_history(messages: list[dict[str, Any]], *, private: bool, store: PrivacyStore | None = None) -> int:
+    """Remove from the history what the chat may no longer send: when the chat is Private, every message that
+    carries a sensitive source; otherwise the messages whose source the owner has since set to NEVER. The text
+    is replaced by a one-line note; returns how many messages were changed (R5-9)."""
+    if not any(PRIV_TAG in m for m in messages):
+        return 0
+    store = store or PrivacyStore()
+    denied = {src for src in SOURCES if store.consent(src) == "deny"}
+    changed = 0
+    for m in messages:
+        tags = m.get(PRIV_TAG)
+        if not tags:
+            continue
+        tags = [tags] if isinstance(tags, str) else list(tags)
+        gone = [t for t in tags if private or t in denied]
+        if not gone:
+            continue
+        label = ", ".join(SOURCES[t]["label"] for t in gone if t in SOURCES) or "sensitive content"
+        if m.get("role") == "tool":
+            m["content"] = (f"[PRIVACY: an earlier result from {label} was removed from this chat's context "
+                            f"because it is no longer shared with a cloud model.]")
+        else:
+            m["content"] = (f"[PRIVACY: an earlier answer that used {label} was removed from this chat's context "
+                            f"because it is no longer shared with a cloud model.]")
+            m.pop("tool_calls", None)
+        m.pop(PRIV_TAG, None)
+        changed += 1
+    return changed
 
 
 # --------------------------------------------------------------------------- #
@@ -932,9 +1365,52 @@ _egress_failures = 0
 
 
 def egress_path() -> Path:
-    from dourmouse.config import workspace_dir
+    """The ledger lives in the settings folder, which the model's file and command tools cannot write (R5-18);
+    it used to sit in the workspace, where they could append, forge or truncate it."""
+    from dourmouse.config import user_config_dir
 
-    return workspace_dir() / "privacy" / "egress.jsonl"
+    return user_config_dir() / "privacy" / "egress.jsonl"
+
+
+def _line_hash(line: str) -> str:
+    return hashlib.sha256(line.strip().encode("utf-8")).hexdigest()[:32]
+
+
+def _last_line(path: Path) -> str:
+    for candidate in (path, Path(f"{path}.1")):
+        try:
+            lines = [ln for ln in candidate.read_text(encoding="utf-8", errors="replace").splitlines() if ln.strip()]
+        except OSError:
+            continue
+        if lines:
+            return lines[-1]
+    return ""
+
+
+def egress_chain_status() -> dict[str, Any]:
+    """Whether the ledger rows still form the chain they were written in: each row names the hash of the row
+    before it and the next sequence number, so a deleted, edited or inserted row shows (R5-18)."""
+    path = egress_path()
+    prev_line = ""
+    prev_seq: int | None = None
+    count = 0
+    for candidate in [Path(f"{path}.{i}") for i in range(EGRESS_KEEP, 0, -1)] + [path]:
+        if not candidate.exists():
+            continue
+        for raw in candidate.read_text(encoding="utf-8", errors="replace").splitlines():
+            if not raw.strip():
+                continue
+            try:
+                row = json.loads(raw)
+            except ValueError:
+                return {"ok": False, "rows": count, "broken_at": count + 1}
+            count += 1
+            if prev_seq is not None and (row.get("seq") != prev_seq + 1 or row.get("prev") != _line_hash(prev_line)):
+                return {"ok": False, "rows": count, "broken_at": row.get("seq")}
+            prev_line, prev_seq = raw, row.get("seq") if isinstance(row.get("seq"), int) else None
+            if prev_seq is None:
+                return {"ok": False, "rows": count, "broken_at": count}
+    return {"ok": True, "rows": count, "broken_at": None}
 
 
 def egress_failures() -> int:
@@ -952,6 +1428,9 @@ def record_egress(
     messages: list[dict[str, Any]] | None = None,
     text: str | None = None,
     origin: str = "",
+    tiers: dict[str, int] | None = None,
+    sources: list[str] | None = None,
+    size: int | None = None,
 ) -> None:
     """One metadata line for one request to a model. Never the content: only
     its size and a SHA-256 of it."""
@@ -964,29 +1443,39 @@ def record_egress(
         count = 1
     data = payload.encode("utf-8", "replace")
     turn = _TURN.get()
-    tiers = dict.fromkeys(TIERS, 0)
-    if turn is not None:
-        tiers.update({k: int(v) for k, v in turn.tiers.items()})
+    tier_row = dict.fromkeys(TIERS, 0)
+    if tiers is not None:
+        tier_row.update(tiers)  # what one batch of results carried, not the whole request tree's total
+    elif turn is not None:
+        tier_row.update({k: int(v) for k, v in turn.tiers.items()})
     row = {
         "ts": _utc_now(),
         "provider": provider_label(backend),
         "backend": backend,
         "model": str(model or "")[:120],
         "origin": origin,
-        "chat": _chat_id(turn.chat) if turn is not None else "",
-        "tiers": tiers,
-        "sources": sorted(turn.sources) if turn is not None else [],
+        "chat": _chat_id(turn.chat if turn is not None else _CHAT.get()),
+        "tiers": tier_row,
+        "sources": sorted(sources) if sources is not None else (sorted(turn.sources) if turn is not None else []),
         "redactions": dict(sorted(turn.redactions.items())) if turn is not None else {},
-        "private": bool(turn.private) if turn is not None else False,
-        "bytes": len(data),
+        "private": bool(turn.private) if turn is not None else (
+            bool(_CHAT.get()) and PrivacyStore().private_for(_CHAT.get())),
+        "bytes": len(data) if size is None else int(size),
         "messages": count,
         "sha256": hashlib.sha256(data).hexdigest(),
     }
-    line = json.dumps(row, sort_keys=True) + "\n"
     path = egress_path()
     try:
         with _egress_lock:
             path.parent.mkdir(parents=True, exist_ok=True)
+            last = _last_line(path)
+            try:
+                last_seq = int(json.loads(last).get("seq") or 0) if last else 0
+            except (ValueError, AttributeError):
+                last_seq = 0
+            row["seq"] = last_seq + 1
+            row["prev"] = _line_hash(last) if last else ""
+            line = json.dumps(row, sort_keys=True) + "\n"
             if path.exists() and path.stat().st_size + len(line) > EGRESS_MAX_BYTES:
                 _rotate(path)
             fd = os.open(str(path), os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
@@ -997,6 +1486,14 @@ def record_egress(
         # counted and shown in SECURITY next to the ledger, never hidden.
         _egress_failures += 1
         print(f"[PRIVACY] the egress ledger could not be written: {exc}")
+
+
+def record_client_request(client: Any, model: str, messages: list[dict[str, Any]], origin: str,
+                          base_url: str = "") -> None:
+    """One ledger row for a request made through an OpenAI-compatible client that is not the dispatch loop's
+    (the orchestrator, the ATLAS lab, the profile, a key check). H-PRIV-6."""
+    url = base_url or str(getattr(client, "base_url", "") or "")
+    record_egress(backend=backend_for_base_url(url), model=model, messages=messages, origin=origin)
 
 
 def _rotate(path: Path) -> None:

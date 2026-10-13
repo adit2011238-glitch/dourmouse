@@ -661,6 +661,9 @@ def _llm_chat(prompt: str, system: str = "") -> str:
 
     try:
         client = OpenAI(api_key=api_key, base_url=NVIDIA_BASE_URL, timeout=60)
+        from dourmouse import privacy
+
+        privacy.record_client_request(client, NVIDIA_MODEL, messages, "atlas_lab", NVIDIA_BASE_URL)
         response = client.chat.completions.create(
             model=NVIDIA_MODEL,
             messages=messages,

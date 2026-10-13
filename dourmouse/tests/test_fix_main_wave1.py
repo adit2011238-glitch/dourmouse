@@ -66,7 +66,7 @@ def test_long_confirmation_required_text_is_not_replaced_by_the_privacy_gate():
 
     text = "CONFIRMATION REQUIRED: run this privileged command: " + "x" * 1500 + " NOT executed."
     turn = privacy.TurnPrivacy(chat="t", private=False, placeholders=privacy.PlaceholderMap())
-    out = privacy.gate_tool_result("run_privileged_command", {"command": "touch /tmp/a"}, text, turn=turn)
+    out = privacy.gate_tool_result("run_privileged_command", {"command": "touch /tmp/a"}, text, turn=turn, own_text=True)
     assert out == text
 
 

@@ -64,13 +64,6 @@ def test_nothing_listening_is_unreachable():
     assert bf._probe_backend("http://127.0.0.1:1/v1", timeout=0.5) is False
 
 
-def test_probe_ollama_fallback_returns_v1_config_when_local_answers(monkeypatch):
-    monkeypatch.delenv("DOURMOUSE_FALLBACK_DISABLED", raising=False)
-    monkeypatch.setattr(bf, "_probe_backend", lambda url, timeout=3.0: True)
-    cfg = bf.probe_ollama_fallback()
-    assert cfg is not None and cfg.base_url.endswith("/v1")
-
-
 def test_configured_ollama_at_default_local_is_not_reprobed(monkeypatch):
     """A configured base url that IS the local default (with /v1) must not trigger a second probe of the same host."""
     monkeypatch.delenv("DOURMOUSE_FALLBACK_DISABLED", raising=False)

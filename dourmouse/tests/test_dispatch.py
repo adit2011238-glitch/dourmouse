@@ -974,8 +974,8 @@ class TestModelOverride:
         assert client.chat.completions.calls[0]["model"] == "nvidia/base-120b"
 
     def test_fast_lane_uses_small_model_for_pure_chat(self, monkeypatch):
-        """v5.x: a PURE-CHAT turn (no plan, no agent match) answers on the
-        small local fast model — the "simple response" speed lane."""
+        """v5.x: a PURE-CHAT turn (no plan, no agent match) takes the "simple response" speed lane. FIX-P
+        H-PRIV-5: it no longer swaps to a small local model (cloud models only); it keeps the turn's own model."""
         monkeypatch.setenv("DOURMOUSE_FAST_LANE", "1")
         monkeypatch.setenv("DOURMOUSE_FAST_MODEL", "qwen3:4b")
         from dourmouse.general_roster import build_general_registry
@@ -983,7 +983,7 @@ class TestModelOverride:
         registry = build_general_registry()
         client = FakeClient([_FakeResponse(_FakeMessage(content="4."))])
         run_dispatch("what is 2+2", registry, client=client)
-        assert client.chat.completions.calls[0]["model"] == "qwen3:4b"
+        assert client.chat.completions.calls[0]["model"] != "qwen3:4b"
 
     def test_fast_lane_skips_agentic_and_explicit(self, monkeypatch):
         """An agentic directive (tools scoped) and an explicit model override
@@ -1121,7 +1121,7 @@ class TestModelOverride:
 
     def test_fast_lane_takes_knowledge_questions(self, monkeypatch):
         """A stable-fact question ("what is the tallest mountain...") answers
-        on the fast model with NO tools even when a research agent nominally
+        in the fast lane with NO tools even when a research agent nominally
         matches — web research adds seconds for facts the model already knows.
         Live-data questions (weather today, prices) stay agentic."""
         monkeypatch.setenv("DOURMOUSE_FAST_LANE", "1")
@@ -1143,7 +1143,7 @@ class TestModelOverride:
         client = FakeClient([_FakeResponse(_FakeMessage(content="Everest."))])
         run_dispatch("what is the tallest mountain on earth", registry, client=client)
         call = client.chat.completions.calls[0]
-        assert call["model"] == "qwen3:4b"
+        assert call["model"] != "qwen3:4b"  # FIX-P H-PRIV-5: no small local model any more
         assert not call.get("tools")
 
     def test_fast_lane_does_not_toolless_a_real_file_question(self, monkeypatch):
@@ -1295,8 +1295,8 @@ class TestLocalAgentRouterModelWinsOverKeywordScorer:
         assert "gmail_search" in tool_names
 
     def test_fast_lane_uses_the_fast_model_with_no_compute_node(self, monkeypatch):
-        """The lane uses the fast model directly; there is no LAN compute node
-        to try first any more (finding #113)."""
+        """There is no LAN compute node to try first (finding #113), and FIX-P H-PRIV-5 removed the small local
+        model: the lane answers on the turn's own model."""
         monkeypatch.setenv("DOURMOUSE_FAST_LANE", "1")
         monkeypatch.setenv("DOURMOUSE_FAST_MODEL", "qwen3:4b")
         monkeypatch.delenv("DOURMOUSE_SERVER_URL", raising=False)
@@ -1305,7 +1305,7 @@ class TestLocalAgentRouterModelWinsOverKeywordScorer:
         registry = build_general_registry()
         client = FakeClient([_FakeResponse(_FakeMessage(content="4"))])
         run_dispatch("what is 2+2", registry, client=client)
-        assert client.chat.completions.calls[0]["model"] == "qwen3:4b"
+        assert client.chat.completions.calls[0]["model"] != "qwen3:4b"
 
     def test_fast_lane_sends_compact_system_prompt(self, monkeypatch):
         """The fast lane swaps the 2.2k-token roster prompt for the compact
@@ -2756,6 +2756,11 @@ class TestRepeatToolCallGuard:
         return r, calls
 
     def test_identical_repeat_call_is_not_re_executed(self):
+        # FIX-P H-FIXP-1: claude_code output is T2 Files now, so the owner has allowed Files for this test
+        # (it is about the repeat guard, not consent).
+        from dourmouse import privacy
+
+        privacy.PrivacyStore().set_consent("files", "allow")
         registry, calls = self._registry_with("claude_code")
         args = json.dumps({"task": "reply with the exact text OK-CLAUDE"})
         client = FakeClient(
@@ -3294,43 +3299,22 @@ class TestNvidiaAccountPoolWiring:
         assert first_client.api_key == "key2" and second_client.api_key == "key3"
         assert first_model == second_model == "m"
 
-    def test_pool_exhaustion_falls_back_to_ollama_when_reachable(self, monkeypatch):
-        """Both NVIDIA accounts cooling down mid-conversation -> the closure
-        must probe backend_fallback.probe_ollama_fallback() and switch to
-        it, instead of silently re-serving the exhausted client."""
-        from dourmouse.config import NvidiaConfig, OllamaConfig
-
-        monkeypatch.setenv("NVIDIA_API_KEY", "key1")
-        monkeypatch.setenv("NVIDIA_API_KEY_2", "key2")
-        config = NvidiaConfig(api_key="key1", base_url="https://x", model="m")
-        fallback_cfg = OllamaConfig(base_url="http://127.0.0.1:11434", model="phi:2b")
-        monkeypatch.setattr(
-            dispatch_module, "probe_ollama_fallback", lambda: fallback_cfg
-        )
-        initial_client = object()
-        factory = dispatch_module._nvidia_rotation_factory(initial_client, config, "m")
-        pool = dispatch_module._get_nvidia_account_pool()
-        for account in pool.accounts():
-            pool.mark_rate_limited(account.name)
-        client, model = factory()
-        assert isinstance(client, dispatch_module.OllamaNativeClient)
-        assert model == "phi:2b"
-
-    def test_pool_exhaustion_with_no_fallback_returns_none(self, monkeypatch):
-        """Both accounts cooling down AND Ollama unreachable -> None, so
-        the caller keeps its current (exhausted) client/model and its own
-        retry/fallback_model machinery still surfaces the real error."""
+    def test_pool_exhaustion_never_falls_back_to_a_local_model(self, monkeypatch):
+        """H-PRIV-5 (FIX-P): every NVIDIA account cooling down -> no switch to a model on this Mac, even when a
+        local Ollama answers. The closure returns None, reports itself exhausted, and the retry loop ends the
+        turn with a clear RATE LIMITED message. (This test replaced one that pinned the switch to local Ollama.)"""
         from dourmouse.config import NvidiaConfig
 
         monkeypatch.setenv("NVIDIA_API_KEY", "key1")
         monkeypatch.setenv("NVIDIA_API_KEY_2", "key2")
         config = NvidiaConfig(api_key="key1", base_url="https://x", model="m")
-        monkeypatch.setattr(dispatch_module, "probe_ollama_fallback", lambda: None)
         factory = dispatch_module._nvidia_rotation_factory(object(), config, "m")
         pool = dispatch_module._get_nvidia_account_pool()
         for account in pool.accounts():
             pool.mark_rate_limited(account.name)
         assert factory() is None
+        assert factory.exhausted() is True
+        assert not hasattr(dispatch_module, "probe_ollama_fallback")
 
 
 class TestOllamaCloudAccountPoolWiring:
@@ -3398,21 +3382,34 @@ class TestOllamaCloudAccountPoolWiring:
         assert client._model == "gpt-oss:20b"
         assert client._headers["Authorization"] in ("Bearer key1", "Bearer key2")
 
-    def test_pool_exhaustion_falls_back_to_local_ollama_when_reachable(self, monkeypatch):
+    def test_pool_exhaustion_ends_the_turn_with_a_clear_message_not_a_local_model(self, monkeypatch):
+        """H-PRIV-5 (FIX-P): the retry loop turns an exhausted Ollama Cloud pool into RATE LIMITED."""
         from dourmouse.config import OllamaConfig
 
         monkeypatch.setenv("OLLAMA_API_KEY", "key1")
         monkeypatch.setenv("OLLAMA_API_KEY_2", "key2")
+        monkeypatch.setattr(dispatch_module.time, "sleep", lambda s: None)
         config = OllamaConfig(api_key="key1", base_url="https://ollama.com", model="m", is_cloud=True)
-        fallback_cfg = OllamaConfig(base_url="http://127.0.0.1:11434", model="phi:2b")
-        monkeypatch.setattr(dispatch_module, "probe_ollama_fallback", lambda: fallback_cfg)
         factory = dispatch_module._nvidia_rotation_factory(object(), config, "m")
         pool = dispatch_module._get_ollama_account_pool()
-        for account in pool.accounts():
+        for account in pool.accounts():  # every account already cooling down: no real client is ever built
             pool.mark_rate_limited(account.name)
-        client, model = factory()
-        assert isinstance(client, dispatch_module.OllamaNativeClient)
-        assert model == "phi:2b"
+
+        class _Limited:
+            def __init__(self):
+                self.calls = 0
+                self.chat = type("C", (), {"completions": self})()
+
+            def create(self, **kw):
+                self.calls += 1
+                import urllib.error
+
+                raise urllib.error.HTTPError("https://ollama.com/api/chat", 429, "Too Many Requests", {}, None)
+
+        client = _Limited()
+        with pytest.raises(RuntimeError, match="RATE LIMITED.*does not fall back to a model on this Mac"):
+            dispatch_module._call_with_retry(client, model="m", messages=[{"role": "user", "content": "x"}],
+                                            tools=[], config=None, client_factory=factory)
 
     def test_nvidia_and_ollama_pools_never_cross_contaminate(self, monkeypatch):
         """Two 2+-account pools configured at once (a real, plausible

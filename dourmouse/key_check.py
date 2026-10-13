@@ -96,6 +96,9 @@ def validate_key_live(
 
     try:
         client = factory(key, base_url)
+        from dourmouse import privacy
+
+        privacy.record_client_request(client, model, [{"role": "user", "content": "ping"}], "key_check", base_url)
         client.chat.completions.create(
             model=model,
             messages=[{"role": "user", "content": "ping"}],
