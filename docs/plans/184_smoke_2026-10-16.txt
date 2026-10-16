@@ -1,0 +1,7 @@
+Automated smoke test of the installed Dourmouse.app (isolated copy, ports 18891/19391/19392, temp data dirs, no model calls), commit 765a8a1.
+- All 19 screens opened through the shell router (home comms research browser media code projects wiki goals timetable orchestration agentsmith voice atlas news security settings apps office): 0 console errors, 0 page errors, 0 failed requests, 0 HTTP 4xx/5xx; each screen rendered its heading and main control.
+- POST /api/os/apps/allow from curl (no owner cookie): 403. POST /api/confirm from curl: 403. Owner gate: enforced.
+- BROWSER bridge /drm: build castlabs-ecs, Electron 44.5.1, Widevine available (software L3), ready true.
+- /api/events stream: 200.
+- Server and app stopped by PID; ports free afterwards.
+Not covered here (owner steps): Google sign-in, a real chat reply, Accessibility drive, protected title playback.
