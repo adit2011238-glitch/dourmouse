@@ -225,6 +225,13 @@ function boot() {
     toasts.show({ level: 'info', title: 'A page is waiting in BROWSER', detail: 'Open BROWSER to see it: ' + evt.url.slice(0, 120), ttl: 9000 });
   });
 
+  /* finding #183 (owner test): the model opens a page from any chat (browser_open shows the native pane);
+     with another screen in front the page floated over that screen and covered its controls. Bring the
+     BROWSER screen forward so the page sits in its own region next to the chat column. */
+  host.onPaneState((state) => {
+    if (state && state.open && router.current() !== 'BROWSER') router.go('browser');
+  });
+
   /* the durable copy of accent, wallpaper and dim follows other windows */
   events.on((e) => e.type === 'state_change' && e.section === 'prefs', () => {
     prefs.hydrate().then((changed) => {

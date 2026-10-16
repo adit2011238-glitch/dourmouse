@@ -45,8 +45,12 @@ function align(cell) {
   return l && r ? 'center' : r ? 'right' : '';
 }
 
+/* Some models (gpt-oss) write their own citation markers into the text, for example
+   【browser_open†page=1†L5-L9】. They point at nothing the owner can open (finding #183), so they are dropped. */
+const MODEL_CITATION = /【[^】\n]{0,200}】/g;
+
 export function md(source) {
-  const text = String(source ?? '').replace(/\r\n/g, '\n');
+  const text = String(source ?? '').replace(/\r\n/g, '\n').replace(MODEL_CITATION, '');
   const out = [];
   const fence = /```([A-Za-z0-9_+-]*)\n([\s\S]*?)(?:```|$)/g;
   let last = 0;

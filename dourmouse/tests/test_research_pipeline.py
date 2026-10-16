@@ -916,6 +916,50 @@ class TestRunFullPipelineStage:
         assert len(record.claims) == 1
         assert record.claims[0].claim == "Body B content is real"
 
+    def test_a_source_found_before_the_run_is_still_extracted(self, monkeypatch):
+        """T-5: the model called research_discover_sources by hand first, so
+        the run's own discovery found nothing new and the old 'new this pass'
+        rule extracted from nothing: zero claims after minutes of work."""
+        record = ResearchRecord(question="Q")
+        record.set_plan(["sub A"])
+        record.add_sources(["https://a.example/1"])
+        import dourmouse.dispatch as dispatch_module
+
+        def _dispatch(messages, registry, **kw):
+            return {"final_text": "ok", "transcript": [
+                {"type": "tool_use", "name": "fetch_url",
+                 "raw_arguments": json.dumps({"url": "https://a.example/1"})},
+            ]}
+
+        monkeypatch.setattr(dispatch_module, "run_dispatch_messages", _dispatch)
+        _install_fetch(monkeypatch, {"https://a.example/1": "Body A content real."})
+        _install_chat_fake(monkeypatch, [
+            "CLAIM: Body A content is real\nPASSAGE: Body A content real.\nLOCATION: whole",
+        ])
+        run_full_pipeline(record, _research_info_registry())
+        assert len(record.claims) == 1
+
+    def test_skip_reasons_are_reported_when_a_list_is_given(self, monkeypatch):
+        record = ResearchRecord(question="Q")
+        record.set_plan(["sub A"])
+        import dourmouse.dispatch as dispatch_module
+
+        def _dispatch(messages, registry, **kw):
+            return {"final_text": "ok", "transcript": [
+                {"type": "tool_use", "name": "fetch_url",
+                 "raw_arguments": json.dumps({"url": "https://a.example/1"})},
+            ]}
+
+        monkeypatch.setattr(dispatch_module, "run_dispatch_messages", _dispatch)
+        _install_fetch(monkeypatch, {"https://a.example/1": "Body A content real."})
+        _install_chat_fake(monkeypatch, [
+            "CLAIM: x is real\nPASSAGE: this text is not on the page\nLOCATION: nowhere",
+        ])
+        skipped: list[str] = []
+        run_full_pipeline(record, _research_info_registry(), skipped=skipped)
+        assert record.claims == ()
+        assert len(skipped) == 1 and "passage validation failed" in skipped[0]
+
 
 class TestExtractEvidenceLocationComesFromTheDocument:
     def test_the_heading_path_replaces_the_models_guess(self, monkeypatch):

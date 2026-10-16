@@ -441,6 +441,35 @@ class TestSecurityDashboardEndpoint:
         assert data["findings"][0]["is_new"] is True
         conn.close()
 
+    def test_a_risky_download_is_listed_and_the_downloads_area_is_checked(self, server):
+        """T-8: the watcher assessed a double-extension decoy but the screen
+        said no download had been assessed and listed no such finding."""
+        from dourmouse.security.sentry import SentryFinding, SentryScanResult, SentryStore, default_db
+
+        SentryStore(default_db()).record_download({
+            "path": "/x/ZZ.pdf.exe", "name": "ZZ.pdf.exe", "sha256": "ab" * 32, "kind": "document",
+            "risk": "high", "reasons": ["double extension: 'ZZ.pdf.exe' pretends to be a document"],
+        }, now=1000.0)
+        finding = SentryFinding(
+            fingerprint="fp1", kind="firewall_disabled", severity="high",
+            title="Application Firewall is disabled", detail="d", recommended_action="a",
+        )
+        result = SentryScanResult(
+            all_findings=[finding], new_findings=[], suppressed_false_positives=[],
+            risk_score=9.0, telemetry_available={"firewall": True}, alerts_written=0,
+        )
+        srv, port = server
+        srv.security_sentry = type("R", (), {"last_result": result, "last_scan_at": 1.0, "tick_count": 1})()
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/api/security_dashboard")
+        data = json.loads(conn.getresponse().read())
+        kinds = [f["kind"] for f in data["findings"]]
+        assert "risky_download" in kinds
+        assert data["findings_by_severity"]["high"] == 2
+        downloads_area = next(d for d in data["posture"] if d["label"].lower().startswith("downloads"))
+        assert "downloads_assessed" not in downloads_area["not_checked"]
+        conn.close()
+
     def test_known_device_count_is_reported(self, server):
         from dourmouse.security.sentry import SentryStore, default_db
 

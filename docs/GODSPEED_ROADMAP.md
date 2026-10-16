@@ -1160,3 +1160,4 @@ and a real build sequence, not just a requirement statement:
 - [x] Finding #180 2026-10-13 -- Privacy gate hardened after review (22 follow-ups + H-PRIV-5/6/7): Claude and Codex CLI front modes sandboxed, consent never auto-answered, placeholders restored only into recipient fields, ledger tamper-resistant, local fallbacks removed.
 - [x] Finding #181 2026-10-16 -- Fix wave 3: FI1 FI2 FU (91 findings), Google start JSON for the sign-in pages, Claude front mode deny-list regression fixed (M-1).
 - [x] Finding #182 2026-10-16 -- BROWSER split view 80/20 with chat column, divider, collapse, overlay, remembered layout; bounds proven live.
+- [x] Finding #183 2026-10-16 -- AI-as-user test day: sign-in fallback, research pipeline extraction, security download listing (T-1 to T-9).

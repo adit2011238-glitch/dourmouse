@@ -4,6 +4,11 @@ from __future__ import annotations
 
 import pytest
 
+from dourmouse import code_backends as _code_backends_for_signin
+
+
+REAL_CLAUDE_CLI_SIGNED_IN = _code_backends_for_signin.claude_cli_signed_in
+
 
 @pytest.fixture(autouse=True)
 def _workspace_isolated(tmp_path_factory, monkeypatch):
@@ -300,3 +305,12 @@ def _security_sentry_off(monkeypatch):
     # Findings #114/#115: the standing-agent runtime, whose librarian would
     # walk the developer's real Documents from every server a test builds.
     monkeypatch.setenv("DOURMOUSE_STANDING_AGENTS", "0")
+
+
+@pytest.fixture(autouse=True)
+def _claude_cli_signed_in_by_default(monkeypatch):
+    """Tests never shell out to the real `claude auth status` (finding #183); a test that needs the
+    signed-out case patches it itself."""
+    from dourmouse import code_backends
+
+    monkeypatch.setattr(code_backends, "claude_cli_signed_in", lambda **k: True)

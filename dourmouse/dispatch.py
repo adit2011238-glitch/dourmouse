@@ -3385,7 +3385,15 @@ def _orchestrator_backend_mode() -> str:
         return env_val
     from dourmouse.config import claude_front_mode_enabled
 
-    return "split" if claude_front_mode_enabled() else ""
+    if not claude_front_mode_enabled():
+        return ""
+    # Finding #183: Claude front mode is the default, but a signed-out CLI cannot answer anything; fall back
+    # to the configured cloud backend (the HOME banner already tells the owner how to sign in).
+    from dourmouse import code_backends as _cb
+
+    if _cb.claude_cli_signed_in() is False:
+        return ""
+    return "split"
 
 
 def claude_orchestrator_enabled() -> bool:

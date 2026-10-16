@@ -196,13 +196,25 @@ def _build_run_pipeline_tool(registry: DispatchRegistry) -> ToolSpec:
         except (TypeError, ValueError):
             return "ERROR: max_sources_per_sub_question must be an integer."
         before_sources, before_claims = len(record.sources), len(record.claims)
-        run_full_pipeline(record, registry, max_sources_per_sub_question=max_sources)
+        skipped: list[str] = []
+        run_full_pipeline(
+            record, registry, max_sources_per_sub_question=max_sources, skipped=skipped
+        )
         _save(record)
-        return (
+        summary = (
             f"Real pipeline run complete over {len(record.plan)} sub-question(s). "
             f"Sources: {before_sources} -> {len(record.sources)}. "
             f"Claims: {before_claims} -> {len(record.claims)}."
         )
+        if not record.claims:
+            summary += (
+                " NO VERIFIED CLAIMS exist: do not present anything as sourced; tell the user"
+                " the pipeline found no quotable evidence and say what was tried."
+            )
+        if skipped:
+            shown = "; ".join(s[:160] for s in skipped[:5])
+            summary += f" {len(skipped)} source(s) skipped: {shown}"
+        return summary
 
     return ToolSpec(
         name="research_run_pipeline",

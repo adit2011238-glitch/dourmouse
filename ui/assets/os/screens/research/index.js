@@ -118,7 +118,7 @@ export default {
         }
         off();
         confirmHere(confirmEl, 'Send this question to the research agent? "' + shorten(text, 200) + '" It will be planned into sub-questions, and the agent may fetch web pages and spend model credit.', async () => {
-          ctx.chat.send(text, { focusAgent: 'research_info' });
+          ctx.chat.send(text, { focusAgent: 'evidence_pipeline' }); /* finding #183: the pipeline agent owns research_plan and the stages that fill QUESTIONS, CLAIMS and the graph; research_info only searched the web */
         }, { onDone: () => setTimeout(() => confirmEl.replaceChildren(), 1500) });
       });
       confirmEl.replaceChildren(form);

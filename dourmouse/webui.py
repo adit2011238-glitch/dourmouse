@@ -1225,7 +1225,9 @@ class _SSEBroadcast:
             c.emit(payload)
 
 
-def _security_posture(findings: list[dict[str, Any]], result: Any) -> list[dict[str, Any]]:
+def _security_posture(
+    findings: list[dict[str, Any]], result: Any, downloads: list[dict[str, Any]] | None = None
+) -> list[dict[str, Any]]:
     """Finding #110: the dashboard's posture by area, from the sentry's last
     scan; the monitoring area uses the latest saved report's indicators, and
     is UNKNOWN until a report has been made."""
@@ -1233,7 +1235,10 @@ def _security_posture(findings: list[dict[str, Any]], result: Any) -> list[dict[
 
     latest = _report.latest_saved()
     monitoring = latest.get("monitoring") if latest else None
-    return _report.posture(findings, result.telemetry_available, monitoring)
+    # T-8: downloads are assessed as they arrive, not by the scan, so the area
+    # is "checked" once any download has been assessed (the full report does the same).
+    available = {**result.telemetry_available, "downloads_assessed": bool(downloads)}
+    return _report.posture(findings, available, monitoring)
 
 
 def _resolve_server_config(config: Any | None) -> Any | None:
@@ -3595,6 +3600,18 @@ class _Handler(BaseHTTPRequestHandler):
                         "recommended_action": f.recommended_action,
                         "is_new": f in result.new_findings,
                     })
+            # T-8: a risky download is a finding too (the watcher assesses it, the scan does not).
+            recent_downloads = store.recent_downloads(20)
+            for d in recent_downloads:
+                if d.get("risk") not in ("high", "med"):
+                    continue
+                by_severity[d["risk"]] = by_severity.get(d["risk"], 0) + 1
+                findings_payload.append({
+                    "fingerprint": f"download:{str(d.get('sha256', ''))[:16]}", "kind": "risky_download",
+                    "severity": d["risk"], "title": f"{d.get('kind', 'file')} {d.get('name', '')}".strip(),
+                    "detail": "; ".join(d.get("reasons") or []),
+                    "recommended_action": "Do not open it until you know what it is.", "is_new": False,
+                })
             incidents = store.list_incidents()
             incidents_by_status = {"OPEN": 0, "INVESTIGATING": 0, "RESOLVED": 0, "ACCEPTED_RISK": 0}
             for inc in incidents:
@@ -3611,7 +3628,7 @@ class _Handler(BaseHTTPRequestHandler):
                 "telemetry_available": result.telemetry_available if result else {},
                 # Finding #110: posture by area (spec item 25: never one magic
                 # number); the monitoring area comes from the latest report.
-                "posture": _security_posture(findings_payload, result) if result else [],
+                "posture": _security_posture(findings_payload, result, recent_downloads) if result else [],
             })
         elif path == "/api/device_wiki":
             # Domain E, step 6: read-only inspection of the device wiki's

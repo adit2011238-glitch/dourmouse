@@ -454,6 +454,7 @@ def run_full_pipeline(
     registry: Any,
     *,
     max_sources_per_sub_question: int = 3,
+    skipped: list[str] | None = None,
     **dispatch_kwargs: Any,
 ) -> ResearchRecord:
     """The real multi-source/multi-sub-question orchestration loop -- the
@@ -488,23 +489,34 @@ def run_full_pipeline(
     it is a caller error."""
     if not record.plan:
         raise ValueError("cannot run the full pipeline before a real plan exists")
+    # A source found earlier (the model calling research_discover_sources by
+    # hand before the run) is deduped by add_sources(), so "new this pass"
+    # alone would leave it unextracted forever and a run could end with zero
+    # claims after minutes of work. Candidates are every source no claim cites
+    # yet and this run has not tried, so a pre-discovered source is used.
+    attempted: set[int] = set()
     for sub_question_index in range(len(record.plan)):
-        before = len(record.sources)
         discover_sources(
             record, registry, sub_question_index=sub_question_index, **dispatch_kwargs
         )
-        new_source_indices = list(range(before, len(record.sources)))[
-            :max_sources_per_sub_question
-        ]
-        for source_index in new_source_indices:
+        cited = {c.url for c in record.claims}
+        candidates = [
+            i for i, u in enumerate(record.sources) if u not in cited and i not in attempted
+        ][:max_sources_per_sub_question]
+        for source_index in candidates:
+            attempted.add(source_index)
             try:
                 extract_evidence(
                     record, registry,
                     source_index=source_index, sub_question_index=sub_question_index,
                     **dispatch_kwargs,
                 )
-            except ValueError:
-                continue  # one bad source must never block the rest of the real run
+            except ValueError as exc:
+                # one bad source must never block the rest of the real run,
+                # but the reason is kept so a zero-claim run can say why
+                if skipped is not None:
+                    skipped.append(str(exc))
+                continue
     return record
 
 

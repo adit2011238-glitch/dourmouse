@@ -668,6 +668,37 @@ def _run_claude_once(
             privacy.bridge_collect(privacy_map)
 
 
+_SIGNIN_CACHE: dict[str, Any] = {"at": 0.0, "value": None}
+
+
+def claude_cli_signed_in(*, ttl: float = 60.0) -> bool | None:
+    """Whether the Claude CLI is signed in: True, False, or None when it cannot be told (CLI missing or
+    `claude auth status` unreadable). Cached for ``ttl`` seconds. Finding #183 (owner test): with the CLI
+    installed but signed out, every HOME turn failed with "NOT SIGNED IN" because Claude front mode is the
+    default; the caller now falls back to the configured cloud backend instead."""
+    import time
+
+    now = time.monotonic()
+    if _SIGNIN_CACHE["value"] is not None and now - _SIGNIN_CACHE["at"] < ttl:
+        return _SIGNIN_CACHE["value"][0]
+    result: bool | None = None
+    try:
+        from dourmouse.general_roster import _find_claude_cli
+
+        cli = _find_claude_cli()
+        if cli:
+            proc = subprocess.run(  # noqa: S603 - the owner's own CLI, fixed argv
+                [cli, "auth", "status"], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=8, check=False, stdin=subprocess.DEVNULL,
+            )
+            data = json.loads(proc.stdout or "{}")
+            if isinstance(data, dict) and isinstance(data.get("loggedIn"), bool):
+                result = data["loggedIn"]
+    except (OSError, ValueError, subprocess.SubprocessError):
+        result = None
+    _SIGNIN_CACHE["at"], _SIGNIN_CACHE["value"] = now, (result,)
+    return result
+
+
 def _cli_env(cli: str | None = None) -> dict[str, str]:
     """The environment to hand a coding CLI child process.
 
