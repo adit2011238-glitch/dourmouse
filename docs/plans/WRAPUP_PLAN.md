@@ -28,3 +28,9 @@ Sign in to Google once in the pane and run `scripts/live_checks/docs_and_youtube
 ## Definition of done for this wrap-up
 
 Full suite green; smoke report green; the 8 high attacks pass live; no ledger row above low left open without an owner decision; Gate A and Gate B signed off by the owner; PERF_BUDGET numbers met or the miss recorded.
+
+## Owner notes, 2026-10-16
+
+- Protected-title test uses Spotify only (the owner has a Spotify account, no YouTube Premium). YouTube Premium titles are dropped from the checks; ordinary YouTube playback (no DRM) is still tested in the Docs and YouTube check.
+- MEDIA: the owner will create a local media database on the desktop later; local media library work is in the post-launch backlog, not in this wrap-up.
+- When the waves are complete, the owner wants a SLOW, step by step guided walkthrough of each owner-only item and of Gate A / Gate B: one step at a time, wait for the owner's reply (result in one line) before the next step. Order: (1) provider privacy settings, (2) Trading 212 practice key and a supervised demo order, (3) Accessibility and the TextEdit drive, (4) Google sign-in in the pane and the Docs and YouTube check, (5) Spotify protected-title check, (6) SETTINGS privacy ticks, (7) the real-model benchmark decision, then MANUAL_TEST_PLAN.md parts 1 to 4. MT5 is skipped on this Mac (the MetaTrader5 Python package is Windows-only and not installed; the MT5 tools refuse safely).
