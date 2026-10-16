@@ -135,13 +135,25 @@ def generate_hypotheses(question_id: str, *, complete: Complete | None = None,
             dropped += 1
             continue
         hid = _hid(h["statement"])
-        g.put("hypothesis", hid, {"statement": h["statement"].strip(), "status": "proposed",
-                                  "rationale": str(h.get("rationale") or "")[:2000]},
-              created_by=BY, project_id=q.project_id)
+        # The id comes from the statement alone, but put() refuses an existing
+        # id whose body differs, and the model words its rationale differently
+        # every run. A repeated statement is the SAME hypothesis: keep what is
+        # stored (it may have been criticised since), only add the new links.
+        try:
+            g.get("hypothesis", hid)
+            existing = True
+        except KeyError:
+            existing = False
+            g.put("hypothesis", hid, {"statement": h["statement"].strip(), "status": "proposed",
+                                      "rationale": str(h.get("rationale") or "")[:2000]},
+                  created_by=BY, project_id=q.project_id)
         g.link(("hypothesis", hid), "about", ("research_question", question_id), created_by=BY)
         for r in refs:
             g.link(("hypothesis", hid), "derived_from", ("claim", claims[r - 1].id), created_by=BY)
-        made.append({"id": hid, "statement": h["statement"].strip(), "claims": [claims[r - 1].id for r in refs]})
+        entry = {"id": hid, "statement": h["statement"].strip(), "claims": [claims[r - 1].id for r in refs]}
+        if existing:
+            entry["existing"] = True
+        made.append(entry)
     if not made and not parsed:
         return {"ok": False, "error": "the model did not return hypotheses", "raw": raw[:1000]}
     return {"ok": True, "hypotheses": made, "dropped": dropped}
@@ -185,7 +197,8 @@ def design_and_run(hypothesis_id: str, *, complete: Complete | None = None, stor
         return {"ok": False, "error": "the model did not return a runnable design", "raw": raw[:1000]}
     code = re.sub(r"^```(?:python)?\s*|\s*```$", "", design["code"].strip())
     null = design.get("null_value")
-    null_value = float(null) if isinstance(null, (int, float)) and not isinstance(null, bool) else None
+    null_value = (float(null) if isinstance(null, (int, float)) and not isinstance(null, bool)
+                  and math.isfinite(null) else None)
     run = ex.run_experiment(design["protocol"], code, hypothesis_id=hypothesis_id, store=g, wait_s=wait_s,
                             project_id=h.project_id)
     out = {"ok": True, **{k: run[k] for k in ("experiment_id", "run_id", "state")}, "null_value": null_value}
@@ -212,11 +225,18 @@ def describe_samples(samples: list[float], null_mean: float = 0.0) -> dict[str, 
     n = len(xs)
     if n < 2:
         return {"n": n, "error": "at least two numeric samples are needed"}
+    if not isinstance(null_mean, (int, float)) or isinstance(null_mean, bool) or not math.isfinite(null_mean):
+        return {"n": n, "error": "the null value must be a finite number"}
     mean, sd = statistics.fmean(xs), statistics.stdev(xs)
     se = sd / math.sqrt(n)
     z = 1.959963984540054
-    t = (mean - null_mean) / se if se > 0 else math.inf
-    p = math.erfc(abs(t) / math.sqrt(2)) if math.isfinite(t) else 0.0
+    if se > 0:
+        t = (mean - null_mean) / se
+        p = math.erfc(abs(t) / math.sqrt(2))
+    elif math.isclose(mean, null_mean, rel_tol=1e-12, abs_tol=1e-12):
+        t, p = 0.0, 1.0  # no spread, and the one value is the null: nothing to reject
+    else:
+        t, p = math.copysign(math.inf, mean - null_mean), 0.0  # no spread, a different value
     return {"n": n, "mean": mean, "sd": sd, "ci95": [mean - z * se, mean + z * se], "null_mean": null_mean,
             "t": t, "p_two_sided": p, "method": "one-sample t with a normal approximation to its p-value"
             + (" (n < 30: treat p as rough)" if n < 30 else "")}

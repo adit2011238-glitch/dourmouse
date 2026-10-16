@@ -27,12 +27,25 @@ Secrets:
 
 from __future__ import annotations
 
+import contextlib
+import csv
 import hmac
+import io
 import json
+import math
 import os
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from dourmouse.message_bus import BROADCAST
+from dourmouse.state_file import atomic_write_text
+
+try:
+    import fcntl
+except ImportError:  # Windows: only the in-process lock is available
+    fcntl = None  # type: ignore[assignment]
 
 # Locked seasonal legs from the strict walk-forward survivors (three trades
 # that survived selection, blind holdout, Monte Carlo permutations and the
@@ -192,7 +205,7 @@ def handle_tv_webhook(
             act = applied.get("action", "?")
             bus.post(
                 "tradingview",
-                "BROADCAST",
+                BROADCAST,
                 f"TV {act.upper()}",
                 f"{signal.get('strategy', '?')} {signal.get('side', '?')} "
                 f"{signal.get('ticker', '?')} @ {signal.get('price', '?')}"
@@ -275,65 +288,95 @@ def _paper_log_path() -> Path | None:
 
 
 def _write_paper_row(row: list[str]) -> bool:
-    """Append one CSV row to the paper log (thread-safe, creates header)."""
-    import csv
-
+    """Append one CSV row to the paper log (creates the header), under the
+    same lock as the read-modify-write path."""
     path = _paper_log_path()
     if path is None:
         return False
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "a", newline="", encoding="utf-8") as fh:
+        with paper_log_lock(), open(path, "a", newline="", encoding="utf-8") as fh:
             writer = csv.writer(fh)
             if fh.tell() == 0:
-                writer.writerow(
-                    ["key", "side", "venue", "entry_date", "entry_price",
-                     "contract", "exit_date", "exit_price", "pnl_pct",
-                     "pnl_usd", "notes"]
-                )
+                writer.writerow(_PAPER_HEADER)
             writer.writerow(row)
         return True
     except OSError:
         return False
 
 
-def _read_paper_rows() -> list[list[str]]:
-    """All paper-log rows (header stripped); empty on any failure."""
-    import csv
+_PAPER_HEADER = ["key", "side", "venue", "entry_date", "entry_price",
+                 "contract", "exit_date", "exit_price", "pnl_pct",
+                 "pnl_usd", "notes"]
 
+
+class PaperLogUnreadable(OSError):
+    """The paper log exists but could not be read right now. The log is left
+    exactly as it is and nothing may be written over it."""
+
+
+def _read_paper_rows() -> list[list[str]]:
+    """All paper-log rows (header stripped). An absent log is an empty book;
+    a log that cannot be read raises PaperLogUnreadable, because treating it
+    as empty and then rewriting would replace the whole history."""
     path = _paper_log_path()
     if path is None or not path.exists():
         return []
     try:
         with open(path, newline="", encoding="utf-8") as fh:
             return [r for r in csv.reader(fh) if r and r[0] != "key"]
-    except OSError:
-        return []
+    except (OSError, csv.Error, UnicodeDecodeError) as exc:
+        raise PaperLogUnreadable(f"{path.name} could not be read ({type(exc).__name__}: {exc})") from exc
 
 
 def _rewrite_paper_rows(rows: list[list[str]]) -> bool:
-    """Rewrite the whole log (header + rows). Locked via a module mutex."""
-    import csv
-
+    """Replace the whole log (header + rows) through a temp file and
+    os.replace, so a crash leaves the old log or the new one, never a
+    truncated file. Callers hold paper_log_lock()."""
     path = _paper_log_path()
     if path is None:
         return False
+    buf = io.StringIO(newline="")
+    writer = csv.writer(buf)
+    writer.writerow(_PAPER_HEADER)
+    writer.writerows(rows)
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w", newline="", encoding="utf-8") as fh:
-            writer = csv.writer(fh)
-            writer.writerow(
-                ["key", "side", "venue", "entry_date", "entry_price",
-                 "contract", "exit_date", "exit_price", "pnl_pct",
-                 "pnl_usd", "notes"]
-            )
-            writer.writerows(rows)
+        atomic_write_text(path, buf.getvalue())
         return True
     except OSError:
         return False
 
 
-_PAPER_LOCK = __import__("threading").Lock()
+_PAPER_LOCK = threading.Lock()
+
+
+def _paper_lock_path() -> Path | None:
+    path = _paper_log_path()
+    return None if path is None else path.with_name(path.name + ".lock")
+
+
+@contextlib.contextmanager
+def paper_log_lock():
+    """Serialise read-modify-write of the paper log: a mutex for this process
+    and an flock on a sidecar file for every other process that edits the log
+    and takes the same lock (POSIX; elsewhere only the in-process mutex)."""
+    with _PAPER_LOCK:
+        fd = None
+        lock = _paper_lock_path()
+        if fcntl is not None and lock is not None:
+            lock.parent.mkdir(parents=True, exist_ok=True)
+            fd = os.open(lock, os.O_CREAT | os.O_RDWR, 0o600)
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX)
+            except OSError:
+                os.close(fd)
+                raise
+        try:
+            yield
+        finally:
+            if fd is not None:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+                os.close(fd)
 
 
 def _signal_timestamp(signal: dict[str, Any]) -> str:
@@ -373,6 +416,9 @@ def route_to_paper(signal: dict[str, Any]) -> dict[str, Any]:
     except (TypeError, ValueError):
         return {"applied": False, "action": "unknown",
                 "reason": f"price not numeric: {price_raw!r}"}
+    if not math.isfinite(price):
+        return {"applied": False, "action": "unknown",
+                "reason": f"price not a finite number: {price_raw!r}"}
     if price <= 0:
         return {"applied": False, "action": "unknown",
                 "reason": f"price not positive: {price}"}
@@ -394,38 +440,64 @@ def route_to_paper(signal: dict[str, Any]) -> dict[str, Any]:
 
     now = _signal_timestamp(signal)
     contract = leg["ticker"]
-    with _PAPER_LOCK:
-        rows = _read_paper_rows()
-        if action == "open":
-            row = [key, leg_dir, "tradingview", now, f"{price:.5f}", contract,
-                   "", "", "", "", "tv alert open"]
-            rows.append(row)
-            if not _rewrite_paper_rows(rows):
-                return {"applied": False, "action": "open",
-                        "reason": "paper log write failed"}
-            return {"applied": True, "action": "open", "key": key,
-                    "price": price, "row": row}
-        # close: fill the newest OPEN row for this key (FIFO per key).
-        for i in range(len(rows) - 1, -1, -1):
-            r = rows[i]
-            if r[0] == key and not r[6]:  # same key, no exit yet
-                entry = float(r[4])
-                pnl_pct = ((price - entry) / entry if leg_dir == "long"
-                           else (entry - price) / entry)
-                pnl_usd = pnl_pct * _PAPER_REFERENCE_NOTIONAL
-                r[6] = now
-                r[7] = f"{price:.5f}"
-                r[8] = f"{pnl_pct:.4f}"
-                r[9] = f"{pnl_usd:.2f}"
-                r[10] = "tv alert close"
-                if not _rewrite_paper_rows(rows):
-                    return {"applied": False, "action": "close",
-                            "reason": "paper log write failed"}
-                return {"applied": True, "action": "close", "key": key,
-                        "price": price, "pnl_pct": pnl_pct,
-                        "pnl_usd": pnl_usd, "row": r}
-        return {"applied": False, "action": "close",
-                "reason": f"no open {key} row to close"}
+    try:
+        with paper_log_lock():
+            return _apply_to_paper(key, leg_dir, contract, action, price, now)
+    except PaperLogUnreadable as exc:
+        return {"applied": False, "action": action,
+                "reason": f"paper log unreadable right now ({exc}); nothing was written"}
+    except OSError as exc:
+        return {"applied": False, "action": action,
+                "reason": f"paper log unavailable ({type(exc).__name__}: {exc}); nothing was written"}
+
+
+def _apply_to_paper(key: str, leg_dir: str, contract: str, action: str,
+                    price: float, now: str) -> dict[str, Any]:
+    """The read-modify-write itself; the caller holds paper_log_lock()."""
+    rows = _read_paper_rows()
+    if action == "open":
+        row = [key, leg_dir, "tradingview", now, f"{price:.5f}", contract,
+               "", "", "", "", "tv alert open"]
+        rows.append(row)
+        if not _rewrite_paper_rows(rows):
+            return {"applied": False, "action": "open",
+                    "reason": "paper log write failed"}
+        return {"applied": True, "action": "open", "key": key,
+                "price": price, "row": row}
+    # close: fill the newest OPEN row for this key (FIFO per key).
+    for i in range(len(rows) - 1, -1, -1):
+        r = rows[i]
+        if r[0] != key:
+            continue
+        # A row an external script left short is padded so its columns exist.
+        r = r + [""] * (len(_PAPER_HEADER) - len(r))
+        if r[6]:
+            continue  # already closed
+        try:
+            entry = float(r[4])
+        except ValueError:
+            entry = math.nan
+        if not math.isfinite(entry) or entry <= 0:
+            return {"applied": False, "action": "close",
+                    "reason": f"the open {key} row has no usable entry price ({r[4]!r}); "
+                              "nothing was changed"}
+        rows[i] = r
+        pnl_pct = ((price - entry) / entry if leg_dir == "long"
+                   else (entry - price) / entry)
+        pnl_usd = pnl_pct * _PAPER_REFERENCE_NOTIONAL
+        r[6] = now
+        r[7] = f"{price:.5f}"
+        r[8] = f"{pnl_pct:.4f}"
+        r[9] = f"{pnl_usd:.2f}"
+        r[10] = "tv alert close"
+        if not _rewrite_paper_rows(rows):
+            return {"applied": False, "action": "close",
+                    "reason": "paper log write failed"}
+        return {"applied": True, "action": "close", "key": key,
+                "price": price, "pnl_pct": pnl_pct,
+                "pnl_usd": pnl_usd, "row": r}
+    return {"applied": False, "action": "close",
+            "reason": f"no open {key} row to close"}
 
 
 def tv_panel_snapshot() -> dict[str, Any]:

@@ -65,6 +65,7 @@ _OUTPUT_TAIL = 64 * 1024
 MAX_JOB_OUTPUT_BYTES = 32 * 1024 * 1024
 MAX_JOB_DIR_BYTES = 2 * 1024 * 1024 * 1024
 _MAX_FILE_BYTES = 1024 * 1024 * 1024  # RLIMIT_FSIZE: one file a job writes
+_MAX_METRICS_BYTES = 1024 * 1024  # the node reads and parses metrics.json itself, so it is capped well below that
 _MAX_OPEN_FILES = 1024
 _NPROC_HEADROOM = 256  # forks a job may add beyond the user's current process count
 # Every job runs inside the Seatbelt sandbox in dourmouse/sandbox.py (S19).
@@ -240,6 +241,18 @@ if sys.platform == "win32":
         k32.CloseHandle(handle)
 
 
+#: Runs in the job's own process, before the job: sets the resource limits it is
+#: given as JSON, then replaces itself with the job's command line. Replaces
+#: preexec_fn, which runs Python code between fork and exec and can deadlock when
+#: another thread of this multi-threaded server holds a lock at the moment of fork.
+_LIMIT_LAUNCHER = (
+    "import json, os, resource, sys\n"
+    "for name, value in json.loads(sys.argv[1]):\n"
+    "    resource.setrlimit(getattr(resource, name), (value, value))\n"
+    "os.execv(sys.argv[2], sys.argv[2:])\n"
+)
+
+
 class JobRunner:
     def __init__(self, root: Path, python: str, blob_fetch: Any) -> None:
         self.root = root
@@ -376,8 +389,6 @@ class JobRunner:
             kwargs["creationflags"] = 0x00000004  # CREATE_SUSPENDED: capped before it runs a line
             status["memory_limit"] = "enforced (Windows Job Object)"
         else:
-            import resource
-
             # Own session and process group, so a timeout or a memory breach
             # can kill the job's children too (S21).
             kwargs["start_new_session"] = True
@@ -385,17 +396,13 @@ class JobRunner:
             cpu_seconds = min(status["timeout_s"] * (os.cpu_count() or 1), MAX_JOB_SECONDS * 4)
             nproc = _nproc_limit()
 
-            def _limits() -> None:
-                # CPU seconds, one file's size, forks, open files, no core dumps (S22).
-                if as_limit is not None:
-                    resource.setrlimit(resource.RLIMIT_AS, (as_limit, as_limit))
-                resource.setrlimit(resource.RLIMIT_CPU, (cpu_seconds, cpu_seconds))
-                resource.setrlimit(resource.RLIMIT_FSIZE, (_MAX_FILE_BYTES, _MAX_FILE_BYTES))
-                resource.setrlimit(resource.RLIMIT_NPROC, (nproc, nproc))
-                resource.setrlimit(resource.RLIMIT_NOFILE, (_MAX_OPEN_FILES, _MAX_OPEN_FILES))
-                resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
-
-            kwargs["preexec_fn"] = _limits
+            # CPU seconds, one file's size, forks, open files, no core dumps (S22).
+            # Applied by a tiny launcher that execs the job (see _LIMIT_LAUNCHER),
+            # not by preexec_fn, which is unsafe in a multi-threaded server.
+            limits = [["RLIMIT_CPU", cpu_seconds], ["RLIMIT_FSIZE", _MAX_FILE_BYTES],
+                      ["RLIMIT_NPROC", nproc], ["RLIMIT_NOFILE", _MAX_OPEN_FILES], ["RLIMIT_CORE", 0]]
+            if as_limit is not None:
+                limits.insert(0, ["RLIMIT_AS", as_limit])
             if sys.platform.startswith("linux"):
                 status["memory_limit"] = "enforced (RLIMIT_AS)"
             else:
@@ -407,6 +414,8 @@ class JobRunner:
                     "enforced (RSS watchdog, 250 ms)" if _psutil() is not None else f"NOT enforced on {sys.platform}"
                 )
         argv = [self.python, "-I", "-B", "main.py"]
+        if sys.platform != "win32":
+            argv = [self.python, "-I", "-S", "-c", _LIMIT_LAUNCHER, json.dumps(limits), *argv]
         profile_path = None
         if _sandbox_exe() is not None:
             profile_path = _sandbox.write_profile(_sandbox.build_job_profile(d, self.python))
@@ -477,9 +486,16 @@ class JobRunner:
             metrics = {"_error": "metrics.json is a symlink; refused"}
         elif metrics_file.exists():
             try:
-                metrics = json.loads(metrics_file.read_text(encoding="utf-8"))
-            except ValueError:
-                metrics = {"_error": "out/metrics.json is not valid JSON"}
+                size = metrics_file.stat().st_size
+            except OSError:
+                size = 0
+            if size > _MAX_METRICS_BYTES:
+                metrics = {"_error": f"metrics.json is too large ({size} bytes, limit {_MAX_METRICS_BYTES}); not read"}
+            else:
+                try:
+                    metrics = json.loads(metrics_file.read_text(encoding="utf-8"))
+                except ValueError:
+                    metrics = {"_error": "out/metrics.json is not valid JSON"}
         artifacts = {}
         for f in sorted((d / "out").rglob("*")):
             if f.is_file() and not f.is_symlink():  # a link could point at a file the job may not read itself
@@ -688,10 +704,41 @@ def make_handler(app: NodeApp) -> type[BaseHTTPRequestHandler]:
             self.wfile.write(data)
 
         def _body(self, limit: int) -> bytes:
-            n = int(self.headers.get("Content-Length") or 0)
+            raw = self.headers.get("Content-Length") or "0"
+            try:
+                n = int(raw)
+            except ValueError:
+                raise ValueError(f"Content-Length must be a whole number, got {raw!r}") from None
+            if n < 0:
+                raise ValueError(f"Content-Length must not be negative, got {n}")
             if n > limit:
                 raise ValueError(f"body larger than {limit} bytes")
             return self.rfile.read(n)
+
+        def _json_object(self, limit: int) -> dict[str, Any]:
+            """The request body as a JSON object; anything else is a 400."""
+            body = json.loads(self._body(limit))
+            if not isinstance(body, dict):
+                raise ValueError("the request body must be a JSON object")
+            return body
+
+        def _fail(self, exc: Exception) -> None:
+            """Answer a handler failure with JSON instead of dropping the
+            connection: 404 for a missing file or directory, 400 for a bad
+            request, 503 when the node refuses (for example no sandbox),
+            500 for anything else. If the client is already gone, nothing."""
+            if isinstance(exc, (BrokenPipeError, ConnectionResetError)):
+                return
+            if isinstance(exc, (FileNotFoundError, IsADirectoryError, NotADirectoryError)):
+                code, message = 404, "not found"
+            elif isinstance(exc, (ValueError, TypeError, AttributeError, KeyError)):
+                code, message = 400, str(exc)
+            elif isinstance(exc, RuntimeError):
+                code, message = 503, str(exc)
+            else:
+                code, message = 500, f"{type(exc).__name__}: {exc}"
+            with contextlib.suppress(OSError):
+                self._json(code, {"error": message})
 
         def _route(self) -> tuple[str, list[str]]:
             parts = [p for p in self.path.split("?", 1)[0].split("/") if p]
@@ -737,10 +784,8 @@ def make_handler(app: NodeApp) -> type[BaseHTTPRequestHandler]:
                         self._json(404, {"error": "not found"})
                 else:
                     self._json(404, {"error": "not found"})
-            except FileNotFoundError:
-                self._json(404, {"error": "not found"})
-            except ValueError as exc:
-                self._json(400, {"error": str(exc)})
+            except Exception as exc:  # noqa: BLE001 -- answered as JSON by _fail, never a dropped connection
+                self._fail(exc)
 
         def do_PUT(self) -> None:  # noqa: N802
             if not self._authorized():
@@ -754,12 +799,12 @@ def make_handler(app: NodeApp) -> type[BaseHTTPRequestHandler]:
                     if not app.blobs.has(rest[0]):
                         self._json(404, {"error": "no blob with that hash"})
                         return
-                    app.blobs.put_meta(rest[0], json.loads(self._body(1024 * 1024)))
+                    app.blobs.put_meta(rest[0], self._json_object(1024 * 1024))
                     self._json(200, {"sha256": rest[0]})
                 else:
                     self._json(404, {"error": "not found"})
-            except ValueError as exc:
-                self._json(400, {"error": str(exc)})
+            except Exception as exc:  # noqa: BLE001 -- answered as JSON by _fail
+                self._fail(exc)
 
         def do_POST(self) -> None:  # noqa: N802
             if not self._authorized():
@@ -767,11 +812,11 @@ def make_handler(app: NodeApp) -> type[BaseHTTPRequestHandler]:
             kind, rest = self._route()
             try:
                 if kind == "jobs" and app.jobs is not None and not rest:
-                    self._json(202, app.jobs.submit(json.loads(self._body(4 * 1024 * 1024))))
+                    self._json(202, app.jobs.submit(self._json_object(4 * 1024 * 1024)))
                 else:
                     self._json(404, {"error": "not found"})
-            except ValueError as exc:
-                self._json(400, {"error": str(exc)})
+            except Exception as exc:  # noqa: BLE001 -- answered as JSON by _fail
+                self._fail(exc)
 
     return Handler
 

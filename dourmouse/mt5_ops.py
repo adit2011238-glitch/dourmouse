@@ -125,14 +125,19 @@ def _require_terminal() -> Any:
 
 
 def _is_demo() -> bool:
+    """True only when the terminal itself says this is a DEMO account.
+
+    ``account_info().trade_mode`` (ACCOUNT_TRADE_MODE_DEMO / CONTEST / REAL) is
+    the authoritative field. A server NAME is not: a real-money account on a
+    server called "...Demo..." must still go through the MT5_ALLOW_LIVE /
+    MT5_CONFIRM_LIVE double gate. A missing or unrecognised trade_mode, a
+    contest account, and no account at all are all treated as live."""
     info = mt5.account_info()
     if info is None:
         return False
-    # Demo servers report trade accounts on demo; the safest honest signal is
-    # the server name containing 'demo' — combined with the double gate below
-    # for live, this never lets a stray flag turn paper into real orders.
-    server = (info.server or "").lower()
-    return "demo" in server or "practice" in server
+    demo_mode = getattr(mt5, "ACCOUNT_TRADE_MODE_DEMO", 0)
+    mode = getattr(info, "trade_mode", None)
+    return isinstance(mode, int) and not isinstance(mode, bool) and mode == demo_mode
 
 
 def _config() -> tuple[Any, dict[str, Any]]:
@@ -458,6 +463,9 @@ import time  # noqa: E402
 
 _PANEL_LOCK = threading.Lock()
 _PANEL_CACHE: dict[str, Any] = {"ts": 0.0, "data": None}
+#: True while a refresh thread is running, so a stuck terminal and a fast HUD
+#: poll cannot pile up concurrent probe subprocesses against the same terminal.
+_PANEL_REFRESHING = False
 
 
 def _panel_shape(data: dict[str, Any]) -> dict[str, Any]:
@@ -469,26 +477,35 @@ def _panel_shape(data: dict[str, Any]) -> dict[str, Any]:
 
 
 def _refresh_panel() -> None:
-    data = _panel_shape(_run_worker(["panel"], timeout=15.0))
-    with _PANEL_LOCK:
-        _PANEL_CACHE["data"] = data
-        _PANEL_CACHE["ts"] = time.time()
+    global _PANEL_REFRESHING
+    try:
+        data = _panel_shape(_run_worker(["panel"], timeout=15.0))
+        with _PANEL_LOCK:
+            _PANEL_CACHE["data"] = data
+            _PANEL_CACHE["ts"] = time.time()
+    finally:
+        with _PANEL_LOCK:
+            _PANEL_REFRESHING = False
 
 
 def mt5_panel_snapshot() -> dict[str, Any]:
     """Bounded status+universe for the HUD panel (never hangs, never blocks
     the single-threaded webui: returns instantly from the cache and refreshes
     in a background thread)."""
+    global _PANEL_REFRESHING
     now = time.time()
     with _PANEL_LOCK:
         cached = _PANEL_CACHE["data"]
         fresh = cached is not None and now - _PANEL_CACHE["ts"] < 20
-    if not fresh:
+        start = not fresh and not _PANEL_REFRESHING
+        if start:
+            _PANEL_REFRESHING = True
+    if start:
         threading.Thread(target=_refresh_panel, daemon=True).start()
-        if cached is None:
-            return _panel_shape({"configured": False,
-                                 "error": "MT5 probe pending — check "
-                                           "again shortly"})
+    if not fresh and cached is None:
+        return _panel_shape({"configured": False,
+                             "error": "MT5 probe pending — check "
+                                      "again shortly"})
     return cached
 
 

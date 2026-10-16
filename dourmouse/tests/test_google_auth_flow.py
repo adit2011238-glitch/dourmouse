@@ -466,7 +466,8 @@ def test_drive_not_configured_without_user(google_env, monkeypatch, auth_store):
 
 def test_drive_search_escapes_quotes_in_query(google_env, monkeypatch, auth_store):
     """Drive q-syntax injection is neutralized: a query containing a single
-    quote is escaped by doubling (O'Brien -> O''Brien), never spliced raw."""
+    quote is backslash-escaped (O'Brien -> O\\'Brien, the Drive v3 q grammar;
+    the old doubling ended the literal early, FI1 P3-31), never spliced raw."""
     seen = []
 
     def handler(request, timeout=None):
@@ -481,8 +482,9 @@ def test_drive_search_escapes_quotes_in_query(google_env, monkeypatch, auth_stor
     finally:
         google_auth.set_current_user(None)
     assert seen, "files.list must be called"
-    assert "O%27%27Brien" in seen[0]  # O''Brien URL-encoded — doubled quote
+    assert "O%5C%27Brien" in seen[0]  # O\'Brien URL-encoded — backslash-escaped quote
     assert "O%27Brien" not in seen[0]  # never a single spliced quote
+    assert "O%27%27Brien" not in seen[0]  # and never the doubled form Drive rejects
 
 
 def test_drive_read_works_without_size_metadata(google_env, monkeypatch, auth_store):

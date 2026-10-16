@@ -22,6 +22,11 @@
    panel laid over it would be invisible. While one is open the native view is
    hidden, exactly as for any other panel.
 
+   The page area is the left region of a split view (split.js): the browser takes about 80 percent of
+   the screen and a chat column the rest, so the owner can tell the AI what to do while watching it. The
+   native view is placed from the left region only (computeBounds clips to it), so it never covers the
+   column.
+
    Nothing here is a sample: the address, title, loading, back and forward all
    come from the pane's own state, or from the addresses opened in this window
    when the page is proxied. */
@@ -33,6 +38,7 @@ import { confirmHere } from '../../kit/confirm-card.js';
 import { createPrivacy } from './privacy-ui.js';
 import { createControl } from './control-ui.js';
 import { createManage } from './manage-ui.js';
+import { createSplit, loadSplitStyles, removeSplitStyles } from './split.js';
 import { profileLabel } from './manage-model.js';
 import { ago, clock } from '../../kit/format.js';
 import { isAbort } from '../../core/api.js';
@@ -96,6 +102,11 @@ export default {
   thread: false,
 
   async mount(root, ctx) {
+    await loadSplitStyles(); /* the split's own stylesheet, so the first measurement already has the layout */
+    if (ctx.signal.aborted) {
+      removeSplitStyles();
+      return;
+    }
     const pane = ctx.host.pane || null; /* the Electron pane bridge, or null */
     const electron = ctx.host.kind === 'electron';
     const fallbackKind = electron ? 'electron' : ctx.host.kind;
@@ -264,6 +275,15 @@ export default {
     const resR = $('bwResR');
     const resB = $('bwResB');
     const bodyEl = root.parentElement || root;
+    /* the split view: wraps the page frame in the left region and adds the chat column beside it */
+    const split = createSplit({
+      ctx, root, wrap, foot: $('bwFoot'), fields: [addr, findInput], control: hasC2 ? pane.control : null, note, shared: Boolean(pane),
+      onLayout: () => schedule(),
+      onDragging: (on) => {
+        dragging = on;
+        applyView();
+      },
+    });
 
     PRESETS.forEach((p) => {
       const b = el('button');
@@ -312,7 +332,7 @@ export default {
       if (!root.isConnected || root.offsetParent === null) return null;
       const pr = pageEl.getBoundingClientRect();
       const br = bodyEl.getBoundingClientRect();
-      return viewBounds(pr, br);
+      return viewBounds(pr, split.clip(br)); /* the left region of the split, and never the overlay */
     }
 
     function applyView() {
@@ -340,7 +360,7 @@ export default {
       const w = Math.round(wrap.getBoundingClientRect().width);
       resR.setAttribute('aria-valuenow', String(w));
       resR.setAttribute('aria-valuemin', '280');
-      resR.setAttribute('aria-valuemax', String(Math.round(root.clientWidth) || w));
+      resR.setAttribute('aria-valuemax', String(Math.round(split.availWidth()) || w));
       const h = Math.round(pageEl.getBoundingClientRect().height);
       resB.setAttribute('aria-valuenow', String(h));
       resB.setAttribute('aria-valuemin', '120');
@@ -429,6 +449,7 @@ export default {
       if (proxied) {
         proxyEl.textContent = 'Proxied view: this server fetched the page for you and shows it in a sandbox. No cookies or logins reach it, only this exact address is fetched, and links clicked inside it do not open here. Type an address in the bar, or use OPEN EXTERNALLY.';
       }
+      split.setContext(v);
       paintRegion(v);
       renderTabs(v);
       paintTools(v);
@@ -590,8 +611,16 @@ export default {
       if (surface === 'pane') {
         if (pane) safe(pane.nav(cur().loading && !model.error ? 'stop' : 'reload'));
       } else if (frameEl && hist.current()) {
-        loadFrame(hist.current(), frameProxied ? true : false);
+        loadHistoryEntry(hist.current());
       }
+    }
+
+    /* hist holds the address the owner asked for (a real web address, or a path on this server);
+       a web address is only ever shown through the server proxy, on reload as on back and forward
+       (U1-1: a reload used to hand the real address to the iframe, bypassing the proxy) */
+    function loadHistoryEntry(target) {
+      if (target.startsWith('/') && !target.startsWith('//')) loadFrame(target, false);
+      else loadFrame('/api/browser-pane/proxy?url=' + encodeURIComponent(target), true);
     }
 
     function goHistory(dir) {
@@ -601,8 +630,7 @@ export default {
       }
       const target = dir === 'back' ? hist.back() : hist.forward();
       if (!target) return;
-      if (target.startsWith('/') && !target.startsWith('//')) loadFrame(target, false);
-      else loadFrame('/api/browser-pane/proxy?url=' + encodeURIComponent(target), true);
+      loadHistoryEntry(target);
     }
 
     function openExternally() {
@@ -1212,7 +1240,7 @@ export default {
       });
       handle.addEventListener('pointermove', (e) => {
         if (!start) return;
-        if (axis === 'x') setWidth(clampWidth(start.w + 2 * (e.clientX - start.x), root.clientWidth), false);
+        if (axis === 'x') setWidth(clampWidth(start.w + 2 * (e.clientX - start.x), split.availWidth()), false);
         else setHeight(clampHeight(start.h + (e.clientY - start.y), 1600 + chromeHeight()), false);
       });
       const end = () => {
@@ -1231,7 +1259,7 @@ export default {
         const step = e.shiftKey ? 100 : 20;
         if (axis === 'x' && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
           const cw = wrap.getBoundingClientRect().width;
-          setWidth(clampWidth(cw + (e.key === 'ArrowRight' ? step : -step), root.clientWidth), true);
+          setWidth(clampWidth(cw + (e.key === 'ArrowRight' ? step : -step), split.availWidth()), true);
           e.preventDefault();
         } else if (axis === 'y' && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
           const ch = wrap.getBoundingClientRect().height;
@@ -1376,6 +1404,7 @@ export default {
       offControl = null;
       if (controlUi) controlUi.dispose();
       controlUi = null;
+      split.dispose();
       manageUi = null;
       if (histTimer) clearTimeout(histTimer);
       if (offFindEsc) offFindEsc();
@@ -1511,6 +1540,9 @@ export default {
       loadBookmarks();
     }
     await connectPane();
+    /* left during the pane-state round trip: shutDown has run, so leave the request queued for the
+       next visit and do not navigate the native view over the screen now showing (U1-2) */
+    if (disposed) return;
     loadAttached();
     /* a page the server asked for while another screen was showing (NEWS, the agent's browser tools) */
     const waiting = takePaneRequest();

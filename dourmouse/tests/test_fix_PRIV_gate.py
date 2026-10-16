@@ -14,6 +14,7 @@ from typing import Any
 import pytest
 
 from dourmouse import privacy
+from dourmouse.config import OllamaConfig
 from dourmouse.dispatch import (
     DispatchRegistry,
     OllamaNativeClient,
@@ -21,7 +22,6 @@ from dourmouse.dispatch import (
     ToolSpec,
     run_dispatch_messages,
 )
-from dourmouse.config import OllamaConfig
 
 MAILBOX = (
     "From: Alice Example <alice@example.org>\n"

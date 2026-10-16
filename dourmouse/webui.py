@@ -4742,7 +4742,7 @@ class _Handler(BaseHTTPRequestHandler):
             if not prompt:
                 self._send_json({"ok": False, "error": "prompt is required"}, status=400)
                 return
-            pair = (body.get("pair") or "EURUSD").strip()
+            pair = (body.get("pair") or "").strip() or "EURUSD"  # an unposted pair defers to the prompt (finding #181)
             try:
                 result = submit_backtest(prompt, pair=pair)
                 self._send_json({"ok": True, **result})
@@ -5265,7 +5265,9 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json({"ok": False, "error": "body is required"}, status=400)
             return
         bus = getattr(self.server, "bus", None) or get_message_bus()
-        bus.post(sender, "BROADCAST", subject, text)
+        from dourmouse.message_bus import BROADCAST
+
+        bus.post(sender, BROADCAST, subject, text)
         self._send_json({"ok": True, "from": sender, "subject": subject})
 
     def _handle_tv_webhook(self) -> None:
@@ -6556,8 +6558,18 @@ class _Handler(BaseHTTPRequestHandler):
         _store = google_auth.auth_store()
         prompt = "select_account" if (_store is not None and _store.all_user_emails()) else "consent"
         url = google_auth.authorization_url(redirect_uri, state, challenge, prompt=prompt)
-        self.send_response(302)
-        self.send_header("Location", url)
+        # finding #181 (U1-9): the sign-in pages ask for the consent URL as JSON so a fetch does not
+        # follow the redirect cross-origin (the browser rejects that) and the page can hand the URL
+        # to the system browser itself; the claim cookie is still set on this response.
+        as_json = (qs.get("format") or [""])[0].lower() == "json"
+        if as_json:
+            payload = json.dumps({"ok": True, "url": url}).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(payload)))
+        else:
+            self.send_response(302)
+            self.send_header("Location", url)
         if claim:
             self.send_header(
                 "Set-Cookie",
@@ -6571,6 +6583,10 @@ class _Handler(BaseHTTPRequestHandler):
                 f"Max-Age={int(_OAUTH_PENDING_TTL_SECONDS)}",
             )
         self.send_header("Cache-Control", "no-store")
+        if as_json:
+            self.end_headers()
+            self.wfile.write(payload)
+            return
         self.send_header("Content-Length", "0")
         self.end_headers()
 

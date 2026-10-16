@@ -375,7 +375,12 @@ export default {
     async function pollLog() {
       try {
         const n = await readLog();
-        if (n && !guard()) refreshAll();
+        if (guard()) return;
+        /* a good read ends the "Live updates paused" banner whether or not anything was new (U1-5);
+           a "Could not refresh" banner from the question list is that read's own and stays */
+        const banner = qsEl.querySelector(':scope > .st-stale');
+        if (banner && banner.textContent.startsWith('Live updates')) states.clearStale(qsEl);
+        if (n) refreshAll();
       } catch (err) {
         if (!isAbort(err)) states.stale(qsEl, 'Live updates paused: ' + err.message);
       }

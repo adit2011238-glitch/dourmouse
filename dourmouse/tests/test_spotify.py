@@ -199,10 +199,14 @@ class TestLoginFlow:
         assert ss.status()["linked"] is True
 
     def test_state_mismatch_rejected(self, _workspace, monkeypatch):
-        """CSRF guard: a callback with the wrong state must not link."""
+        """CSRF guard: a callback with the wrong state must not link. FI2
+        P3-65: it is also ignored outright (400), so a stray request cannot
+        abort a login that the real approval would still complete; with no
+        right-state callback the login times out and nothing is saved."""
         _set_client_id(monkeypatch)
         sock = _free_port()
         monkeypatch.setattr(ss, "_REDIRECT_PORT", sock)
+        monkeypatch.setattr(ss, "_LOGIN_TIMEOUT", 3)
         monkeypatch.setattr(
             ss, "_post_form",
             lambda url, body: {"access_token": "a", "refresh_token": "r", "expires_in": 3600},
@@ -220,19 +224,21 @@ class TestLoginFlow:
         deadline = time.monotonic() + 30
         while time.monotonic() < deadline and not ss._CallbackHandler.expected_state:
             time.sleep(0.05)
-        fired = False
-        while time.monotonic() < deadline and not fired:
+        status = 0
+        while time.monotonic() < deadline and not status:
             try:
                 urllib.request.urlopen(
                     f"http://127.0.0.1:{sock}/callback?code=thecode&state=WRONG_STATE",
                     timeout=2,
                 ).read()
-                fired = True
+                status = 200
+            except urllib.error.HTTPError as exc:
+                status = exc.code
             except (OSError, urllib.error.URLError):
                 time.sleep(0.1)
-        assert fired, "could not reach the callback server"
+        assert status == 400, "a wrong-state callback must be refused"
         thread.join(timeout=30)
-        assert "state mismatch" in result["text"]
+        assert "TIMED OUT" in result["text"]
         assert ss._load_tokens() == {}  # nothing saved
 
 

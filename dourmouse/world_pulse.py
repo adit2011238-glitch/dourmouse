@@ -134,26 +134,54 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+#: Env vars whose VALUES must never appear in an error shown to the UI, the
+#: chat feed or a log. FIRMS puts its key in the URL path and ENTSO-E in a
+#: query parameter, and live_feeds builds its error text from the full URL.
+_SECRET_ENV_NAMES = ("FIRMS_MAP_KEY", "ENTSOE_API_TOKEN", "AISSTREAM_API_KEY", "OPENAQ_API_KEY")
+_SECRET_QUERY = re.compile(r"(?i)([?&](?:securityToken|api[_-]?key|apikey|access_token|token|key)=)[^&\s]+")
+
+
+def _scrub(text: str) -> str:
+    """`text` with every configured secret value, and any secret-looking query
+    parameter, replaced by ***."""
+    for name in _SECRET_ENV_NAMES:
+        val = os.environ.get(name, "").strip()
+        if len(val) >= 4:
+            text = text.replace(val, "***")
+    return _SECRET_QUERY.sub(r"\1***", text)
+
+
 def _http_get(url: str) -> str:
-    """Keyless GET via the existing live_feeds helper (honest errors)."""
-    return live_feeds._http_get(url, timeout=_SOURCE_TIMEOUT)
+    """Keyless GET via the existing live_feeds helper (honest errors, with any
+    key in the URL removed from the message)."""
+    try:
+        return live_feeds._http_get(url, timeout=_SOURCE_TIMEOUT)
+    except RuntimeError as exc:
+        raise RuntimeError(_scrub(str(exc))) from None
+
+
+#: Largest body `_http_get_bytes` will hold in memory.
+_MAX_DOWNLOAD_BYTES = 25 * 1024 * 1024
 
 
 def _http_get_bytes(url: str) -> bytes:
     """Same honest-error contract as `_http_get`, but returns raw bytes
     undecoded — only the conflict_events channel needs this, to fetch a
     real ZIP file (GDELT's raw event-export stream) without corrupting
-    it through a text decode."""
+    it through a text decode. The body is capped at `_MAX_DOWNLOAD_BYTES`."""
     req = urllib.request.Request(url, headers={"User-Agent": live_feeds._UA})
     try:
         with urllib.request.urlopen(req, timeout=_SOURCE_TIMEOUT) as resp:
-            return resp.read()
+            data: bytes = resp.read(_MAX_DOWNLOAD_BYTES + 1)
     except urllib.error.HTTPError as exc:
-        raise RuntimeError(f"HTTP {exc.code} from {url}") from exc
+        raise RuntimeError(_scrub(f"HTTP {exc.code} from {url}")) from None
     except urllib.error.URLError as exc:
-        raise RuntimeError(f"network error fetching {url}: {exc.reason}") from exc
+        raise RuntimeError(_scrub(f"network error fetching {url}: {exc.reason}")) from None
     except TimeoutError as exc:
-        raise RuntimeError(f"timeout fetching {url}: {exc}") from exc
+        raise RuntimeError(_scrub(f"timeout fetching {url}: {exc}")) from None
+    if len(data) > _MAX_DOWNLOAD_BYTES:
+        raise RuntimeError(f"response from {url} is too large (over {_MAX_DOWNLOAD_BYTES} bytes); refused")
+    return data
 
 
 def _http_post(url: str, data: bytes) -> str:
@@ -165,13 +193,16 @@ def _http_post(url: str, data: bytes) -> str:
     req = urllib.request.Request(url, data=data, headers={"User-Agent": live_feeds._UA})
     try:
         with urllib.request.urlopen(req, timeout=_SOURCE_TIMEOUT) as resp:
-            return resp.read().decode("utf-8", errors="replace")
+            body: bytes = resp.read(_MAX_DOWNLOAD_BYTES + 1)
     except urllib.error.HTTPError as exc:
-        raise RuntimeError(f"HTTP {exc.code} from {url}") from exc
+        raise RuntimeError(_scrub(f"HTTP {exc.code} from {url}")) from None
     except urllib.error.URLError as exc:
-        raise RuntimeError(f"network error posting to {url}: {exc.reason}") from exc
+        raise RuntimeError(_scrub(f"network error posting to {url}: {exc.reason}")) from None
     except TimeoutError as exc:
-        raise RuntimeError(f"timeout posting to {url}: {exc}") from exc
+        raise RuntimeError(_scrub(f"timeout posting to {url}: {exc}")) from None
+    if len(body) > _MAX_DOWNLOAD_BYTES:
+        raise RuntimeError(f"response from {url} is too large (over {_MAX_DOWNLOAD_BYTES} bytes); refused")
+    return body.decode("utf-8", errors="replace")
 
 
 # --------------------------------------------------------------------------- #
@@ -1126,7 +1157,11 @@ def _fetch_conflict_zones() -> list[dict[str, Any]]:
 # it's a real, direct mapping of GoldsteinScale, an established CAMEO
 # field already present in GDELT's own schema (-10..+10, more negative =
 # more severe conflict intensity), not a rating this code makes up.
-_GDELT_LASTUPDATE_URL = "http://data.gdeltproject.org/gdeltv2/lastupdate.txt"
+_GDELT_HOST = "data.gdeltproject.org"
+_GDELT_LASTUPDATE_URL = f"https://{_GDELT_HOST}/gdeltv2/lastupdate.txt"
+#: Largest export member that will be decompressed into memory (a real 15
+#: minute export is a few MB; this only stops a zip bomb).
+_MAX_GDELT_UNZIPPED_BYTES = 150 * 1024 * 1024
 _VIOLENT_EVENT_ROOT_CODES = {"18", "19", "20"}  # assault, fight, mass violence
 
 # GoldsteinScale is a real CAMEO field (see the module comment above), but
@@ -1158,6 +1193,12 @@ def _fetch_conflict_events() -> list[dict[str, Any]]:
             break
     if not export_url:
         raise RuntimeError("GDELT lastupdate.txt carried no export file URL")
+    parsed_url = urllib.parse.urlparse(export_url)
+    if parsed_url.hostname != _GDELT_HOST:
+        raise RuntimeError(
+            f"GDELT lastupdate.txt named an export on {parsed_url.hostname!r}, not {_GDELT_HOST}; refused"
+        )
+    export_url = parsed_url._replace(scheme="https").geturl()  # the index lists http; the host serves https
 
     zip_bytes = _http_get_bytes(export_url)
     try:
@@ -1165,7 +1206,17 @@ def _fetch_conflict_events() -> list[dict[str, Any]]:
             names = zf.namelist()
             if not names:
                 raise RuntimeError("GDELT export ZIP was empty")
-            csv_text = zf.read(names[0]).decode("utf-8", errors="replace")
+            info = zf.getinfo(names[0])
+            too_large = RuntimeError(
+                f"GDELT export member is too large to decompress (limit {_MAX_GDELT_UNZIPPED_BYTES} bytes); refused"
+            )
+            if info.file_size > _MAX_GDELT_UNZIPPED_BYTES:
+                raise too_large
+            with zf.open(info) as member:
+                raw_csv = member.read(_MAX_GDELT_UNZIPPED_BYTES + 1)  # a forged header cannot lift the limit
+            if len(raw_csv) > _MAX_GDELT_UNZIPPED_BYTES:
+                raise too_large
+            csv_text = raw_csv.decode("utf-8", errors="replace")
     except zipfile.BadZipFile as exc:
         raise RuntimeError(f"GDELT export was not a valid ZIP: {exc}") from exc
 
@@ -1299,15 +1350,17 @@ def _fetch_markets() -> list[dict[str, Any]]:
     if failures:
         # Partial is reported as partial. A channel that quietly drops
         # equities and shows only crypto would read as a complete market
-        # picture, which it is not.
-        items.append(_item(
-            "EQUITIES UNAVAILABLE",
-            summary=(
-                "Yahoo is rate-limiting this host (HTTP 429); crypto and FX "
-                "below are live. No keyless equity source is configured."
-            ),
+        # picture, which it is not. The warning LEADS and is counted inside
+        # the cap: appended last it was cut off whenever 8+ real items came
+        # back, which is exactly the partial case. Its text is the real
+        # failures, not a guess about who is rate-limiting.
+        shown = "; ".join(failures[:4]) + (f"; and {len(failures) - 4} more" if len(failures) > 4 else "")
+        warn = _item(
+            "MARKET DATA PARTIAL",
+            summary=f"{len(failures)} market request(s) failed, so this picture is incomplete: {shown}",
             severity="warn",
-        ))
+        )
+        return [warn, *items[: _MAX_ITEMS_PER_SOURCE - 1]]
     return items[: _MAX_ITEMS_PER_SOURCE]
 
 
@@ -1324,10 +1377,15 @@ def _fetch_news() -> list[dict[str, str]]:
         except Exception as exc:  # noqa: BLE001
             out.append(_item(f"{region} NEWS UNAVAILABLE", summary=str(exc)[:150], severity="warn"))
             continue
-        for it in _rss_items(raw, 3, _pick_news):
+        try:
+            edition_items = _rss_items(raw, 3, _pick_news)
+        except RuntimeError as exc:  # unparseable or empty edition: the other editions still count
+            out.append(_item(f"{region} NEWS UNAVAILABLE", summary=str(exc)[:150], severity="warn"))
+            continue
+        for it in edition_items:
             it["severity"] = "news"
             out.append(it)
-    if not out:
+    if not any(it.get("severity") == "news" for it in out):
         raise RuntimeError("all news editions failed")
     return out[:_MAX_ITEMS_PER_SOURCE]
 
@@ -1567,6 +1625,11 @@ def _compute_pulse(items: dict[str, list[dict[str, str]]]) -> tuple[int, str]:
     return score, label
 
 
+#: One fan-out at a time: a caller that finds the cache stale while another is
+#: already fetching waits for that fetch and shares its result.
+_build_lock = threading.Lock()
+
+
 def world_pulse_snapshot(force: bool = False) -> dict[str, Any]:
     """The aggregated monitor snapshot (cached). Never raises."""
     now = time.monotonic()
@@ -1574,20 +1637,50 @@ def world_pulse_snapshot(force: bool = False) -> dict[str, Any]:
         if not force and _cache["snapshot"] and (now - _cache["at"]) < _ttl():
             return _cache["snapshot"]
 
+    with _build_lock:
+        with _cache_lock:
+            # Someone finished a build while this caller waited for the lock:
+            # that snapshot is newer than the request, so reuse it.
+            if _cache["snapshot"] and _cache["at"] >= now:
+                return _cache["snapshot"]
+        return _build_snapshot()
+
+
+def _build_snapshot() -> dict[str, Any]:
     results: dict[str, Any] = {}
     items: dict[str, list[dict[str, str]]] = {}
-    with concurrent.futures.ThreadPoolExecutor(max_workers=_SOURCE_COUNT) as pool:
-        futures = {name: pool.submit(fn) for name, (label, fn) in _SOURCES.items()}
+
+    def _timed(fn: Callable[[], list[dict[str, Any]]]) -> tuple[list[dict[str, Any]], int]:
+        started = time.perf_counter()
+        got = fn()
+        return got, int((time.perf_counter() - started) * 1000)
+
+    # Not a `with` block: leaving that waits for every worker, so one stalled
+    # provider would hold the whole snapshot (and every caller queued behind
+    # it) for as long as its slowest sequential requests. One shared deadline
+    # bounds the wait; a worker still running after it is left to finish on
+    # its own (its requests have their own timeouts) and its result is dropped.
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=_SOURCE_COUNT, thread_name_prefix="world-pulse")
+    try:
+        futures = {name: pool.submit(_timed, fn) for name, (label, fn) in _SOURCES.items()}
+        deadline = time.monotonic() + _SOURCE_TIMEOUT + 2
+        concurrent.futures.wait(list(futures.values()), timeout=_SOURCE_TIMEOUT + 2)
         for name, fut in futures.items():
-            started = time.perf_counter()
+            if not fut.done():
+                fut.cancel()
+                results[name] = {"ok": False, "count": 0,
+                                 "error": f"timed out after {_SOURCE_TIMEOUT + 2:g}s; this source is skipped this cycle"}
+                items[name] = []
+                continue
             try:
-                got = fut.result(timeout=_SOURCE_TIMEOUT + 2)
-                latency_ms = int((time.perf_counter() - started) * 1000)
+                got, latency_ms = fut.result(timeout=max(0.0, deadline - time.monotonic()))
                 results[name] = {"ok": True, "latency_ms": latency_ms, "count": len(got)}
                 items[name] = got
             except Exception as exc:  # noqa: BLE001 - per-source isolation
-                results[name] = {"ok": False, "error": str(exc)[:200], "count": 0}
+                results[name] = {"ok": False, "error": _scrub(str(exc))[:200], "count": 0}
                 items[name] = []
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
 
     score, label = _compute_pulse(items)
     snapshot = {

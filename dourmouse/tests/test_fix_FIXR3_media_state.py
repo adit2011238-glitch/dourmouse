@@ -9,8 +9,7 @@ import os
 import pytest
 
 from dourmouse.config import workspace_dir
-from dourmouse.os_api import ApiError, Request
-from dourmouse.os_api import media
+from dourmouse.os_api import ApiError, Request, media
 
 
 @pytest.fixture

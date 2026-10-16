@@ -163,8 +163,8 @@ def plan(record: ResearchRecord) -> ResearchRecord:
     )
     text = _strip_internal_diagnostics((result.get("final_text") or "").strip())
     sub_questions = [
-        line[2:].strip() for line in text.splitlines()
-        if line.strip().startswith("- ") and line[2:].strip()
+        line.strip()[2:].strip() for line in text.splitlines()
+        if line.strip().startswith("- ") and line.strip()[2:].strip()
     ]
     if not sub_questions:
         # Honest fallback: the model answered but not in the requested
@@ -251,6 +251,29 @@ def _source_id_for_url(url: str) -> str:
     return hashlib.sha256(url.encode("utf-8")).hexdigest()[:16]
 
 
+#: A quoted passage must be a real stretch of the page, not a word that any
+#: page contains ("the", "a"), and it must bear on the claim it is offered for.
+_MIN_PASSAGE_WORDS = 3
+_MIN_PASSAGE_CHARS = 12
+
+
+def _weak_passage(claim_text: str, passage: str) -> str:
+    """Why `passage` cannot back `claim_text` even though it is on the page,
+    or "" when it can: too short to be a quotation, or sharing no content word
+    with the claim."""
+    from .answer_critic import _tokens
+
+    words = passage.split()
+    if len(words) < _MIN_PASSAGE_WORDS or len(passage.strip()) < _MIN_PASSAGE_CHARS:
+        return (f"the quoted passage is too short to be evidence (needs at least {_MIN_PASSAGE_WORDS} "
+                f"words and {_MIN_PASSAGE_CHARS} characters)")
+    claim_words, _ = _tokens(claim_text)
+    passage_words, _ = _tokens(passage)
+    if not claim_words & passage_words:
+        return "the quoted passage shares no content word with the claim it is offered for"
+    return ""
+
+
 def extract_evidence(
     record: ResearchRecord,
     registry: Any,
@@ -321,6 +344,9 @@ def extract_evidence(
             f"passage validation failed for {url}: the model's quoted passage is not a "
             "real substring of the real fetched text (rejected, not silently accepted)"
         )
+    weak = _weak_passage(claim_text, passage)
+    if weak:
+        raise ValueError(f"passage validation failed for {url}: {weak} (rejected, not silently accepted)")
 
     # The location comes from the document's own heading structure when it
     # has one (finding #091): the model's LOCATION line was a guess, the
@@ -561,7 +587,9 @@ def run_follow_up(
     One bad source never blocks the rest (same rule as run_full_pipeline).
     The record's own stage does not move: the project only goes forward and
     the evidence grows."""
-    task = next(t for t in record.tasks if t.task_id == task_id)
+    task = next((t for t in record.tasks if t.task_id == task_id), None)
+    if task is None:
+        raise ValueError(f"no task {task_id!r}")
     if task.status != "OPEN":
         raise ValueError(f"task {task_id} is not open")
     contradiction = next(
@@ -569,6 +597,7 @@ def run_follow_up(
     )
     note = contradiction.note if contradiction is not None else task.title
     before = len(record.sources)
+    claims_before = len(record.claims)
     discover_sources(
         record, registry,
         query=_FOLLOW_UP_DISCOVERY.format(sub_question=task.sub_question or record.question, note=note),
@@ -583,7 +612,11 @@ def run_follow_up(
             )
         except ValueError:
             continue
-    record.complete_task(task_id)
+    # A task is only settled by evidence. With none gathered it stays OPEN, so
+    # the next backward-edge call retries it and the synthesis is not revised
+    # as if the contradiction had been investigated.
+    if any(c.task_id == task_id for c in record.claims[claims_before:]):
+        record.complete_task(task_id)
     return record
 
 

@@ -26,6 +26,7 @@ missing), every tool reports NOT CONFIGURED honestly — never a stub.
 from __future__ import annotations
 
 import csv
+import math
 import os
 import socket
 import subprocess
@@ -329,10 +330,22 @@ def forex_paper() -> dict[str, Any]:
     rows = _csv_rows(path)
     open_pos = [r for r in rows if not r.get("exit_date")]
     closed = [r for r in rows if r.get("exit_date")]
-    try:
-        total_pnl = sum(float(r.get("pnl_usd") or 0) for r in closed)
-    except ValueError:
-        total_pnl = 0.0
+    # A bad cell skips only its own row (and is counted); it never zeroes the sum.
+    total_pnl = 0.0
+    unparseable = 0
+    for r in closed:
+        cell = str(r.get("pnl_usd") or "").strip()
+        if not cell:
+            continue
+        try:
+            value = float(cell)
+        except ValueError:
+            unparseable += 1
+            continue
+        if math.isfinite(value):
+            total_pnl += value
+        else:
+            unparseable += 1
     return {
         "configured": True,
         "log_file": path.name if path.is_file() else None,
@@ -340,6 +353,7 @@ def forex_paper() -> dict[str, Any]:
         "open_positions": open_pos,
         "closed_trades": len(closed),
         "realised_pnl_usd": total_pnl,
+        "unparseable_pnl_rows": unparseable,
     }
 
 
@@ -360,6 +374,9 @@ def _forex_paper_tool(arguments: dict[str, Any]) -> str:
         lines.append("  open positions: none")
     lines.append(f"  closed trades: {p['closed_trades']} | "
                  f"realised P&L: ${p['realised_pnl_usd']:.2f}")
+    if p["unparseable_pnl_rows"]:
+        lines.append(f"  WARNING: {p['unparseable_pnl_rows']} closed trade(s) with an unreadable pnl_usd "
+                     "were left out of that total.")
     return "\n".join(lines)
 
 

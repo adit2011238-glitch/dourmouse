@@ -71,8 +71,10 @@ def cmd_panel() -> dict[str, Any]:
             found, missing = {}, []
             for code in sorted(SEASONAL_SYMBOLS):
                 name = _find_symbol(mt5, code)
-                (found if name else missing).append(
-                    f"{code}={name}" if name else code)
+                if name:
+                    found[code] = name
+                else:
+                    missing.append(code)
             universe = {"configured": True, "available": found,
                         "not_listed": missing}
     return {"status": status, "universe": universe}

@@ -418,13 +418,13 @@
     <div class="panel" style="flex:1.3">
       <div class="phead">⚡ SUIT DIAGNOSTICS</div>
       <div class="pbody">
-        <div class="metric"><div class="mrow"><span>⚡ ARC STABILITY</span><b id="mArc">—</b></div><div class="bar"><div id="bArc" style="width:0%"></div></div></div>
-        <div class="metric"><div class="mrow"><span>🛡 SHIELD INTEGRITY</span><b id="mShield">—</b></div><div class="bar"><div id="bShield" style="width:0%"></div></div></div>
+        <div class="metric"><div class="mrow"><span title="Not measured: this gauge has no data source">⚡ ARC STABILITY</span><b id="mArc">—</b></div><div class="bar"><div id="bArc" style="width:0%"></div></div></div>
+        <div class="metric"><div class="mrow"><span title="Not measured: this gauge has no data source">🛡 SHIELD INTEGRITY</span><b id="mShield">—</b></div><div class="bar"><div id="bShield" style="width:0%"></div></div></div>
         <div class="metric"><div class="mrow"><span>⚡ RAM USAGE</span><b id="mRam">—</b></div><div class="bar"><div id="bRam" style="width:0%"></div></div></div>
         <div class="metric"><div class="mrow"><span>⚙ CPU LOAD</span><b id="mCpu">—</b></div><div class="bar"><div id="bCpu" style="width:0%"></div></div></div>
         <div class="dualfoot">
-          <span>O2 RESERVES<br>⌖ <b id="o2Val">—</b></span>
-          <span>BIO-SIGN<br>⚡ <b id="bioVal">—</b></span>
+          <span title="Not measured: this gauge has no data source">O2 RESERVES<br>⌖ <b id="o2Val">—</b></span>
+          <span title="The 1 minute load average of the server machine">BIO-SIGN<br>⚡ <b id="bioVal">—</b></span>
         </div>
       </div>
     </div>
@@ -461,7 +461,7 @@
           <button data-goto="/map" title="Agent orchestration map"><span class="ic">⌖</span><span class="lb">TARGET</span></button>
           <button data-goto="/voice" title="Voice command mode"><span class="ic">🌐</span><span class="lb">COMMS</span></button>
           <button data-goto="/" title="Full dashboard"><span class="ic">⚡</span><span class="lb">POWER</span></button>
-          <button data-goto="/api/atlas" title="ATLAS quant engine (opens dashboard)" class="atlas"><span class="ic">⚙</span><span class="lb">DRIVE</span></button>
+          <button data-goto="/atlas-lab" title="ATLAS quant lab (opens the dashboard page)" class="atlas"><span class="ic">⚙</span><span class="lb">DRIVE</span></button>
           <button data-goto="/voice" title="Talk to the core"><span class="ic">&gt;_</span><span class="lb">SHELL</span></button>
           <button id="hudReload" title="Reload this HUD"><span class="ic">☷</span><span class="lb">HUD</span></button>
         </div>
@@ -604,12 +604,12 @@ async function loadDiag() {
     bar('bRam', memPct);
     $('mCpu').textContent = cpu.toFixed(0) + '%';
     bar('bCpu', cpu);
-    $('mArc').textContent = '98%'; bar('bArc', 98);  // model online
-    $('mShield').textContent = TOK ? '84%' : '100%';
-    bar('bShield', TOK ? 84 : 100);
-    const uptime = load.length ? load[0] : 0;
-    $('o2Val').textContent = (uptime / 100).toFixed(2) + 'd';
-    $('bioVal').textContent = load[0] + ' LDA';
+    // U1-17: only measured values are shown. Arc stability, shield integrity and O2 reserves have
+    // no data source (they used to be constants), so they read n/a rather than posing as readings.
+    $('mArc').textContent = 'n/a'; bar('bArc', 0);
+    $('mShield').textContent = 'n/a'; bar('bShield', 0);
+    $('o2Val').textContent = 'n/a';
+    $('bioVal').textContent = (load.length ? load[0] : 'n/a') + ' LDA';
     return { memPct, cpu, load };
   } catch (_) { return null; }
 }
@@ -703,7 +703,7 @@ async function pollActivity() {
     if (active) {
       lastIntent = active.toUpperCase();
       $('intentVal').textContent = lastIntent;
-      if ($('confVal').textContent === '—') $('confVal').textContent = '94.3%';
+      // U1-17: no model confidence is measured, so CONFIDENCE stays at its dash
     }
     $('uplinkTag').textContent = 'LVL ' + pad2(liveCount || 1);
     $('uplinkRow').textContent = liveCount + ' live';

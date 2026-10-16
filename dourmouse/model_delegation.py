@@ -99,9 +99,7 @@ def _backend_for(task: "DelegationTask", allow_gemini: bool) -> str:
     """The task's own ``model`` may pick Gemini only for an agent that is
     not sensitive, and no task goes to Gemini once the request has read a
     sensitive source (P5-31); ``model`` naming anything else runs the roster."""
-    from dourmouse.privacy import SENSITIVE_AGENTS
-
-    from dourmouse.privacy import current_turn
+    from dourmouse.privacy import SENSITIVE_AGENTS, current_turn
 
     turn = current_turn()
     if turn is not None and turn.sources:

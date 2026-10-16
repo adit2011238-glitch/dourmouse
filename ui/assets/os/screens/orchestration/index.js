@@ -286,7 +286,9 @@ export default {
     root.addEventListener('click', (e) => {
       const win = e.target.closest('[data-ah-window]');
       if (win) {
-        if (!ctx.host.openExternal('/all-hands?run=' + encodeURIComponent(win.dataset.ahWindow))) ctx.notify({ level: 'warn', title: 'ORCHESTRATION', detail: 'This window could not open a separate page.' });
+        /* openExternal refuses a bare path, so the page is named by its full address (U1-3) */
+        const page = location.origin + '/all-hands?run=' + encodeURIComponent(win.dataset.ahWindow);
+        if (!ctx.host.openExternal(page)) ctx.notify({ level: 'warn', title: 'ORCHESTRATION', detail: 'This window could not open a separate page.' });
         return;
       }
       const tg = e.target.closest('[data-ah-toggle]');

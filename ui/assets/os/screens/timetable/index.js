@@ -26,7 +26,7 @@ export default {
   thread: false,
 
   async mount(root, ctx) {
-    const st = { entries: null, tiers: {}, tiersError: '', error: null, edit: null, editError: '', sig: '', hand: null };
+    const st = { entries: null, tiers: {}, tiersError: '', error: null, edit: null, editError: '', sig: '', hand: null, draft: null };
 
     root.dataset.state = 'populated';
     setHtml(root, html`
@@ -93,9 +93,16 @@ export default {
         st.tiersError = ros.reason.message;
       }
       if (sch.status === 'fulfilled') {
+        const wasStale = Boolean(st.error);
         st.error = null;
         const sig = JSON.stringify(sch.value) + JSON.stringify(st.tiers);
-        if (sig === st.sig && reason === 'poll' && !st.edit) {
+        /* an unchanged poll never repaints, even with an editor open: a repaint would replace the
+           input the owner is typing in with the stored text (U1-6). A recovered poll drops its banner. */
+        if (sig === st.sig && reason === 'poll') {
+          if (wasStale) {
+            states.clearStale(root);
+            if (st.entries && !st.entries.length) root.dataset.state = 'empty';
+          }
           paintOverdue();
           return;
         }
@@ -117,6 +124,9 @@ export default {
         return;
       }
       if (!st.entries) return;
+      /* a changed list repaints the rows; keep what the owner has typed in the open editor */
+      const open = listEl.querySelector('[data-edit-input]');
+      if (open && st.edit) st.draft = { id: st.edit, text: open.value };
       root.querySelectorAll(':scope > .st-stale').forEach((n) => n.remove());
       if (st.error) states.stale(root, 'Could not refresh: ' + st.error.message + ' Showing the last read.');
       else root.dataset.state = 'populated';
@@ -147,6 +157,10 @@ export default {
       setHtml(nextEl, html`${list.map(({ e, at }) => html`<div class="kv"><span>${toolLabel(e.tool)} <span class="muted">${argsPhrase(e.tool, e.arguments)}</span></span><b>${whenShort(at)}</b></div>`)}`);
     }
 
+    function draftFor(e) {
+      return st.draft && st.draft.id === e.id ? st.draft.text : (e.schedule_text || '');
+    }
+
     function row(e) {
       const overdue = isOverdue(e);
       const blocked = cannotRunUnattended(e, st.tiers);
@@ -165,7 +179,7 @@ export default {
           </span>
         </div>
         ${editing ? html`<div class="tt-edit"><label class="tt-l" for="ttEdit-${e.id}">When, in words (for example: daily at 8:30, every 30 minutes, every Monday at 9:00)</label>
-          <div class="tt-editrow"><input id="ttEdit-${e.id}" class="tt-in" type="text" maxlength="120" value="${e.schedule_text || ''}" data-edit-input data-spec="The new schedule in words. The server checks it and says why if it does not understand.">
+          <div class="tt-editrow"><input id="ttEdit-${e.id}" class="tt-in" type="text" maxlength="120" value="${draftFor(e)}" data-edit-input data-spec="The new schedule in words. The server checks it and says why if it does not understand.">
           <button type="button" class="os-btn os-btn--primary" data-save="${e.id}" data-spec="Asks for confirmation, then changes the schedule.">SAVE</button>
           <button type="button" class="os-btn" data-edit-cancel data-spec="Closes this editor without changing anything.">CANCEL</button></div>
           ${st.editError ? html`<div class="tt-err" role="alert">${st.editError}</div>` : ''}</div>` : ''}
@@ -240,9 +254,11 @@ export default {
       if ((el = q('[data-edit]'))) {
         st.edit = st.edit === el.dataset.edit ? null : el.dataset.edit;
         st.editError = '';
+        st.draft = null;
         paint();
       } else if (q('[data-edit-cancel]')) {
         st.edit = null;
+        st.draft = null;
         paint();
       } else if ((el = q('[data-save]'))) {
         saveEdit(el.dataset.save);
@@ -275,6 +291,7 @@ export default {
           try {
             await post('/api/schedules/update', { id: id, schedule_text: text }, 'Schedule changed.');
             st.edit = null;
+            st.draft = null;
             st.editError = '';
             paint();
           } catch (err) {
@@ -289,6 +306,7 @@ export default {
       if (e.key === 'Escape') {
         if (st.edit) {
           st.edit = null;
+          st.draft = null;
           paint();
         } else if (!handCard.hidden) {
           closeHand();

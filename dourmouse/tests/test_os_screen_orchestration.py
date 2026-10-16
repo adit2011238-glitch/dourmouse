@@ -142,7 +142,7 @@ R.newest = h.newestRuns({ a: { id: 'a', started: 1 }, b: { id: 'b', started: 3 }
         src = (SCREENS / "orchestration" / "index.js").read_text(encoding="utf-8")
         assert "/api/allhands" in src and "ctx.events.on('allhands'" in src
         assert "innerHTML" not in src and ".innerHTML" not in src
-        assert "openExternal('/all-hands?run='" in src
+        assert "location.origin + '/all-hands?run='" in src  # U1-3: openExternal refuses a bare path
 
     def test_esc_closes_the_transcript_only_while_one_is_open(self):
         src = (SCREENS / "orchestration" / "index.js").read_text(encoding="utf-8")

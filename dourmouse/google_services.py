@@ -173,6 +173,22 @@ class GoogleApiError(RuntimeError):
         self.over_cap = over_cap
 
 
+class BodyTooLarge(RuntimeError):
+    """A response body went past the byte cap while it was being read."""
+
+
+def _partial_failure(exc: RuntimeError, what: str, scope_hint: str = "") -> RuntimeError:
+    """The error to raise when a create succeeded but a later call failed.
+
+    Keeps Google's real message and ALWAYS says what already exists (with its
+    id), whatever the failure was, so the caller does not believe nothing was
+    created and retry into a duplicate. ``scope_hint`` is added for a 403."""
+    msg = str(exc)
+    if scope_hint and "403" in msg:
+        msg += f" — {scope_hint}"
+    return RuntimeError(f"{msg} — {what}")
+
+
 def _google_error_reason(raw: bytes) -> str:
     """Google's machine reason (``exportSizeLimitExceeded``, ``rateLimitExceeded`` ...) from an error body, or ''."""
     try:
@@ -382,8 +398,10 @@ def _gmail_read_oauth(token: str, message_id: str) -> str:
     mid = str(message_id or "").strip()
     if not mid:
         return "ERROR: gmail_read needs a message id."
+    if not _MSG_ID_RE.match(mid):
+        return f"ERROR: gmail_read needs a Gmail message id (letters, digits, - and _), got {mid!r}."
     msg = _http_json(
-        "GET", f"{_GMAIL_API}/messages/{urllib.parse.quote(mid)}?format=full", token
+        "GET", f"{_GMAIL_API}/messages/{urllib.parse.quote(mid, safe='')}?format=full", token
     )
     headers = {}
     for h in msg.get("payload", {}).get("headers", []):
@@ -396,11 +414,25 @@ def _gmail_read_oauth(token: str, message_id: str) -> str:
     )
 
 
+def _gmail_send_problem(to: str, subject: str) -> str:
+    """"" when the recipient and subject are acceptable, else the ERROR string.
+    Shared by the OAuth and SMTP paths so neither can send what the other
+    would refuse; a CR/LF/NUL in a header value is refused outright."""
+    if not to or "@" not in to or any(c in to for c in "\r\n\x00"):
+        return "ERROR: gmail_send requires a valid recipient address."
+    if not subject or any(c in subject for c in "\r\n\x00"):
+        return "ERROR: gmail_send requires a subject (a single line)."
+    return ""
+
+
 def _gmail_send_oauth(token: str, to: str, subject: str, body: str) -> str:
     msg = EmailMessage()
     msg["From"] = "me"  # Gmail fills the authenticated user's address
-    msg["To"] = to
-    msg["Subject"] = subject
+    try:
+        msg["To"] = to
+        msg["Subject"] = subject
+    except ValueError as exc:
+        return f"ERROR: gmail_send header rejected: {exc}. Nothing was sent."
     msg.set_content((body or "")[:50_000])
     raw = base64.urlsafe_b64encode(msg.as_bytes()).decode("ascii")
     result = _http_json("POST", f"{_GMAIL_API}/messages/send", token, {"raw": raw})
@@ -575,6 +607,12 @@ _DRIVE_MIME_ALIASES: dict[str, str] = {
 }
 
 
+def _drive_q_escape(value: str) -> str:
+    """Escape text for a single-quoted Drive v3 ``q`` string literal: a
+    backslash escapes both a quote and itself, so the backslash goes first."""
+    return value.replace("\\", "\\\\").replace("'", "\\'")
+
+
 def _drive_search_oauth(
     token: str, query: str, max_results: int, file_type: str | None = None
 ) -> str:
@@ -589,13 +627,12 @@ def _drive_search_oauth(
     q = (query or "").strip()
     clauses = ["trashed = false"]
     if q:
-        # Drive q syntax: single quotes are escaped by doubling.
-        safe = q.replace("'", "''")
+        safe = _drive_q_escape(q)
         clauses.append(f"(name contains '{safe}' or fullText contains '{safe}')")
     ftype = (file_type or "").strip().lower()
     if ftype:
         mime = _DRIVE_MIME_ALIASES.get(ftype, file_type.strip())
-        safe_mime = mime.replace("'", "''")
+        safe_mime = _drive_q_escape(mime)
         clauses.append(f"mimeType = '{safe_mime}'")
     clause = " and ".join(clauses)
     params = urllib.parse.urlencode(
@@ -626,9 +663,12 @@ def _drive_read_oauth(token: str, file_id: str) -> str:
     files (Docs/Sheets/Slides) go through the export endpoint; everything
     else through alt=media with a hard size cap. Honest refusal for
     oversized binaries — never a truncated lie or a fabricated read."""
-    fid = urllib.parse.quote(str(file_id or "").strip())
-    if not fid:
+    raw_id = str(file_id or "").strip()
+    if not raw_id:
         return "ERROR: drive_read needs a file id."
+    if not _valid_google_id(raw_id, "drive file"):
+        return f"ERROR: drive_read needs a Drive file id (letters, digits, - and _), got {raw_id!r}."
+    fid = urllib.parse.quote(raw_id, safe="")
     meta = _http_json(
         "GET",
         f"{_DRIVE_API}/files/{fid}?fields=id,name,mimeType,modifiedTime,size",
@@ -709,14 +749,12 @@ def _drive_create_oauth(token: str, title: str, content: str) -> str:
                 content_type="text/plain; charset=utf-8",
             )
         except RuntimeError as exc:
-            msg = str(exc)
-            if "403" in msg:
-                raise RuntimeError(
-                    msg
-                    + " — Drive WRITE needs the full scopes (GOOGLE_OAUTH_FULL_SCOPES=1). "
-                    f"The empty doc {name!r} was created but its content was not written."
-                ) from exc
-            raise
+            raise _partial_failure(
+                exc,
+                f"The empty doc {name!r} (id {fid}, https://drive.google.com/open?id={fid}) "
+                "was created but its content was not written. Do not create it again.",
+                "Drive WRITE needs the full scopes (GOOGLE_OAUTH_FULL_SCOPES=1).",
+            ) from exc
     return (
         f"DRIVE DOC CREATED: {name!r} (id {fid}) — "
         f"open at https://drive.google.com/open?id={fid} · "
@@ -777,13 +815,15 @@ def _docs_append_oauth(token: str, document_id: str, text: str) -> str:
     doc_id = (document_id or "").strip()
     if not doc_id:
         return "ERROR: docs_append requires a document_id."
+    if not _valid_google_id(doc_id, "document"):
+        return f"ERROR: docs_append needs a document id (letters, digits, - and _), got {doc_id!r}. Nothing was appended."
     body_text = text or ""
     if not body_text.strip():
         return "ERROR: docs_append requires non-empty text to append."
     try:
         _http_json(
             "POST",
-            f"{_DOCS_API}/{urllib.parse.quote(doc_id)}:batchUpdate",
+            f"{_DOCS_API}/{urllib.parse.quote(doc_id, safe='')}:batchUpdate",
             token,
             {
                 "requests": [
@@ -870,13 +910,15 @@ def _docs_insert_image_oauth(token: str, document_id: str, image_url: str) -> st
     doc_id = (document_id or "").strip()
     if not doc_id:
         return "ERROR: docs_insert_image requires a document_id."
+    if not _valid_google_id(doc_id, "document"):
+        return f"ERROR: docs_insert_image needs a document id (letters, digits, - and _), got {doc_id!r}. Nothing was inserted."
     url = (image_url or "").strip()
     if not url.lower().startswith(("http://", "https://")):
         return f"ERROR: docs_insert_image requires a real http(s) image_url, got {url!r}."
     try:
         _http_json(
             "POST",
-            f"{_DOCS_API}/{urllib.parse.quote(doc_id)}:batchUpdate",
+            f"{_DOCS_API}/{urllib.parse.quote(doc_id, safe='')}:batchUpdate",
             token,
             {
                 "requests": [
@@ -1020,6 +1062,7 @@ def _slides_create_oauth(
             f"SLIDES DECK CREATED: {name!r} (id {pres_id}) — no slides added. "
             f"open at https://docs.google.com/presentation/d/{pres_id}"
         )
+    deck_url = f"https://docs.google.com/presentation/d/{pres_id}"
     try:
         _http_json(
             "POST",
@@ -1028,14 +1071,12 @@ def _slides_create_oauth(
             {"requests": requests},
         )
     except RuntimeError as exc:
-        msg = str(exc)
-        if "403" in msg:
-            raise RuntimeError(
-                msg
-                + " — Slides WRITE needs the full scopes (GOOGLE_OAUTH_FULL_SCOPES=1). "
-                f"The empty deck {name!r} was created but its slides were not added."
-            ) from exc
-        raise
+        raise _partial_failure(
+            exc,
+            f"The empty deck {name!r} (id {pres_id}, {deck_url}) was created but its "
+            "slides were not added. Do not create it again.",
+            "Slides WRITE needs the full scopes (GOOGLE_OAUTH_FULL_SCOPES=1).",
+        ) from exc
     # Second batch: draw explicit title/body text boxes on each slide.
     text_requests: list[dict[str, Any]] = []
     for i, slide in enumerate(slides):
@@ -1109,14 +1150,12 @@ def _slides_create_oauth(
                 {"requests": text_requests},
             )
         except RuntimeError as exc:
-            msg = str(exc)
-            if "403" in msg:
-                raise RuntimeError(
-                    msg
-                    + " — Slides WRITE needs the full scopes (GOOGLE_OAUTH_FULL_SCOPES=1). "
-                    f"The deck {name!r} was created but its text could not be written."
-                ) from exc
-            raise
+            raise _partial_failure(
+                exc,
+                f"The deck {name!r} (id {pres_id}, {deck_url}) was created but its text "
+                "could not be written. Do not create it again.",
+                "Slides WRITE needs the full scopes (GOOGLE_OAUTH_FULL_SCOPES=1).",
+            ) from exc
     return (
         f"SLIDES DECK CREATED: {name!r} (id {pres_id}) — "
         f"{len(slides)} slide(s) · open at "
@@ -1167,6 +1206,11 @@ def _drive_share_oauth(
     addr = (email or "").strip()
     if not fid:
         return "ERROR: drive_share requires a file_id."
+    if not _valid_google_id(fid, "drive file"):
+        return (
+            f"ERROR: drive_share needs a Drive file id (letters, digits, - and _), "
+            f"got {fid!r}. Nothing was shared."
+        )
     # Deliberately structural, not a full RFC check: a local part, one @, and
     # a dotted domain. "@nope" contains an @ and no spaces but is not an
     # address, and a share sent to a malformed target fails confusingly at
@@ -1182,7 +1226,7 @@ def _drive_share_oauth(
     try:
         _http_json(
             "POST",
-            f"{_DRIVE_API}/files/{fid}/permissions"
+            f"{_DRIVE_API}/files/{urllib.parse.quote(fid, safe='')}/permissions"
             f"?sendNotificationEmail={'true' if notify else 'false'}",
             token,
             {"type": "user", "role": role, "emailAddress": addr},
@@ -1309,6 +1353,15 @@ def _decode(b: bytes | None) -> str:
         return str(b)
 
 
+def _imap_quote_safe(query: str) -> str:
+    """Make free text safe inside an IMAP quoted string: control characters
+    (CR/LF/NUL would end the command and start another) become spaces,
+    backslashes are doubled so none can escape the closing quote, and double
+    quotes become single quotes."""
+    text = re.sub(r"[\x00-\x1f\x7f]", " ", query or "").strip()
+    return text.replace("\\", "\\\\").replace('"', "'")
+
+
 def gmail_search(query: str, max_results: int = 10) -> str:
     """Search the Gmail inbox (IMAP), newest first.
 
@@ -1340,7 +1393,7 @@ def gmail_search(query: str, max_results: int = 10) -> str:
             return "GMAIL SEARCH: inbox is empty."
         # Embedded quotes are escaped so a malformed query can never break the
         # search syntax.
-        safe = (query or "").strip().replace('"', "'")
+        safe = _imap_quote_safe(query)
         if not safe:
             # Empty query: browse the most recent messages instead of erroring
             # on a zero-length IMAP search (live-caught: Gmail rejects it).
@@ -1711,19 +1764,18 @@ def gmail_send(to: str, subject: str, body: str) -> str:
     v5.15: with a logged-in OAuth user this sends from THEIR account via the
     Gmail API; SMTP App-Password is the fallback.
     """
+    to = (to or "").strip()
+    subject = (subject or "").strip()
+    problem = _gmail_send_problem(to, subject)
+    if problem:
+        return problem
     token = _oauth_access_token()
     if token:
         return _gmail_send_oauth(token, to, subject, body)
     reauth = _oauth_user_needs_reauth("SEND")
     if reauth:
         return reauth
-    to = (to or "").strip()
-    subject = (subject or "").strip()
     body = (body or "").strip()
-    if not to or "@" not in to:
-        return "ERROR: gmail_send requires a valid recipient address."
-    if not subject:
-        return "ERROR: gmail_send requires a subject."
     if not gmail_configured():
         raise RuntimeError(
             "NOT CONFIGURED: set GOOGLE_GMAIL_USER + GOOGLE_GMAIL_APP_PASSWORD "
@@ -1813,12 +1865,31 @@ def calendar_events(max_results: int = 5) -> str:
 _UA = "Mozilla/5.0 (Dourmouse/1.0)"
 
 
-def _http_get(url: str, timeout: int = 25) -> tuple[int, bytes, str]:
-    """GET a URL with a browser-ish UA; returns (status, body, content_type)."""
+def _http_get(url: str, timeout: int = 25, max_bytes: int | None = None) -> tuple[int, bytes, str]:
+    """GET a URL with a browser-ish UA; returns (status, body, content_type).
+
+    ``max_bytes`` bounds the read itself: the body is read in chunks and
+    BodyTooLarge is raised as soon as it passes the cap, so an oversized
+    response is never fully held in memory."""
     req = urllib.request.Request(url, headers={"User-Agent": _UA})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return resp.status, resp.read(), (resp.headers.get("Content-Type") or "")
+            ctype = resp.headers.get("Content-Type") or ""
+            if max_bytes is None:
+                return resp.status, resp.read(), ctype
+            chunks: list[bytes] = []
+            total = 0
+            while True:
+                chunk = resp.read(min(65536, max_bytes + 1 - total))
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                total += len(chunk)
+                if total > max_bytes:
+                    raise BodyTooLarge(f"response is larger than {max_bytes:,} bytes")
+            return resp.status, b"".join(chunks), ctype
+    except BodyTooLarge:
+        raise
     except urllib.error.HTTPError as exc:
         return exc.code, b"", (exc.headers.get("Content-Type") or "")
     except Exception as exc:  # noqa: BLE001 - network failures, readable
@@ -2059,6 +2130,9 @@ def sheets_create(title: str, rows: list[list[Any]] | None = None) -> str:
     )
 
 
+_MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024
+
+
 def drive_download(file_id: str, dest: str = "") -> str:
     """Download a link-shared Google Drive file by its ID (stdlib urllib).
 
@@ -2088,16 +2162,19 @@ def drive_download(file_id: str, dest: str = "") -> str:
     if path != root and root not in path.parents:
         return f"REFUSED: drive_download saves only inside {root}; {path} is outside it. Nothing was downloaded."
     url = f"https://drive.google.com/uc?export=download&id={fid}"
-    status, body, ctype = _http_get(url)
+    try:
+        status, body, ctype = _http_get(url, max_bytes=_MAX_DOWNLOAD_BYTES)
+    except BodyTooLarge:
+        return "DRIVE DOWNLOAD REFUSED: the file is larger than 50 MB. Nothing was saved."
     if status != 200:
         return (
             f"DRIVE DOWNLOAD FAILED: HTTP {status}. The file must be shared "
             "'Anyone with the link' (Share -> General access -> Anyone with "
             "the link). Nothing was downloaded."
         )
-    if len(body) > 50 * 1024 * 1024:
-        return "DRIVE DOWNLOAD REFUSED: the file is larger than 50 MB. Nothing was saved."
-    text = body.decode("utf-8", errors="replace")
+    # Only an HTML interstitial is sniffed, and only its first part: a real
+    # sign-in or confirmation page is small, a download is not decoded at all.
+    text = body[:65536].decode("utf-8", errors="replace") if ctype.startswith("text/html") else ""
     if ctype.startswith("text/html") and "googleusercontent.com" not in text:
         if "signin" in text.lower() or "Sign in" in text:
             return (

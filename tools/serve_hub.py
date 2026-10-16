@@ -14,6 +14,7 @@ Run:  python tools/serve_hub.py [--port 8791] [--bind 127.0.0.1]
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import os
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -30,18 +31,42 @@ FEED_URL = os.environ.get("HUB_FEED_URL", "http://127.0.0.1:8788")
 DM_URL = os.environ.get("HUB_DM_URL", "index.html")
 
 
+def _host_is_literal(host_header: str) -> bool:
+    """True when the Host header names this machine by an IP literal or ``localhost``.
+
+    The hub page carries the engine token, so it must not answer to an arbitrary
+    hostname: a DNS-rebinding page (attacker.example resolved to 127.0.0.1) would
+    otherwise be same-origin with it and could read the token."""
+    host = (host_header or "").strip().lower()
+    if host.startswith("["):
+        host = host[1 : host.find("]")] if "]" in host else host[1:]
+    elif host.count(":") == 1:
+        host = host.rsplit(":", 1)[0]
+    if host == "localhost":
+        return True
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return True
+
+
 class Handler(SimpleHTTPRequestHandler):
     def __init__(self, *a, **kw):
         super().__init__(*a, directory=str(UI), **kw)
 
-    def end_headers(self):
-        self.send_header("Access-Control-Allow-Origin", "*")
-        super().end_headers()
+    # No Access-Control-Allow-Origin header at all (U1-11): hub.html has the engine token baked in,
+    # and "*" let any web page the owner visits fetch it cross-origin and read the token. The hub
+    # reaches ATLAS and FEED itself (they answer their own CORS); nothing needs to read these pages
+    # from another origin, so the browser's default same-origin rule is the right one.
 
     def log_message(self, *a):  # keep the console quiet
         pass
 
     def do_GET(self):  # inject the engine token into the hub page only
+        if not _host_is_literal(self.headers.get("Host", "")):
+            self.send_error(403, "Reach the hub by its IP address or localhost")
+            return
         if self.path in ("/hub.html", "/"):
             try:
                 raw = (UI / "hub.html").read_bytes()

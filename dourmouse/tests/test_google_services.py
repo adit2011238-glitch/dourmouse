@@ -591,9 +591,10 @@ class TestDriveSearchFileType:
         gs._drive_search_oauth(
             "tok", "mimeType='application/vnd.google-apps.spreadsheet'", 10
         )
-        # The single quotes are escaped by doubling, per the function's own
-        # existing (unchanged) contract -- never left as raw Drive syntax.
-        assert "''application/vnd.google-apps.spreadsheet''" in captured["q"]
+        # The single quotes are backslash-escaped (Drive v3 q grammar; the old
+        # doubling ended the literal early, FI1 P3-31) -- never left as raw
+        # Drive syntax.
+        assert "\\'application/vnd.google-apps.spreadsheet\\'" in captured["q"]
         assert captured["q"].count("mimeType =") == 0
 
     def test_public_drive_search_threads_file_type_through(self, monkeypatch):
@@ -726,6 +727,7 @@ class _FakeResp:
     def __init__(self, body: str, ctype: str = "text/javascript; charset=utf-8"):
         self._body = body.encode("utf-8")
         self._ctype = ctype
+        self._pos = 0
 
     def __enter__(self) -> "_FakeResp":
         return self
@@ -733,8 +735,12 @@ class _FakeResp:
     def __exit__(self, *a: object) -> None:
         return None
 
-    def read(self) -> bytes:
-        return self._body
+    def read(self, n: int = -1) -> bytes:
+        # Chunked like a real response: the bounded download reads by size.
+        end = len(self._body) if n is None or n < 0 else self._pos + n
+        chunk = self._body[self._pos:end]
+        self._pos += len(chunk)
+        return chunk
 
     @property
     def headers(self):

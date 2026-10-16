@@ -86,10 +86,18 @@ export default {
       try {
         const b = await ctx.api.get('/api/os/goals/board');
         if (ctx.signal.aborted) return;
+        const wasStale = Boolean(st.error);
         st.error = null;
         st.running = !b.runtime || b.runtime.running !== false;
         const sig = JSON.stringify(b);
-        if (sig === st.sig && reason === 'poll') return;
+        if (sig === st.sig && reason === 'poll') {
+          /* an unchanged board skips the repaint, but a recovered read must still drop its banner (U1-4) */
+          if (wasStale) {
+            states.clearStale(root);
+            if (!b.goals.length) root.dataset.state = 'empty';
+          }
+          return;
+        }
         st.sig = sig;
         st.board = b;
       } catch (err) {

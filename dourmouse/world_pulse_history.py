@@ -14,15 +14,18 @@ database, no LLM anywhere in this module (Rule 2.2: never fabricate data).
 The workspace root resolution is copied verbatim from that function so this
 file lands in the same place other local state does.
 
-Two things keep the log bounded even if a caller polls aggressively:
+Writes are cheap and safe:
 
 - ``record_snapshot`` is a cheap no-op when called again within
   ``_MIN_INTERVAL_SECONDS`` of the last recorded snapshot, so a poller can
   call it on every tick without writing a line every few seconds.
-- ``prune_old`` (also run automatically inside ``record_snapshot``) drops
-  anything older than the requested retention window, and a hard cap
-  (``_MAX_LINES``) prunes the oldest entries before every append so nothing
-  calling ``record_snapshot`` in a tight loop can grow the file unboundedly.
+- The common case APPENDS one line (the file is not re-read, re-parsed and
+  re-written). Only when something must be dropped (a line older than
+  ``_RETENTION_HOURS``, or the hard cap ``_MAX_LINES`` would be exceeded) is
+  the file rewritten, through a temp file and ``os.replace``, so a kill
+  mid-write leaves the old history, not a truncated one. A torn last line
+  from a crash during an append is fenced off with a newline before the next
+  record so it cannot glue onto it. ``prune_old`` rewrites the same way.
 
 Every public function is a "nice to have" for the UI, never a load-bearing
 data path: all of them swallow their own errors and return an honest empty
@@ -38,6 +41,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from dourmouse.state_file import atomic_write_text
+
 #: Re-recording within this many seconds of the last snapshot is a no-op.
 _MIN_INTERVAL_SECONDS = 90.0
 
@@ -46,6 +51,9 @@ _MIN_INTERVAL_SECONDS = 90.0
 #: loop. ~24h at a ~2-minute polling cadence is ~720 entries; 1000 gives
 #: headroom without letting the file grow forever.
 _MAX_LINES = 1000
+
+#: Snapshots older than this are dropped when the log is next written.
+_RETENTION_HOURS = 24.0
 
 _ENV_HISTORY_FILE = "DOURMOUSE_WORLD_HISTORY_FILE"
 
@@ -100,13 +108,19 @@ def _parse_at(raw: Any) -> datetime | None:
     return dt.astimezone(timezone.utc)
 
 
-def _read_lines(path: Path) -> list[dict[str, Any]]:
-    """Read + parse every valid JSONL line. Missing file -> []; bad lines skipped."""
+def _read_lines(path: Path, *, strict: bool = False) -> list[dict[str, Any]]:
+    """Read + parse every valid JSONL line. Missing file -> []; bad lines skipped.
+
+    A file that exists but cannot be read is [] for the read-only callers, but
+    ``strict=True`` (used before a rewrite) lets the OSError out: treating an
+    unreadable log as empty and rewriting it would replace the history."""
     if not path.exists():
         return []
     try:
         raw = path.read_text(encoding="utf-8")
     except OSError:
+        if strict:
+            raise
         return []
     out: list[dict[str, Any]] = []
     for line in raw.splitlines():
@@ -123,11 +137,58 @@ def _read_lines(path: Path) -> list[dict[str, Any]]:
 
 
 def _write_lines(path: Path, records: list[dict[str, Any]]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
+    """Replace the whole log through a temp file + os.replace (never truncate
+    in place)."""
     body = "\n".join(json.dumps(r, ensure_ascii=False) for r in records)
     if body:
         body += "\n"
-    path.write_text(body, encoding="utf-8")
+    atomic_write_text(path, body)
+
+
+def _count_lines(path: Path) -> int:
+    """How many lines the file holds (newline count; no JSON parsing)."""
+    try:
+        with open(path, "rb") as fh:
+            return sum(chunk.count(b"\n") for chunk in iter(lambda: fh.read(1 << 20), b""))
+    except OSError:
+        return 0
+
+
+def _first_at(path: Path) -> datetime | None:
+    """Timestamp of the first line, or None when it is absent or unreadable."""
+    try:
+        with open(path, "rb") as fh:
+            first = fh.readline()
+        rec = json.loads(first.decode("utf-8", errors="replace"))
+    except (OSError, ValueError):
+        return None
+    return _parse_at(rec.get("at")) if isinstance(rec, dict) else None
+
+
+_TAIL_BYTES = 4 * 1024 * 1024
+
+
+def _last_record(path: Path) -> tuple[dict[str, Any] | None, bool]:
+    """(newest valid record, whether the file ends with a newline). Reads only
+    the tail of the file; a torn last line is skipped to the one before it."""
+    try:
+        with open(path, "rb") as fh:
+            fh.seek(0, os.SEEK_END)
+            size = fh.tell()
+            fh.seek(max(0, size - _TAIL_BYTES))
+            tail = fh.read()
+    except OSError:
+        return None, True
+    ends_clean = tail.endswith(b"\n") or not tail
+    lines = tail.decode("utf-8", errors="replace").splitlines()
+    for line in reversed(lines):
+        try:
+            rec = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(rec, dict) and _parse_at(rec.get("at")) is not None:
+            return rec, ends_clean
+    return None, ends_clean
 
 
 def record_snapshot(geo: dict) -> None:
@@ -135,26 +196,45 @@ def record_snapshot(geo: dict) -> None:
 
     Cheap no-op if called again within ``_MIN_INTERVAL_SECONDS`` of the most
     recently recorded snapshot, so a caller can invoke this on every poll
-    without writing a line every few seconds. Also enforces the hard line
-    cap by pruning the oldest entries before appending. Never raises — a
-    write failure here is swallowed; this is a nice-to-have feature, not
-    part of the core data path.
+    without writing a line every few seconds. Appends one line normally;
+    rewrites (atomically) only to drop snapshots past ``_RETENTION_HOURS`` or
+    to hold the ``_MAX_LINES`` cap. Never raises: a failure here is swallowed
+    (a nice-to-have feature, not part of the core data path), and a failed
+    rewrite leaves the old file in place.
     """
     if not isinstance(geo, dict):
         return
     try:
         path = _history_file()
         with _lock:
-            records = _read_lines(path)
             now = _now()
-            if records:
-                last_at = _parse_at(records[-1].get("at"))
+            last, ends_clean = _last_record(path) if path.exists() else (None, True)
+            if last is not None:
+                last_at = _parse_at(last.get("at"))
                 if last_at is not None and (now - last_at).total_seconds() < _MIN_INTERVAL_SECONDS:
-                    return  # too soon — no-op write
-            records.append({"at": now.isoformat(timespec="seconds"), "geo": geo})
-            if len(records) > _MAX_LINES:
-                records = records[-_MAX_LINES:]
-            _write_lines(path, records)
+                    return  # too soon: no-op write
+            record = {"at": now.isoformat(timespec="seconds"), "geo": geo}
+            line = json.dumps(record, ensure_ascii=False) + "\n"
+            if path.exists():
+                oldest = _first_at(path)
+                stale = oldest is None or oldest < now - timedelta(hours=_RETENTION_HOURS)
+                full = _count_lines(path) + 1 > _MAX_LINES
+            else:
+                stale = full = False
+            if stale or full:
+                records = _read_lines(path, strict=True)
+                cutoff = now - timedelta(hours=_RETENTION_HOURS)
+                records = [r for r in records if (_parse_at(r.get("at")) or now) >= cutoff]
+                records.append(record)
+                if len(records) > _MAX_LINES:
+                    records = records[-_MAX_LINES:]
+                _write_lines(path, records)
+                return
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(path, "ab") as fh:
+                # A file that ends mid-line (killed during an earlier append):
+                # start this record on its own line.
+                fh.write((b"" if ends_clean else b"\n") + line.encode("utf-8"))
     except Exception:  # noqa: BLE001 - nice-to-have, must never raise
         return
 
@@ -245,7 +325,7 @@ def prune_old(hours: float = 24.0) -> int:
     try:
         path = _history_file()
         with _lock:
-            records = _read_lines(path)
+            records = _read_lines(path, strict=True)
             if not records:
                 return 0
             cutoff = _now() - timedelta(hours=hours)

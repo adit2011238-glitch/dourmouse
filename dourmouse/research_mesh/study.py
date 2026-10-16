@@ -25,7 +25,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from .brain import Brain
+from .brain import Brain, _extract_file_text
 from .core import (
     PHASE_ORDER,
     STUDY_BUDGET_MIN,
@@ -107,6 +107,17 @@ def load_corpus(papers_root: Path, domain: str, field: str) -> FieldCorpus:
     landing = tuple(sorted(p for p in folder.glob("*.html")))
     return FieldCorpus(domain=domain, field=field, folder=folder,
                        papers=tuple(papers), landing_pages=landing)
+
+
+def read_key_text(path: Path) -> str:
+    """Gradable text of a key file; "" when no text can be extracted.
+
+    Keys are `*.pdf` files, so the raw bytes must never be decoded as text
+    (a real PDF decodes to megabytes of stream noise and every genuine answer
+    would score about zero). A PDF is text-extracted; a scanned or damaged one
+    yields "" and callers must skip or flag it rather than grade against it.
+    """
+    return _extract_file_text(path).strip()
 
 
 def iteration_order(papers: list[Paper]) -> list[Paper]:
@@ -212,7 +223,9 @@ class StudyEngine:
             ans = self.brain.answer(p.id)
             if not ans.text:
                 continue
-            key_text = p.key_path.read_text(errors="replace")
+            key_text = read_key_text(p.key_path)
+            if not key_text:
+                continue  # unreadable key: no score rather than a fake one
             self._practice_scores.append(grade_answer(ans.text, key_text))
 
     def _practice_all(self) -> None:
@@ -222,8 +235,9 @@ class StudyEngine:
                 continue
             ans = self.brain.answer(p.id)
             if ans.text:
-                key_text = p.key_path.read_text(errors="replace")
-                self._practice_scores.append(grade_answer(ans.text, key_text))
+                key_text = read_key_text(p.key_path)
+                if key_text:
+                    self._practice_scores.append(grade_answer(ans.text, key_text))
 
     def _gap_closure(self, record, sources: list[Path]) -> None:
         # Re-ingest the same allowed sources: cheap for the mock, targeted

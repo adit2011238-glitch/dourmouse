@@ -13,7 +13,11 @@ import sys
 from pathlib import Path
 from typing import Any
 
-_ROOT = Path(__file__).resolve().parent.parent
+#: The repo root, where ``atlas_terminal`` lives (this file is
+#: <repo>/dourmouse/atlas/atlas_ui_ops.py). Only the root goes on sys.path:
+#: putting ``dourmouse/`` there would let its top-level modules (config,
+#: cache, voice, ...) shadow same-named packages for every later import.
+_ROOT = Path(__file__).resolve().parents[2]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 

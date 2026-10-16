@@ -177,8 +177,11 @@ _CLAUDE_MCP_CONNECTION_FAILED_RE = re.compile(
 #: only way to touch the disk is through Dourmouse's own gated tools. ToolSearch stays: it loads the
 #: bridge's tools. The claude_code tool keeps the native tools (the owner approves each call), see
 #: general_roster._claude_code_mcp_args, which drops this whole list.
-_DISALLOWED_NATIVE_TOOLS = "Bash,Write,Edit,MultiEdit,NotebookEdit,WebFetch,WebSearch," + (
-    "PowerShell,NotebookRead,Read,Glob,Grep,LS,Task,Agent,TodoWrite,SlashCommand,Skill,REPL,Monitor,"
+#: Finding #181: only names the installed CLI knows. The CLI exits 1 ("Permission deny rule ... matches no
+#: known tool") on a name it does not know, which broke Claude front mode entirely when MultiEdit, NotebookRead,
+#: LS, SlashCommand and REPL were listed. Do not add a name without checking it against `claude` first.
+_DISALLOWED_NATIVE_TOOLS = "Bash,Write,Edit,NotebookEdit,WebFetch,WebSearch," + (
+    "PowerShell,Read,Glob,Grep,Task,Agent,TodoWrite,Skill,Monitor,"
     "EnterWorktree,ExitWorktree"
 )
 _MCP_ALLOWED_TOOLS = "mcp__dourmouse__*"

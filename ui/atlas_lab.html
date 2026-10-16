@@ -858,8 +858,8 @@ function renderPendingCard(p) {
         <option value="local">run: LOCAL</option>
         <option value="desktop">run: DESKTOP ENGINE</option>
       </select>
-      <button class="btn-approve" onclick="approveProposal('${esc(p.id)}')">✓ APPROVE &amp; RUN</button>
-      <button class="btn-reject" onclick="rejectProposal('${esc(p.id)}')">✕ REJECT</button>
+      <button class="btn-approve" data-prop-act="approve" data-prop-id="${esc(p.id)}">✓ APPROVE &amp; RUN</button>
+      <button class="btn-reject" data-prop-act="reject" data-prop-id="${esc(p.id)}">✕ REJECT</button>
     </div>`;
   return `<div class="prop-card" id="prop-${esc(p.id)}">
     <div class="prop-head">
@@ -873,14 +873,38 @@ function renderPendingCard(p) {
   </div>`;
 }
 
+// The 5 s poll must not undo what the reviewer is doing in a card: an open
+// "view generated code" panel and the chosen run target. A render whose markup
+// is identical to the last one is skipped, and a changed list gets the open
+// panels and selected targets put back after the rebuild.
+function repaintList(el, markup) {
+  if (el.dataset.lastMarkup === markup) return;
+  const cardKey = (c, i) => c.id || "card-" + i;
+  const open = {};
+  el.querySelectorAll(".prop-card").forEach((c, i) => {
+    open[cardKey(c, i)] = [...c.querySelectorAll("details")].map((d) => d.open);
+  });
+  const picked = {};
+  el.querySelectorAll("select[id]").forEach((sel) => { picked[sel.id] = sel.value; });
+  el.innerHTML = markup;
+  el.dataset.lastMarkup = markup;
+  el.querySelectorAll(".prop-card").forEach((c, i) => {
+    const was = open[cardKey(c, i)];
+    if (was) c.querySelectorAll("details").forEach((d, j) => { if (was[j]) d.open = true; });
+  });
+  el.querySelectorAll("select[id]").forEach((sel) => {
+    if (picked[sel.id] !== undefined && [...sel.options].some((o) => o.value === picked[sel.id])) sel.value = picked[sel.id];
+  });
+}
+
 async function loadProposals() {
   try {
     const res = await fetch("/api/atlas-lab/proposals?status=pending", { cache: "no-store" });
     const data = await res.json();
     const items = (data.proposals || []);
-    $("pendingList").innerHTML = items.length
+    repaintList($("pendingList"), items.length
       ? items.map(renderPendingCard).join("")
-      : '<div class="empty">no proposals waiting on you</div>';
+      : '<div class="empty">no proposals waiting on you</div>');
   } catch (e) { /* transient — next poll retries */ }
 }
 
@@ -924,9 +948,9 @@ async function loadHistory() {
     const runsByProposal = {};
     runs.forEach((r) => { (runsByProposal[r.proposal_id] = runsByProposal[r.proposal_id] || []).push(r); });
     const decided = props.filter((p) => p.status !== "pending");
-    $("historyList").innerHTML = decided.length
+    repaintList($("historyList"), decided.length
       ? decided.map((p) => renderHistoryEntry(p, runsByProposal)).join("")
-      : '<div class="empty">nothing yet — submit an idea above</div>';
+      : '<div class="empty">nothing yet — submit an idea above</div>');
   } catch (e) { /* transient — next poll retries */ }
 }
 
@@ -985,6 +1009,14 @@ async function rejectProposal(id) {
     await loadHistory();
   } catch (e) { /* best-effort refresh below still runs */ }
 }
+
+// The id never becomes script text: an entity-escaped quote in an onclick attribute is decoded
+// back to a quote before the script is parsed, so the buttons carry it as data (same class as U1-13).
+document.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-prop-act]");
+  if (!b) return;
+  (b.dataset.propAct === "approve" ? approveProposal : rejectProposal)(b.dataset.propId);
+});
 
 // Poll pending + history every 5s while a run might be in flight — cheap
 // for a single-user local app, same unconditional-poll convention as the

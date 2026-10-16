@@ -848,8 +848,8 @@ class TestRunFullPipelineStage:
             "https://b.example/1": "Body B content real.",
         })
         _install_chat_fake(monkeypatch, [
-            "CLAIM: claim A\nPASSAGE: Body A content real.\nLOCATION: whole",
-            "CLAIM: claim B\nPASSAGE: Body B content real.\nLOCATION: whole",
+            "CLAIM: Body A content is real\nPASSAGE: Body A content real.\nLOCATION: whole",
+            "CLAIM: Body B content is real\nPASSAGE: Body B content real.\nLOCATION: whole",
         ])
         result = run_full_pipeline(record, _research_info_registry())
         assert result is record
@@ -875,7 +875,7 @@ class TestRunFullPipelineStage:
         monkeypatch.setattr(dispatch_module, "run_dispatch_messages", _dispatch)
         _install_fetch(monkeypatch, dict.fromkeys(("https://a.example/1", "https://a.example/2", "https://a.example/3"), "Body content real."))
         _install_chat_fake(monkeypatch, [
-            "CLAIM: claim\nPASSAGE: Body content real.\nLOCATION: whole",
+            "CLAIM: Body content is real\nPASSAGE: Body content real.\nLOCATION: whole",
         ])
         run_full_pipeline(record, _research_info_registry(), max_sources_per_sub_question=1)
         assert record.sources == ("https://a.example/1", "https://a.example/2", "https://a.example/3")
@@ -906,15 +906,15 @@ class TestRunFullPipelineStage:
             "https://b.example/1": "Body B content real.",
         })
         _install_chat_fake(monkeypatch, [
-            "CLAIM: claim A\nPASSAGE: this text is not in the real fetched page\nLOCATION: nowhere",
-            "CLAIM: claim B\nPASSAGE: Body B content real.\nLOCATION: whole",
+            "CLAIM: Body A content is real\nPASSAGE: this text is not in the real fetched page\nLOCATION: nowhere",
+            "CLAIM: Body B content is real\nPASSAGE: Body B content real.\nLOCATION: whole",
         ])
         run_full_pipeline(record, _research_info_registry())
         # sub A's own source was discovered but failed passage validation --
         # sub B's own source still produced a real claim.
         assert set(record.sources) == {"https://a.example/1", "https://b.example/1"}
         assert len(record.claims) == 1
-        assert record.claims[0].claim == "claim B"
+        assert record.claims[0].claim == "Body B content is real"
 
 
 class TestExtractEvidenceLocationComesFromTheDocument:

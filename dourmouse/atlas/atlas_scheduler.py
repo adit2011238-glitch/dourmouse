@@ -68,10 +68,10 @@ def _good_friday(year: int) -> date:
     g = (b - f + 1) // 3
     h = (19 * a + b - d - g + 15) % 30
     i, k = divmod(c, 4)
-    l = (32 + 2 * e + 2 * i - h - k) % 7
-    m = (a + 11 * h + 22 * l) // 451
-    month = (h + l - 7 * m + 114) // 31
-    day = ((h + l - 7 * m + 114) % 31) + 1
+    weekday = (32 + 2 * e + 2 * i - h - k) % 7
+    m = (a + 11 * h + 22 * weekday) // 451
+    month = (h + weekday - 7 * m + 114) // 31
+    day = ((h + weekday - 7 * m + 114) % 31) + 1
     return date(year, month, day) - timedelta(days=2)
 
 
@@ -87,7 +87,7 @@ def _holidays(year: int) -> set[date]:
         nth_weekday(year, 1, 0, 3),            # MLK (3rd Mon Jan)
         nth_weekday(year, 2, 0, 3),            # Presidents' Day (3rd Mon Feb)
         _good_friday(year),                    # Good Friday
-        nth_weekday(year, 5, 0, 5),            # Memorial Day (last Mon May)
+        date(year, 5, 31) - timedelta(days=date(year, 5, 31).weekday()),  # Memorial Day (last Mon May)
         date(year, 6, 19),                     # Juneteenth
         date(year, 7, 4),                      # Independence Day
         nth_weekday(year, 9, 0, 1),            # Labor Day (1st Mon Sep)

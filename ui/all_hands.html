@@ -333,7 +333,9 @@ function connectSSE() {
         fetchRuns();
       }
     };
-    es.onerror = () => es.close(); // poll covers it; EventSource retries anyway
+    // Do not close on error: the browser reconnects a dropped stream by
+    // itself, and the 2 s poll above covers the gap meanwhile.
+    es.onerror = () => {};
   } catch (e) { /* SSE unavailable — poll only */ }
 }
 
@@ -367,12 +369,14 @@ $("goalinput").addEventListener("keydown", (e) => { if (e.key === "Enter") $("st
 if (runId) {
   $("newrun").style.display = "none";
   fetchRun(runId);
-  // Poll only while the run is live — a finished run stays rendered from
-  // its final snapshot (reviewer: no pointless requests on an idle window).
-  setInterval(() => {
-    if (!current || current.status === "running") fetchRun(runId);
-  }, 2000);
 }
+// Poll only while the run is live: a finished run stays rendered from its
+// final snapshot (reviewer: no pointless requests on an idle window). The
+// timer is always armed and reads runId on each tick, so a run started or
+// picked in this window later is polled too, not only one named in the URL.
+setInterval(() => {
+  if (runId && (!current || current.id !== runId || current.status === "running")) fetchRun(runId);
+}, 2000);
 fetchRuns();
 setInterval(fetchRuns, 15000);
 connectSSE();

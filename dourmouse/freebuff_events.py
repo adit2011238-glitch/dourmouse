@@ -30,6 +30,7 @@ live expectation.
 
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import threading
@@ -39,6 +40,13 @@ from typing import Any
 
 _FREEBUFF_BASE = os.environ.get("FREEBUFF_API_URL", "http://127.0.0.1:51819").strip().rstrip("/")
 _STREAM_PATH = "/api/events"
+
+# Socket timeout (seconds) for each read on the open stream. Events are sparse,
+# so a quiet stream is normal; a read that times out after this long means the
+# stream has stalled (half-open connection after sleep or a network change) and
+# is reopened quietly. A timed-out HTTPResponse cannot be read again, so this
+# is deliberately long rather than a short poll.
+_READ_TIMEOUT_SECONDS = 600.0
 
 # Backoff schedule for reconnect attempts (seconds).
 _BACKOFF = (1.0, 2.0, 4.0, 8.0)
@@ -137,7 +145,7 @@ class FreebuffEventWatcher:
                 # reconnect after a short pause, with backoff reset (the app
                 # was up long enough to stream, so we're healthy again).
                 attempt = 0
-            except (FreebuffWatchError, OSError) as exc:  # unreachable / mid-read drop
+            except (FreebuffWatchError, OSError, http.client.HTTPException) as exc:  # unreachable / mid-read drop
                 self._mark_offline(str(exc))
                 attempt = min(attempt + 1, len(_BACKOFF) - 1)
             if self._stop.wait(timeout=_BACKOFF[attempt]):
@@ -170,7 +178,7 @@ class FreebuffEventWatcher:
         url = self._base + self._path
         req = urllib.request.Request(url, headers={"User-Agent": "dourmouse/0.1"})
         try:
-            resp = urllib.request.urlopen(req, timeout=30)
+            resp = urllib.request.urlopen(req, timeout=_READ_TIMEOUT_SECONDS)
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
             raise FreebuffWatchError(f"Freebuff events stream unreachable: {exc}") from exc
 
@@ -179,7 +187,15 @@ class FreebuffEventWatcher:
         buf = ""
         try:
             while not self._stop.is_set():
-                chunk = resp.read(4096)
+                try:
+                    # read1 returns what has arrived (read(4096) would block
+                    # until 4 KB did, holding small events back).
+                    chunk = resp.read1(4096)
+                except TimeoutError:
+                    # Quiet for _READ_TIMEOUT_SECONDS: stalled, not offline.
+                    # The response cannot be read after a timeout, so end this
+                    # connection cleanly and let _run reconnect.
+                    break
                 if not chunk:
                     break  # clean EOF -> reconnect
                 buf += chunk.decode("utf-8", errors="replace")

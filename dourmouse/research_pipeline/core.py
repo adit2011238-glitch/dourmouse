@@ -63,6 +63,8 @@ class Claim:
     # original pipeline pass; a follow-up task's id for evidence gathered to
     # settle a contradiction after synthesis.
     task_id: str = ""
+    # Why a REJECTED claim was dropped (reject_claim's reason); "" while ACTIVE.
+    rejected_reason: str = ""
 
 
 @dataclass(frozen=True)
@@ -189,7 +191,9 @@ class ResearchRecord:
         honest about what was once claimed and why it was dropped."""
         # replace(), not a hand-listed copy: a field added to Claim later
         # (final_url, finding #089) must survive rejection too.
-        rejected = replace(self.claims[index], status="REJECTED")
+        if not 0 <= index < len(self.claims):
+            raise IndexError(f"no claim at index {index} (record has {len(self.claims)})")
+        rejected = replace(self.claims[index], status="REJECTED", rejected_reason=reason)
         self.claims = self.claims[:index] + (rejected,) + self.claims[index + 1:]
 
     def add_contradiction(self, contradiction: Contradiction) -> None:

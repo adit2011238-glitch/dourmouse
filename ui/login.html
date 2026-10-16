@@ -358,10 +358,15 @@
     if (!IN_WEBVIEW) { window.location.href = '/api/auth/google/start'; return; }
     // The claim secret is minted by the SERVER and handed to this window as an HttpOnly cookie;
     // the page only asks for the bridge (?claim=1) and never chooses or sees the value.
-    // Step 1: get the Google consent URL from the server (start 302s; fetch
-    // follows it, giving us the final Google URL without leaving this page).
-    fetch('/api/auth/google/start?claim=1', { redirect: 'follow' })
-      .then(r => r.url)
+    // Step 1: get the Google consent URL from the server as JSON (U1-9). A plain 302 cannot be
+    // followed by fetch: the redirect to accounts.google.com is cross-origin with no
+    // Access-Control-Allow-Origin, so the fetch rejects and r.url is never readable. The start
+    // route answers {ok, url} when asked with format=json, and still sets the claim cookie.
+    fetch('/api/auth/google/start?claim=1&format=json', { headers: { Accept: 'application/json' } })
+      .then(r => r.json().then(j => {
+        if (!r.ok || !j || !/^https:\/\//i.test(String(j.url || ''))) throw new Error((j && j.error) || ('HTTP ' + r.status));
+        return j.url;
+      }))
       .then(googleUrl => {
         // Step 2: open Chrome (the bridge prefers Chrome, falls back to the
         // default browser). When it honestly cannot, show a copyable link.
@@ -379,7 +384,18 @@
             'Approve it there. This window signs you in automatically when done.</span>';
         }
       })
-      .catch(() => { window.location.href = '/api/auth/google/start?claim=1'; });
+      .catch(err => {
+        // Navigating this embedded window to Google itself is the refusal the bridge exists to
+        // avoid ("this browser or app may not be secure"), so say what failed instead.
+        const w = document.getElementById('ggoogleMsg');
+        if (!w) return;
+        w.style.display = 'block';
+        w.textContent = '';
+        const m = document.createElement('span');
+        m.className = 'warn';
+        m.textContent = 'Could not start Google sign-in: ' + (err && err.message ? err.message : err) + '. Press the button to try again.';
+        w.appendChild(m);
+      });
   });
 
   // Adopt a system-browser session: poll /api/auth/claim until the parked session is

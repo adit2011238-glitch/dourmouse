@@ -213,6 +213,12 @@ def _record_entities(rec: GkgRecord) -> list[tuple[str, str, str]]:
     return entities[:_MAX_ENTITIES_PER_RECORD]
 
 
+#: Size caps. One GKG file can carry 4000 records of up to C(10,2)=45 pairs, and
+#: edges are kept for hours, so age alone does not bound the graph.
+_MAX_NODES = 30_000
+_MAX_EDGES = 100_000
+
+
 class KineticGraph:
     """Bounded, decaying co-occurrence graph over real GDELT entities.
 
@@ -223,8 +229,10 @@ class KineticGraph:
     async needed.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, max_nodes: int = _MAX_NODES, max_edges: int = _MAX_EDGES) -> None:
         self._lock = threading.Lock()
+        self._max_nodes = max_nodes
+        self._max_edges = max_edges
         self._nodes: dict[str, dict[str, Any]] = {}
         # Edge key is a sorted 2-tuple so (a, b) and (b, a) are the same edge.
         self._edges: dict[tuple[str, str], dict[str, Any]] = {}
@@ -257,6 +265,26 @@ class KineticGraph:
                     else:
                         edge["weight"] += 1
                         edge["last_seen"] = ts
+            self._enforce_caps_locked()
+
+    def _enforce_caps_locked(self) -> None:
+        """Keep the graph bounded in SIZE, not only in age: past a cap, evict
+        the lowest-weight (then least recently seen) entries down to 90% of the
+        cap, so eviction runs once per ~10% of growth, not on every record.
+        Edges whose node was evicted go with it. Caller holds the lock."""
+        if len(self._edges) > self._max_edges:
+            keep_edges = int(self._max_edges * 0.9)
+            edge_rank = sorted(self._edges, key=lambda ek: (self._edges[ek]["weight"], self._edges[ek]["last_seen"]))
+            for edge_key in edge_rank[: len(self._edges) - keep_edges]:
+                del self._edges[edge_key]
+        if len(self._nodes) > self._max_nodes:
+            keep_nodes = int(self._max_nodes * 0.9)
+            node_rank = sorted(self._nodes, key=lambda nk: (self._nodes[nk]["weight"], self._nodes[nk]["last_seen"]))
+            dropped = set(node_rank[: len(self._nodes) - keep_nodes])
+            for node_key in dropped:
+                del self._nodes[node_key]
+            for edge_key in [ek for ek in self._edges if ek[0] in dropped or ek[1] in dropped]:
+                del self._edges[edge_key]
 
     def ingest_records(self, records: list[GkgRecord]) -> int:
         now = time.time()
@@ -331,12 +359,18 @@ def fetch_latest_gkg_url(timeout: float = _DEFAULT_TIMEOUT) -> str | None:
     return None
 
 
-def fetch_gkg_records(url: str, timeout: float = _DEFAULT_TIMEOUT, max_records: int | None = 4000) -> list[GkgRecord]:
+def fetch_gkg_records(
+    url: str,
+    timeout: float = _DEFAULT_TIMEOUT,
+    max_records: int | None = 4000,
+    errors: list[str] | None = None,
+) -> list[GkgRecord]:
     """Download + unzip ONE real GKG file entirely in memory (no disk
     write — these files run 5-20MB, small enough, and this avoids ever
     needing filesystem cleanup) and parse it. Empty list on any failure,
     never a crash — a bad/half-downloaded zip must not take the poller
-    thread down."""
+    thread down. A failure is also appended to ``errors`` (when given) so a
+    caller can tell a failed download from a genuinely empty file."""
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "dourmouse-gdelt-graph/1.0"})
         with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 - real fixed GDELT host
@@ -346,7 +380,9 @@ def fetch_gkg_records(url: str, timeout: float = _DEFAULT_TIMEOUT, max_records: 
             if not names:
                 return []
             text = zf.read(names[0]).decode("utf-8", errors="replace")
-    except (urllib.error.URLError, OSError, TimeoutError, zipfile.BadZipFile):
+    except (urllib.error.URLError, OSError, TimeoutError, zipfile.BadZipFile) as exc:
+        if errors is not None:
+            errors.append(f"download failed: {exc}")
         return []
     return parse_gkg_text(text, max_records=max_records)
 
@@ -380,7 +416,14 @@ def poll_once() -> dict[str, Any]:
     with _state_lock:
         if url == _last_processed_url:
             return {"ok": True, "fetched": False, "records": 0, "error": None}
-    records = fetch_gkg_records(url)
+    fetch_errors: list[str] = []
+    records = fetch_gkg_records(url, errors=fetch_errors)
+    if fetch_errors:
+        # Not recorded as processed: the next poll sees the same URL and
+        # retries the download instead of dropping this window for good.
+        with _state_lock:
+            _last_error = f"could not fetch {url}: {fetch_errors[0]}"
+        return {"ok": False, "fetched": False, "records": 0, "error": _last_error, "url": url}
     graph = get_graph()
     graph.ingest_records(records)
     graph.prune(_max_age_seconds())

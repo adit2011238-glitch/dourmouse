@@ -9,7 +9,6 @@ import os
 import pytest
 
 from dourmouse import mcp_client, orch_net
-from dourmouse.orch_net import NeuroStore
 
 
 @pytest.fixture()

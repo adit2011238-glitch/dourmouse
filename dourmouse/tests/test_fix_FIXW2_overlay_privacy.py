@@ -3,8 +3,8 @@ cannot be read at all, both are reported as unknown and drawn as such."""
 from __future__ import annotations
 
 import json
-import subprocess
 import shutil
+import subprocess
 
 import pytest
 

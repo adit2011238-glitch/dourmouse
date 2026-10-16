@@ -158,8 +158,8 @@ class TestResearchRunPipelineTool:
 
         _install_chat_fake(monkeypatch, [
             "- sub A\n- sub B",
-            "CLAIM: claim A\nPASSAGE: Body A content real.\nLOCATION: whole",
-            "CLAIM: claim B\nPASSAGE: Body B content real.\nLOCATION: whole",
+            "CLAIM: Body A content is real\nPASSAGE: Body A content real.\nLOCATION: whole",
+            "CLAIM: Body B content is real\nPASSAGE: Body B content real.\nLOCATION: whole",
         ])
         rpt._research_plan_tool({"question": "Is Z real?"})
 

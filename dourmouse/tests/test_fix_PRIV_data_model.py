@@ -14,7 +14,6 @@ import pytest
 from dourmouse import privacy
 from dourmouse.governance import PiiRedactor, iban_valid, luhn_valid
 
-
 # --------------------------------------------------------------------------- #
 # PRIV-2: reversible placeholders
 # --------------------------------------------------------------------------- #

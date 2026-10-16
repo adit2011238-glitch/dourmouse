@@ -8,7 +8,8 @@ Grading design (why deterministic, why fail-closed):
   present in the answer. Pass threshold 0.9. No LLM judgment anywhere in the
   pass/fail decision.
 - Every answer also passes through the *citation gate*: each citation must
-  resolve to a real file in the field's corpus (by filename or URL substring).
+  resolve to a real file in the field's corpus (equal filename or URL after
+  normalization; a substring is never enough).
   A fabricated citation fails the attempt no matter how good the prose is --
   this is the anti-hallucination spine of the qualification.
 - Where no key exists, exact grading is impossible; the attempt is graded by
@@ -22,7 +23,7 @@ from dataclasses import dataclass
 
 from .brain import BrainAnswer
 from .core import ExamAttempt
-from .study import FieldCorpus, Paper, grade_answer, iteration_order
+from .study import FieldCorpus, Paper, grade_answer, iteration_order, read_key_text
 
 # Pass threshold for key-graded iterations (fraction of key tokens covered).
 PASS_THRESHOLD = 0.9
@@ -65,6 +66,29 @@ def pending_iterations(corpus: FieldCorpus, passed_ids: set[str]) -> list[Iterat
     return [it for it in build_iterations(corpus) if it.paper.id not in passed_ids]
 
 
+def _norm_cite(value: str) -> str:
+    """Case-folded, trimmed form of a citation, quotes and trailing slash cut."""
+    v = value.strip().strip("'\"`[]()<>").strip()
+    return v.rstrip("/").casefold()
+
+
+def _cite_matches(cite: str, known: str) -> bool:
+    """Equality of normalized citation and known id/URL.
+
+    A citation that carries a folder prefix ("tests/x.pdf") matches the known
+    bare filename by its last path segment; the reverse (a short citation that
+    is merely contained in a name) never matches.
+    """
+    c, k = _norm_cite(cite), _norm_cite(known)
+    if not c or not k:
+        return False
+    if c == k:
+        return True
+    if "://" in k or "://" in c:
+        return False  # URLs must be equal
+    return c.rsplit("/", 1)[-1] == k.rsplit("/", 1)[-1] and "/" not in k
+
+
 def verify_citations(corpus: FieldCorpus, answer: BrainAnswer) -> tuple[bool, int]:
     """Every citation must resolve to a real corpus file (name or URL)."""
     if not answer.citations:
@@ -74,10 +98,10 @@ def verify_citations(corpus: FieldCorpus, answer: BrainAnswer) -> tuple[bool, in
         known.append(p.id)
         if p.url:
             known.append(p.url)
-    known.extend(str(x) for x in corpus.landing_pages)
+    known.extend(x.name for x in corpus.landing_pages)
     bad = 0
     for c in answer.citations:
-        if not any(c and (c in k or k in c) for k in known):
+        if not any(_cite_matches(c, k) for k in known):
             bad += 1
     return bad == 0, bad
 
@@ -85,8 +109,10 @@ def verify_citations(corpus: FieldCorpus, answer: BrainAnswer) -> tuple[bool, in
 def grade_iteration(corpus: FieldCorpus, it: Iteration,
                     answer: BrainAnswer) -> Grade:
     ok_cites, bad = verify_citations(corpus, answer)
+    key_text = ""
     if it.has_key and it.paper.key_path is not None:
-        key_text = it.paper.key_path.read_text(errors="replace")
+        key_text = read_key_text(it.paper.key_path)
+    if key_text:
         score = grade_answer(answer.text, key_text)
         passed = score >= PASS_THRESHOLD and ok_cites and bad == 0
         feedback = (
@@ -95,12 +121,15 @@ def grade_iteration(corpus: FieldCorpus, it: Iteration,
         )
         return Grade(score, passed, ok_cites, bad, feedback)
 
-    # No official key: citation gate + completeness floor, honestly labeled.
+    # No usable key: citation gate + completeness floor, honestly labeled.
     complete = len(answer.text.strip()) >= MIN_ANSWER_CHARS
     passed = ok_cites and complete
     score = 1.0 if passed else 0.0
+    why = ("no official key published for this paper"
+           if not it.has_key else
+           "the official key could not be read (scanned or damaged PDF)")
     feedback = (
-        "no official key published for this paper; graded by citation gate "
+        f"{why}; graded by citation gate "
         f"(verified={ok_cites}, fabricated={bad}) and completeness "
         f"({len(answer.text.strip())} chars >= {MIN_ANSWER_CHARS})"
     )

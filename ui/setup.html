@@ -359,10 +359,23 @@ function refresh(){
   $("contBtn").disabled = !ready;
   $("whyDisabled").textContent = why;
 }
+/* U1-10: a check proves one exact value. Editing the field afterwards (or while the check is
+   still running) drops the proof, so Continue can never save a key or address that was not
+   the one that passed. */
+function editedAfterCheck(inputId, message, okFlag){
+  $(inputId).addEventListener("input", () => {
+    if(okFlag === "key"){ keyOk = false; } else { nodeOk = false; nodeUrlOk = ""; }
+    const m = $(message);
+    if(m.textContent){ m.className = "msg"; m.textContent = "Changed since the last check. Check it again to continue."; }
+    refresh();
+  });
+}
 async function checkKey(){
   const m = $("nvMsg"); m.className = "msg"; m.textContent = "checking…";
+  const sent = $("nvKey").value;
   try{
-    const r = await api("/api/setup/validate-key", {api_key: $("nvKey").value});
+    const r = await api("/api/setup/validate-key", {api_key: sent});
+    if($("nvKey").value !== sent) return;  // edited while checking: that answer is for an older value
     keyOk = !!r.ok;
     m.className = "msg " + (r.ok ? "ok" : "bad");
     m.textContent = (r.ok ? "✓ " : "✗ ") + (r.detail || "") + (r.hint ? " (" + r.hint + ")" : "");
@@ -371,14 +384,18 @@ async function checkKey(){
 }
 async function checkNode(){
   const m = $("nodeMsg"); m.className = "msg"; m.textContent = "testing…";
+  const sent = $("nodeUrl").value;
   try{
-    const r = await api("/api/setup/probe-node", {url: $("nodeUrl").value});
-    nodeOk = !!r.ok; nodeUrlOk = $("nodeUrl").value;
+    const r = await api("/api/setup/probe-node", {url: sent});
+    if($("nodeUrl").value !== sent) return;  // edited while testing
+    nodeOk = !!r.ok; nodeUrlOk = sent;
     m.className = "msg " + (r.ok ? "ok" : "bad");
     m.textContent = (r.ok ? "✓ " : "✗ ") + (r.detail || "");
   }catch(e){ nodeOk = false; m.className = "msg bad"; m.textContent = "✗ " + e.message; }
   refresh();
 }
+editedAfterCheck("nvKey", "nvMsg", "key");
+editedAfterCheck("nodeUrl", "nodeMsg", "node");
 /* Restart, then open. Saving config is not enough on its own: the backend
    client is built once at startup, so an app that booted unconfigured keeps
    using whatever it picked then. Without this the user finishes setup, sees
@@ -525,11 +542,14 @@ async function gStartSignin(){
   btn.disabled = true; m.className = "msg"; m.textContent = "opening Google…";
   try{
     // Only the request for the bridge is sent: the server mints the secret and hands it back as a cookie.
-    const r = await fetch("/api/auth/google/start?claim=1", {redirect: "follow"});
-    if(!r.ok){
-      throw new Error("HTTP " + r.status);
+    // U1-9: ask for the consent URL as JSON. Following the 302 with fetch cannot work: the redirect
+    // to accounts.google.com is cross-origin without Access-Control-Allow-Origin, so fetch rejects.
+    const r = await fetch("/api/auth/google/start?claim=1&format=json", {headers: {Accept: "application/json"}});
+    const j = await r.json();
+    if(!r.ok || !j || !/^https:\/\//i.test(String(j.url || ""))){
+      throw new Error((j && j.error) || ("HTTP " + r.status));
     }
-    const googleUrl = r.url;
+    const googleUrl = j.url;
     let opened = true;
     if(G_IN_WEBVIEW){
       try{ opened = await window.pywebview.api.open_external(googleUrl); }

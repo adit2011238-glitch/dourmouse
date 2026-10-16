@@ -192,7 +192,8 @@ const STATE_LABEL = {PENDING_APPROVAL:["PENDING APPROVAL","pending"],FILLED:["FI
   REJECTED_AT_GUARDRAIL:["REJECTED · GUARDRAIL","guard"],NO_TRADE:["DO NOTHING TODAY","notrade"]};
 
 function fmtTime(t){ if(!t) return ""; return new Date(t).toISOString().slice(0,16).replace("T"," "); }
-function esc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+// Escapes quotes too (U1-13): values land inside attributes as well as text.
+function esc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
 
 function renderHold(rows){
   const tb = document.getElementById("holdBody"); tb.innerHTML = "";
@@ -201,7 +202,7 @@ function renderHold(rows){
   rows.forEach(r=>{
     const up = r.pnl && !r.pnl.startsWith("-") && r.pnl!=="—";
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td class="pos">${esc(r.asset)}</td><td>${esc(r.dir)}</td><td>${r.size}</td>
+    tr.innerHTML = `<td class="pos">${esc(r.asset)}</td><td>${esc(r.dir)}</td><td>${esc(r.size)}</td>
       <td>${esc(r.entry)}</td><td>${esc(r.last)}</td>
       <td class="${r.pnl==="—"?"":up?"pnl-up":"pnl-dn"}">${esc(r.pnl)}</td><td class="empty">${live.length?"ledger":""}</td>`;
     tb.appendChild(tr);
@@ -218,7 +219,7 @@ function renderCard(c){
   el.className = "card " + (c.outcome==="NO_TRADE"?"calm":c.outcome==="REJECTED_AT_GUARDRAIL"?"guard":"pending");
   el.innerHTML = `
     <div class="card-h">
-      <span class="state ${cls}">${label}</span>
+      <span class="state ${esc(cls)}">${esc(label)}</span>
       <div><div class="card-title">${esc(c.signal)} · ${esc(c.asset)} · ${esc(c.direction)}</div>
       <div class="card-sub">${esc(c.mechanism)}${guard}</div></div>
     </div>
@@ -227,18 +228,23 @@ function renderCard(c){
     </ul>
     ${c.outcome==="PENDING_APPROVAL"
       ? `<div class="approve-row">
-           <button class="approve" onclick="approve(this,'${esc(c.id)}')">APPROVE</button>
-           <button class="reject" onclick="reject(this,'${esc(c.id)}')">REJECT</button>
+           <button class="approve" data-act="approve" data-id="${esc(c.id)}">APPROVE</button>
+           <button class="reject" data-act="reject" data-id="${esc(c.id)}">REJECT</button>
            <span style="align-self:center;color:var(--dead);font-size:10px">HITL — you are the gate (verdict #5)</span>
          </div>` : ""}
     ${calm?`<div style="font-size:10px;color:var(--dead);margin-top:8px">calm state — a first-class outcome, not dead space (+2)</div>`:""}
     </div>`;
+  // no inline handlers: the id never becomes script text (U1-13)
+  el.querySelectorAll("button[data-act]").forEach(b=>b.addEventListener("click", ()=>{
+    (b.dataset.act==="approve" ? approve : reject)(b, b.dataset.id);
+  }));
   el.addEventListener("click", e=>{ if(e.target.closest("button")) return; el.classList.toggle("open"); });
   return el;
 }
 
-function approve(btn,id){ btn.closest(".approve-row").innerHTML = '<span style="color:#69DB7C">APPROVED — queued for paper execution (T11 gate). Demo only until the ledger is live.</span>'; }
-function reject(btn,id){ btn.closest(".card").querySelector(".state").textContent = "REJECTED BY USER"; btn.closest(".approve-row").innerHTML = '<span style="color:var(--dead)">Logged to the audit trail.</span>'; }
+// Both decisions are demo only: no request is sent, nothing is queued, nothing is recorded (U1-14).
+function approve(btn,id){ btn.closest(".approve-row").innerHTML = '<span style="color:#69DB7C">Approved on this page only. Demo: nothing was queued or recorded, and the card is pending again on reload.</span>'; }
+function reject(btn,id){ btn.closest(".card").querySelector(".state").textContent = "REJECTED ON THIS PAGE"; btn.closest(".approve-row").innerHTML = '<span style="color:var(--dead)">Rejected on this page only. Demo: nothing was recorded, and the card is pending again on reload.</span>'; }
 
 function renderWhy(cards){
   const top = cards.find(c=>c.outcome==="PENDING_APPROVAL") || cards.find(c=>c.outcome!=="NO_TRADE") || cards[0];
@@ -248,7 +254,7 @@ function renderWhy(cards){
       <p style="margin-top:6px">forced participant: <b style="color:var(--text)">${esc(top.forced_participant)}</b></p></div>
     <div class="why-box"><h4>DATA</h4><p>${esc(top.data_refs.join(" + "))}</p>
       <p style="margin-top:6px">every claim deep-links to the raw series — the moat is the linked evidence, not the prose.</p></div>
-    <div class="why-box"><h4>P-VALUE</h4><div class="big">${top.p_value}</div>
+    <div class="why-box"><h4>P-VALUE</h4><div class="big">${esc(top.p_value)}</div>
       <p>permutation p. Anything that can't show it is a story, not a signal.</p></div>`;
 }
 

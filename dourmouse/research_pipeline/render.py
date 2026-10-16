@@ -29,6 +29,9 @@ from typing import Any
 from dourmouse import net_guard
 
 RENDER_TIMEOUT_MS = 20_000
+#: Seconds past the navigation timeout the whole render may take (launch,
+#: DOM read, close) before it is cancelled from inside so Chrome is closed.
+_RENDER_GRACE_S = 25
 _MAX_RESOURCE_BYTES = 5 * 1024 * 1024
 _SKIPPED_TYPES = {"image", "media", "font", "stylesheet"}
 _HOP_BY_HOP = {"host", "connection", "content-length", "accept-encoding", "transfer-encoding"}
@@ -59,24 +62,26 @@ def looks_like_an_empty_shell(markup: bytes, extracted_text: str) -> bool:
     return b"<script" in head
 
 
-def _guarded_fetch(url: str, method: str, headers: dict[str, str], body: bytes | None) -> tuple[str, int, dict[str, str], bytes]:
+def _guarded_fetch(url: str, method: str, headers: dict[str, str],
+                   body: bytes | None) -> tuple[str, int, dict[str, str], bytes, str]:
     """One request, through the SSRF guard. Returns ("ok"|"refused"|"failed",
-    status, headers, body). Runs on a worker thread (blocking I/O)."""
+    status, headers, body, final_url); final_url is where the redirects (which
+    are followed here, in Python) ended. Runs on a worker thread (blocking I/O)."""
     req = urllib.request.Request(url, data=body, headers=headers, method=method)  # noqa: S310 -- scheme enforced by net_guard
     try:
         with net_guard.guarded_urlopen(req, timeout=10) as resp:
             data = resp.read(_MAX_RESOURCE_BYTES)
             status = int(getattr(resp, "status", 200) or 200)
             out = {k: v for k, v in resp.headers.items() if k.lower() not in _HOP_BY_HOP}
-            return "ok", status, out, data
+            return "ok", status, out, data, str(resp.geturl() or url)
     except net_guard.FetchRefused:
-        return "refused", 0, {}, b""
+        return "refused", 0, {}, b"", url
     except urllib.error.HTTPError as exc:
         data = exc.read()[:_MAX_RESOURCE_BYTES] if exc.fp else b""
         out = {k: v for k, v in (exc.headers or {}).items() if k.lower() not in _HOP_BY_HOP}
-        return "ok", exc.code, out, data
+        return "ok", exc.code, out, data, str(exc.geturl() or url)
     except (urllib.error.URLError, OSError):
-        return "failed", 0, {}, b""
+        return "failed", 0, {}, b"", url
 
 
 async def _render_async(url: str, timeout_ms: int) -> RenderResult:
@@ -88,6 +93,11 @@ async def _render_async(url: str, timeout_ms: int) -> RenderResult:
 
     refused: list[str] = []
     served: list[int] = []
+    # The main document's redirects are followed in Python, so Chrome would
+    # never see them: page.url would stay the asked-for address and relative
+    # sub-resources would resolve against it. The answer is held here and
+    # Chrome is sent a real 302 to the final address, which it then asks for.
+    redirected: dict[str, tuple[int, dict[str, str], bytes]] = {}
 
     async def serve(route: Any, request: Any) -> None:
         # Async handlers run concurrently, so a page's dozens of requests are
@@ -100,10 +110,21 @@ async def _render_async(url: str, timeout_ms: int) -> RenderResult:
         if target.startswith(("data:", "blob:")):
             await route.continue_()
             return
+        if target in redirected:
+            status, out, data = redirected.pop(target)
+            served.append(1)
+            await route.fulfill(status=status, headers=out, body=data)
+            return
         headers = {k: v for k, v in request.headers.items() if k.lower() not in _HOP_BY_HOP}
-        outcome, status, out, data = await asyncio.to_thread(
+        outcome, status, out, data, final = await asyncio.to_thread(
             _guarded_fetch, target, request.method, headers, request.post_data_buffer,
         )
+        is_main = request.is_navigation_request() and request.frame.parent_frame is None
+        if outcome == "ok" and is_main and final != target and request.method == "GET":
+            redirected[final] = (status, out, data)
+            served.append(1)
+            await route.fulfill(status=302, headers={"Location": final}, body=b"")
+            return
         if outcome == "refused":
             refused.append(target)
             await route.abort("blockedbyclient")
@@ -142,6 +163,16 @@ async def _render_async(url: str, timeout_ms: int) -> RenderResult:
         raise RenderUnavailable(f"render failed: {exc}") from exc
 
 
+async def _render_bounded(url: str, timeout_ms: int) -> RenderResult:
+    """_render_async under a deadline enforced from inside the loop: on
+    overrun the coroutine is cancelled, so its ``finally`` closes the browser
+    instead of the thread being abandoned with Chrome still running."""
+    try:
+        return await asyncio.wait_for(_render_async(url, timeout_ms), timeout_ms / 1000 + _RENDER_GRACE_S)
+    except asyncio.TimeoutError as exc:
+        raise RenderUnavailable("render did not finish in time") from exc
+
+
 def render_page(url: str, timeout_ms: int = RENDER_TIMEOUT_MS) -> RenderResult:
     """Render ``url`` and return the resulting DOM. Raises RenderUnavailable
     when switched off or when Playwright/Chrome cannot run. Runs its own
@@ -153,13 +184,13 @@ def render_page(url: str, timeout_ms: int = RENDER_TIMEOUT_MS) -> RenderResult:
 
     def run() -> None:
         try:
-            box["result"] = asyncio.run(_render_async(url, timeout_ms))
+            box["result"] = asyncio.run(_render_bounded(url, timeout_ms))
         except BaseException as exc:  # noqa: BLE001 -- re-raised on the caller's thread
             box["error"] = exc
 
     t = threading.Thread(target=run, name="dourmouse-research-render", daemon=True)
     t.start()
-    t.join(timeout_ms / 1000 + 30)
+    t.join(timeout_ms / 1000 + _RENDER_GRACE_S + 5)
     if t.is_alive():
         raise RenderUnavailable("render did not finish in time")
     if "error" in box:

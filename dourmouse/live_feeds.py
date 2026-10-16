@@ -91,6 +91,14 @@ _TASKS_ENV = "DOURMOUSE_TASKS_FILE"
 # HTTP helper — honest errors only
 # --------------------------------------------------------------------------- #
 
+_SECRET_QUERY_RE = __import__("re").compile(r"([?&](?:api_?key|key|token|access_token|apikey|auth|secret|password|signature|sig)=)[^&#\s]*", __import__("re").I)
+
+
+def _safe_url(url: str) -> str:
+    """The URL with secret-looking query values removed, for error text (finding #181)."""
+    return _SECRET_QUERY_RE.sub(r"\1[REDACTED]", str(url))
+
+
 def _http_get(url: str, *, timeout: int = _TIMEOUT, headers: dict[str, str] | None = None) -> str:
     """GET a URL with a timeout and a browser-ish UA; raise on any failure."""
     hdrs = {"User-Agent": _UA, "Accept": "application/json, text/xml, */*"}
@@ -101,13 +109,13 @@ def _http_get(url: str, *, timeout: int = _TIMEOUT, headers: dict[str, str] | No
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return resp.read().decode("utf-8", errors="replace")
     except urllib.error.HTTPError as exc:
-        raise RuntimeError(f"HTTP {exc.code} from {url}") from exc
+        raise RuntimeError(f"HTTP {exc.code} from {_safe_url(url)}") from exc
     except urllib.error.URLError as exc:
-        raise RuntimeError(f"network error fetching {url}: {exc.reason}") from exc
+        raise RuntimeError(f"network error fetching {_safe_url(url)}: {exc.reason}") from exc
     except TimeoutError as exc:
-        raise RuntimeError(f"timeout fetching {url}") from exc
+        raise RuntimeError(f"timeout fetching {_safe_url(url)}") from exc
     except ssl.SSLError as exc:
-        raise RuntimeError(f"TLS error fetching {url}: {exc}") from exc
+        raise RuntimeError(f"TLS error fetching {_safe_url(url)}: {exc}") from exc
 
 
 def _json(url: str) -> dict[str, Any]:

@@ -213,21 +213,32 @@ def call_research_tool(arguments: dict[str, Any]) -> str:
     Never returns fabricated research data (Rule 2.2) — reports
     NOT CONFIGURED / ATLAS RUN FAILED honestly instead.
     """
-    symbols = arguments["symbols"]
-    population_size = arguments.get("population_size", 20)
-    generations = arguments.get("generations", 4)
-    windows = arguments.get("windows", 3)
+    symbols = arguments.get("symbols")
+    if (not isinstance(symbols, list) or not symbols
+            or not all(isinstance(x, str) and x.strip() for x in symbols)):
+        return ("ERROR: run_atlas_research needs 'symbols', a non-empty list of ticker "
+                "strings such as [\"SPY\"]. Nothing was run.")
+    try:
+        population_size = int(arguments.get("population_size", 20))
+        generations = int(arguments.get("generations", 4))
+        windows = int(arguments.get("windows", 3))
+    except (TypeError, ValueError):
+        return ("ERROR: 'population_size', 'generations' and 'windows' must be whole numbers "
+                "(population_size, generations, windows). Nothing was run.")
 
     try:
         result = run_atlas_research(
-            symbols=symbols,
+            symbols=[x.strip() for x in symbols],
             population_size=population_size,
             generations=generations,
             windows=windows,
         )
     except AtlasNotConfiguredError as exc:
         return f"NOT CONFIGURED: {exc}"
-    except RuntimeError as exc:
+    except subprocess.TimeoutExpired as exc:
+        return (f"ATLAS RUN FAILED: timed out after {exc.timeout:g}s. Try fewer symbols, "
+                "generations or windows.")
+    except (RuntimeError, OSError) as exc:  # OSError: the interpreter could not be started
         return f"ATLAS RUN FAILED: {exc}"
 
     return json.dumps(result, indent=2)

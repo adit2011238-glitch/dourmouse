@@ -223,21 +223,53 @@ def _atlas_read_report_tool(arguments: dict[str, Any]) -> str:
 
 _version_cache: dict[str, Any] = {"at": 0.0, "value": None}
 _VERSION_TTL_SECONDS = 60.0
+#: A failed probe is remembered too, briefly: a broken ATLAS venv must not
+#: respawn a python subprocess (timeout 60s) on every HUD poll.
+_VERSION_FAILURE_TTL_SECONDS = 30.0
+#: Single flight: at most one `atlas version` subprocess at a time.
+_version_lock = threading.Lock()
 
 
-def atlas_version() -> str | None:
-    """The real ATLAS package version, or None honestly (never raises)."""
-    now = datetime.now(timezone.utc).timestamp()
-    if now - _version_cache["at"] < _VERSION_TTL_SECONDS:
-        return _version_cache["value"]
+def _version_cache_fresh(now: float) -> bool:
+    ttl = _VERSION_TTL_SECONDS if _version_cache["value"] is not None else _VERSION_FAILURE_TTL_SECONDS
+    return now - _version_cache["at"] < ttl
+
+
+def _probe_version() -> str | None:
+    """Run the probe and cache the outcome, success or failure. Caller holds
+    _version_lock."""
     try:
         code, out, _err = run_atlas_cli(["version"], timeout=60)
         value = out.strip() if (code == 0 and out.strip()) else None
     except Exception:  # noqa: BLE001 -- version probe must never crash the panel
-        return None  # do NOT cache a failure — the next poll retries honestly
-    if value is not None:
-        _version_cache.update({"at": now, "value": value})
+        value = None
+    _version_cache.update({"at": datetime.now(timezone.utc).timestamp(), "value": value})
     return value
+
+
+def atlas_version(wait: bool = True) -> str | None:
+    """The real ATLAS package version, or None honestly (never raises).
+
+    ``wait=False`` (the HUD poll) never blocks on the subprocess: a stale
+    cache starts one background probe and the last known value (None if
+    there is none) is returned now."""
+    now = datetime.now(timezone.utc).timestamp()
+    if _version_cache_fresh(now):
+        return _version_cache["value"]
+    if wait:
+        with _version_lock:
+            if _version_cache_fresh(datetime.now(timezone.utc).timestamp()):
+                return _version_cache["value"]
+            return _probe_version()
+    if _version_lock.acquire(blocking=False):
+        def _background() -> None:
+            try:
+                _probe_version()
+            finally:
+                _version_lock.release()
+
+        threading.Thread(target=_background, daemon=True, name="atlas-version-probe").start()
+    return _version_cache["value"]
 
 
 # --------------------------------------------------------------------------- #
@@ -805,7 +837,7 @@ def atlas_panel_snapshot() -> dict[str, Any]:
     payload: dict[str, Any] = {
         "configured": True,
         "repo": str(repo),
-        "version": atlas_version(),
+        "version": atlas_version(wait=False),
     }
     for key, fn in (
         ("status", atlas_ops.atlas_status),

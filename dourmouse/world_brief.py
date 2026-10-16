@@ -177,6 +177,12 @@ def _empty_sentence(chan: str) -> str:
     return f"No {label.lower()} items this cycle."
 
 
+def _unlisted_sentence(chan: str, count: int) -> str:
+    """The source counted items but none reached the brief: say so, not "none"."""
+    label = _CHANNEL_LABEL.get(chan, chan.capitalize())
+    return f"{count} {label.lower()} items reported, details unavailable this cycle."
+
+
 def _pulse_read(score: Any, label: Any) -> str:
     """One-line overall read. Only uses the real score/label — no invented
     editorializing beyond the fixed wording tied to each label bucket
@@ -292,6 +298,10 @@ def generate_brief(snapshot: dict) -> dict:
 
         if count > 0 and real_items:
             channel_lines.append(_channel_sentence(chan, real_items, count))
+        elif count > 0:
+            # The source counted items but none were passed on (truncated or
+            # dropped upstream): never claim there were none.
+            empty_but_ok.append(_unlisted_sentence(chan, count))
         else:
             # ok but zero items — honest note, not silent omission.
             empty_but_ok.append(_empty_sentence(chan))

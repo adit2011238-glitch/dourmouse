@@ -99,6 +99,10 @@ _HEADING = re.compile(r"^\s*#{1,6}\s+")
 _BOLD_LINE = re.compile(r"^\s*(?:\*\*|__)[^*_]+(?:\*\*|__)\s*:?\s*$")
 _CANDIDATE_END = re.compile(r"[.!?]+[\"')\]]*\s+")
 _WORD = re.compile(r"\d+(?:[.,]\d+)*|[a-z]+")
+#: Polarity cues. They are stopwords for overlap (they carry no topic), but a
+#: sentence that says the opposite of a stored claim must never count as
+#: backed by it, so they are compared as a flag, not as content words.
+_NEGATION = re.compile(r"\b(?:not|no|never|without|cannot|none|neither|nor)\b|n['\u2019]t\b", re.I)
 
 
 @dataclass(frozen=True)
@@ -247,10 +251,20 @@ def _tokens(text: str) -> tuple[frozenset[str], frozenset[str]]:
     return frozenset(words), frozenset(numbers)
 
 
-def _coverage(sent_words: frozenset[str], sent_numbers: frozenset[str], ev_text: str) -> tuple[float, int, bool]:
+def _negated(text: str) -> bool:
+    return _NEGATION.search(_strip_citations(text)) is not None
+
+
+def _coverage(sent_words: frozenset[str], sent_numbers: frozenset[str], ev_text: str,
+              sent_negated: bool = False) -> tuple[float, int, bool]:
+    """(share of the sentence's content words found, how many, and whether the
+    figures AND the polarity agree). A sentence and the text that would back it
+    must both be negated or both not: "X reduces Y" is not backed by "X does
+    not reduce Y"."""
     ev_words, ev_numbers = _tokens(ev_text)
     matched = len(sent_words & ev_words)
-    return (matched / len(sent_words) if sent_words else 0.0), matched, sent_numbers <= ev_numbers
+    agrees = sent_numbers <= ev_numbers and sent_negated == _negated(ev_text)
+    return (matched / len(sent_words) if sent_words else 0.0), matched, agrees
 
 
 def _units(evidence: list[Evidence], passages: dict[str, str]) -> list[Evidence]:
@@ -268,8 +282,8 @@ def _units(evidence: list[Evidence], passages: dict[str, str]) -> list[Evidence]
 
 
 def _best(sent_words: frozenset[str], sent_numbers: frozenset[str],
-          units: list[Evidence]) -> list[tuple[float, int, bool, Evidence]]:
-    scored = [(*_coverage(sent_words, sent_numbers, u.text), u) for u in units]
+          units: list[Evidence], sent_negated: bool = False) -> list[tuple[float, int, bool, Evidence]]:
+    scored = [(*_coverage(sent_words, sent_numbers, u.text, sent_negated), u) for u in units]
     scored.sort(key=lambda r: (r[2], r[0], r[1]), reverse=True)
     return scored
 
@@ -327,8 +341,16 @@ def _norm_ws(text: str) -> str:
     return " ".join(text.split())
 
 
+def _quote_negated(q: str, passage: str) -> bool:
+    """Polarity of a quote: of the sentence(s) of the passage it sits in (a
+    fragment such as "reduce the risk" inherits the "not" before it), else of
+    the quote itself."""
+    hosts = [s for s, kind in split_sentences(passage) if kind == "sentence" and q in _norm_ws(s)]
+    return any(_negated(h) for h in hosts) if hosts else _negated(q)
+
+
 def _verify_quote(quote: str, passages: dict[str, str], sent_words: frozenset[str],
-                  sent_numbers: frozenset[str]) -> tuple[str | None, str]:
+                  sent_numbers: frozenset[str], sent_negated: bool = False) -> tuple[str | None, str]:
     """(passage id, "") when the quote is verbatim in a stored passage of this
     question and bears on the sentence; (None, why not) otherwise."""
     q = _norm_ws(quote)
@@ -341,6 +363,8 @@ def _verify_quote(quote: str, passages: dict[str, str], sent_words: frozenset[st
                 return None, "the quoted passage does not contain the numbers in the sentence"
             if len(sent_words & q_words) < min(_MIN_MATCHED, len(sent_words)):
                 return None, "the quoted passage does not bear on the sentence"
+            if sent_negated != _quote_negated(q, text):
+                return None, "the quoted passage and the sentence disagree on negation"
             return pid, ""
     return None, "the quote does not appear in any stored passage of this question"
 
@@ -369,6 +393,7 @@ class _Pending:
     text: str
     words: frozenset[str]
     numbers: frozenset[str]
+    negated: bool
     ranked: list[tuple[float, int, bool, Evidence]] = field(default_factory=list)
 
 
@@ -401,14 +426,15 @@ def critique_answer(answer_text: str, question_or_record: ResearchRecord | str, 
             base[i] = SentenceVerdict(i, text, NOT_A_CLAIM, reason=why)
             continue
         words, numbers = _tokens(text)
+        negated = _negated(text)
         facts[i] = (text, words, numbers)
-        ranked = _best(words, numbers, units)
+        ranked = _best(words, numbers, units, negated)
         top = ranked[0] if ranked else None
         if top and top[2] and top[0] >= _SUPPORT_MIN and top[1] >= min(_MIN_MATCHED, len(words)):
             base[i] = SentenceVerdict(i, text, SUPPORTED, _ids_of(top[3]),
                                       f"{top[1]} of {len(words)} content words found in one stored source")
         elif top and top[0] >= _AMBIGUOUS_MIN and top[1] >= _MIN_MATCHED:
-            pending.append(_Pending(i, text, words, numbers, ranked))
+            pending.append(_Pending(i, text, words, numbers, negated, ranked))
         else:
             base[i] = SentenceVerdict(i, text, UNSUPPORTED, reason="nothing stored for this question backs it")
 
@@ -434,7 +460,7 @@ def critique_answer(answer_text: str, question_or_record: ResearchRecord | str, 
                                                        reason="the model found no passage that backs it",
                                                        decided_by="model")
                 else:
-                    pid, why = _verify_quote(said[1], passages, p.words, p.numbers)
+                    pid, why = _verify_quote(said[1], passages, p.words, p.numbers, p.negated)
                     if pid is None:
                         decided[p.index] = SentenceVerdict(p.index, p.text, UNSUPPORTED,
                                                            reason=f"model claim demoted: {why}",
@@ -448,6 +474,8 @@ def critique_answer(answer_text: str, question_or_record: ResearchRecord | str, 
             partial = p.ranked[0][0]
             reason = ("only partly matched a stored source and no model was available to decide"
                       if llm is None else "only partly matched a stored source and the model could not be used")
+            if p.negated != _negated(p.ranked[0][3].text):
+                reason = "the closest stored source states the opposite polarity (negation differs) and no verified quote backs it"
             decided[p.index] = SentenceVerdict(p.index, p.text, UNSUPPORTED, reason=f"{reason} ({partial:.0%})")
 
     final: list[SentenceVerdict] = []

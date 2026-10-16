@@ -447,7 +447,7 @@ class FakeMT5:
 
     def account_info(self):
         info = types.SimpleNamespace(login=777, server="Broker-Demo", equity=self.equity, balance=self.equity,
-                                     margin_free=self.equity, currency="USD")
+                                     margin_free=self.equity, currency="USD", trade_mode=0)  # 0 = demo (FI1 P3-41)
         if self.margin_mode is not None:
             info.margin_mode = self.margin_mode
         return info

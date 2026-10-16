@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import sys
 import time
 from pathlib import Path
@@ -47,6 +48,8 @@ from .core import MAX_ATTEMPTS, AgentRecord, Status
 from .exams import pending_iterations, take_exam
 from .store import AgentStore
 from .study import FieldCorpus, StudyEngine, load_corpus
+
+log = logging.getLogger(__name__)
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 PAPERS_ROOT = _REPO_ROOT / "jarvis" / "research_mesh" / "fields" / "exams" / "papers"
@@ -71,6 +74,44 @@ class QualificationPipeline:
         self.now = now
         self.open_book = open_book
         self.study_engine = StudyEngine(corpus, brain)
+        self._brain_primed = False
+
+    # -- resume ------------------------------------------------------------
+
+    def _restore_brain(self, record: AgentRecord) -> None:
+        """Re-teach a fresh brain what a resumed record says it already learned.
+
+        The record persists status, dossier and passed iterations, but a
+        brain's knowledge lives only in the instance. A record that is past
+        UNLEARNED and met by a brand-new brain would otherwise sit its next
+        exam with nothing studied, fail, and burn MAX_ATTEMPTS toward a
+        permanent exclusion the agent did not earn. Study material is
+        deterministic from the corpus and the record, so it is rebuilt here
+        with the same held-out rule: papers (and keys) not yet passed stay out,
+        except the iteration the agent already failed and remediated.
+        """
+        if self._brain_primed:
+            return
+        self._brain_primed = True
+        if record.status in (Status.UNLEARNED, Status.STUDYING) or record.status.terminal:
+            return  # study() runs for real in this pipeline, or nothing more to sit
+        if self.open_book:
+            sources: list[Path] = list(self.corpus.landing_pages)
+            for p in self.corpus.papers:
+                sources.append(p.path)
+                if p.key_path is not None:
+                    sources.append(p.key_path)
+            concepts = [self.corpus.field]
+        else:
+            sources, concepts = self.study_engine.study_sources(set(record.passed_iterations))
+            cur = (self.corpus.paper_by_id(record.current_iteration)
+                   if record.current_iteration else None)
+            if (cur is not None and record.attempts_on_iteration > 0
+                    and record.status in (Status.READY, Status.TESTING)):
+                sources.append(cur.path)  # failed and remediated earlier
+                if cur.key_path is not None:
+                    sources.append(cur.key_path)
+        self.brain.study(sources, concepts)
 
     # -- one atomic step --------------------------------------------------
 
@@ -78,6 +119,7 @@ class QualificationPipeline:
         """Advance the record by exactly one transition; persists on the way out."""
         if record.status.terminal:
             return record.status
+        self._restore_brain(record)
 
         if record.status is Status.UNLEARNED:
             record.start_study()
@@ -96,15 +138,27 @@ class QualificationPipeline:
 
         elif record.status is Status.TESTING:
             assert record.current_iteration is not None
-            it = next(x for x in pending_iterations(
+            it = next((x for x in pending_iterations(
                 self.corpus, set(record.passed_iterations))
-                if x.paper.id == record.current_iteration)
-            attempt = take_exam(self.corpus, it, self.brain,
-                                record.attempts_on_iteration + 1)
-            if attempt.passed:
-                record.record_pass(attempt)
+                if x.paper.id == record.current_iteration), None)
+            if it is None:
+                # The corpus changed since the record was saved (paper removed,
+                # renamed, or already passed). Go back to READY so the next
+                # step picks the first pending paper, and say why.
+                log.warning(
+                    "%s / %s: exam paper %r is no longer pending; "
+                    "resetting to READY", record.domain, record.field,
+                    record.current_iteration)
+                record.current_iteration = None
+                record.attempts_on_iteration = 0
+                record.status = Status.READY
             else:
-                record.record_fail(attempt)
+                attempt = take_exam(self.corpus, it, self.brain,
+                                    record.attempts_on_iteration + 1)
+                if attempt.passed:
+                    record.record_pass(attempt)
+                else:
+                    record.record_fail(attempt)
 
         elif record.status is Status.FAILED:
             if record.attempts_on_iteration >= MAX_ATTEMPTS:

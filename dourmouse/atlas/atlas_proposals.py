@@ -63,8 +63,11 @@ from __future__ import annotations
 
 import ast
 import json
+import logging
+import math
 import os
 import shlex
+import shutil
 import sys
 import threading
 import urllib.error
@@ -74,6 +77,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from dourmouse import config, state_file
 from dourmouse.sandbox import run_sandboxed, sandbox_available
 
 # --------------------------------------------------------------------------- #
@@ -109,10 +113,10 @@ _ALLOWED_IMPORTS = {"pandas", "numpy", "math", "statistics", "datetime", "json"}
 
 
 def _workspace_root() -> Path:
-    """Same convention as sandbox.py/general_roster.py (kept independent to
-    avoid an import cycle with either)."""
-    raw = os.environ.get("DOURMOUSE_WORKSPACE")
-    root = Path(raw).expanduser() if raw else Path(__file__).resolve().parent.parent / "workspace"
+    """The one workspace resolver (config.workspace_dir), so proposals, run
+    records and run directories live where sandbox.py and general_roster.py
+    (and their protected-folder rules) expect them."""
+    root = config.workspace_dir()
     root.mkdir(parents=True, exist_ok=True)
     return root
 
@@ -166,23 +170,25 @@ _LOCK = threading.Lock()
 
 
 def _load_all() -> dict[str, Any]:
+    """The store, or an empty one. A store that is unreadable (bad JSON, not an
+    object) is kept aside as proposals.json.corrupt-<stamp> and reported in the
+    log, never silently replaced: the next _save_all would otherwise overwrite
+    every proposal and run with an empty file. A store that cannot be read right
+    now (permission, I/O) raises StateUnreadable and is left untouched."""
     p = _store_path()
-    if not p.is_file():
-        return {"proposals": {}, "runs": {}}
-    try:
-        data = json.loads(p.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {"proposals": {}, "runs": {}}
+    data, note = state_file.load_json_or_aside(p, dict)
+    if note:
+        logging.getLogger(__name__).warning("atlas proposals store: %s", note)
+    if data is None:
+        data = {}
     data.setdefault("proposals", {})
     data.setdefault("runs", {})
     return data
 
 
 def _save_all(data: dict[str, Any]) -> None:
-    p = _store_path()
-    tmp = p.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
-    tmp.replace(p)  # atomic on POSIX — never leaves a half-written store
+    # Temp file in the same directory + os.replace: never leaves a half-written store.
+    state_file.atomic_write_text(_store_path(), json.dumps(data, indent=2, default=str))
 
 
 def _make_id(prefix: str) -> str:
@@ -197,6 +203,12 @@ def _now() -> str:
 # --------------------------------------------------------------------------- #
 # Layer 1 — static safety pre-filter (AST, before the review queue)
 # --------------------------------------------------------------------------- #
+
+_DENIED_NAMES = frozenset({
+    "__builtins__", "__import__", "__loader__", "__spec__",
+    "globals", "locals", "vars", "type", "breakpoint",
+})
+
 
 def _static_safety_check(code: str) -> str:
     """Returns "" if the code is acceptable to even show a reviewer,
@@ -235,6 +247,11 @@ def _static_safety_check(code: str) -> str:
             "__bases__", "__mro__", "__import__", "__loader__",
         ):
             return f"use of {node.attr!r} is refused — not analyzable as safe"
+        # The builtins namespace reached by NAME (``__builtins__['eval']``,
+        # ``vars(__builtins__)``, ``globals()``) never shows up as an
+        # Attribute or a Call of a denied name, so refuse the names themselves.
+        if isinstance(node, ast.Name) and node.id in _DENIED_NAMES:
+            return f"use of {node.id!r} is refused — not analyzable as safe"
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in (
             "eval", "exec", "compile", "open", "__import__", "getattr", "setattr",
         ):
@@ -366,9 +383,16 @@ def _generate_spec_once(prompt: str) -> dict[str, Any]:
     except json.JSONDecodeError as exc:
         raise RuntimeError(f"LLM did not return valid JSON. Raw:\n{raw[:1200]}") from exc
 
+    if not isinstance(spec, dict):
+        raise RuntimeError(f"LLM output was not a JSON object. Raw:\n{raw[:1200]}")
     for k in ("strategy_name", "explanation", "code"):
         if k not in spec or not str(spec[k]).strip():
             raise RuntimeError(f"LLM output missing required field {k!r}. Raw:\n{raw[:1200]}")
+    if not isinstance(spec["code"], str):
+        raise RuntimeError(
+            f"LLM output field 'code' must be a string, got {type(spec['code']).__name__}. "
+            f"Raw:\n{raw[:1200]}"
+        )
     return spec
 
 
@@ -528,7 +552,14 @@ def approve_and_run_async(proposal_id: str, target: str = "local") -> dict[str, 
         _save_all(data)
 
     def _worker() -> None:
-        result = _execute(proposal_id, code, params, target, run_id=placeholder["id"])
+        try:
+            result = _execute(proposal_id, code, params, target, run_id=placeholder["id"])
+        except Exception as exc:  # noqa: BLE001 -- _execute already converts its own failures; this is the last guard so a run is never left "running"
+            result = asdict(BacktestRun(
+                id=placeholder["id"], proposal_id=proposal_id, target=target,
+                status="failed", error=f"unexpected error: {type(exc).__name__}: {exc}",
+                started_at=placeholder["started_at"], finished_at=_now(),
+            ))
         with _LOCK:
             data2 = _load_all()
             data2["runs"][placeholder["id"]] = result
@@ -557,15 +588,20 @@ def list_runs(proposal_id: str | None = None) -> list[dict]:
 # --------------------------------------------------------------------------- #
 
 _HARNESS_TEMPLATE = '''
-import json, sys
-sys.path.insert(0, {strategy_dir!r})
+import json, os, sys
+# Relative to this file, never an absolute path baked in at write time: the
+# harness then works wherever its folder is, and leaks no user name or layout.
+_HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, _HERE)
 import strategy_module as _sm
 
 def _load(key):
     {loader_body}
 
 try:
-    result = _sm.run(_load, {params_json})
+    with open(os.path.join(_HERE, "params.json"), encoding="utf-8") as _pf:
+        _params = json.load(_pf)
+    result = _sm.run(_load, _params)
     if not isinstance(result, dict):
         raise TypeError(f"run() returned {{type(result).__name__}}, expected dict")
     print("===RESULT===")
@@ -573,12 +609,40 @@ try:
 except Exception as exc:
     print("===ERROR===")
     print(str(exc))
+    sys.exit(1)  # a failed backtest must not look like a successful process
 '''
 
-_LOCAL_LOADER_BODY = """raise RuntimeError(
-        "local data registry not configured on this machine — "
-        "ATLAS_DATA_PATH is not set to a data_registry.py root. "
-        "This is an honest NOT CONFIGURED, not a fabricated result."
+#: The local loader. ATLAS_DATA_PATH is read by the parent when the harness is
+#: written and embedded as data (the sandboxed child does not inherit the app's
+#: environment), so "not set" is only ever reported when it really is not set.
+#: NOT CONFIGURED in every case that cannot load: this module has no
+#: data_registry reader yet (needs-backend, see FI1 results P3-69), and it
+#: never substitutes different-shaped data.
+_LOCAL_LOADER_BODY = """data_path = {data_path!r}
+    if not data_path:
+        raise RuntimeError(
+            "local data registry not configured on this machine — "
+            "ATLAS_DATA_PATH is not set to a data_registry.py root. "
+            "This is an honest NOT CONFIGURED, not a fabricated result."
+        )
+    import os as _os
+    if not _os.path.isdir(data_path):
+        raise RuntimeError(
+            "local data registry not configured — ATLAS_DATA_PATH is set to "
+            + repr(data_path) + " but that is not a directory. "
+            "This is an honest NOT CONFIGURED, not a fabricated result."
+        )
+    if not _os.path.isfile(_os.path.join(data_path, "data_registry.py")):
+        raise RuntimeError(
+            "local data registry not configured — ATLAS_DATA_PATH is set to "
+            + repr(data_path) + " but it contains no data_registry.py. "
+            "This is an honest NOT CONFIGURED, not a fabricated result."
+        )
+    raise RuntimeError(
+        "local data registry found at " + repr(data_path) + " but this build has "
+        "no reader for its key format yet (" + repr(key) + " was requested). "
+        "Use the desktop engine target for real data. This is an honest "
+        "NOT CONFIGURED, not a fabricated result."
     )"""
 
 _DESKTOP_LOADER_BODY = """
@@ -636,22 +700,55 @@ def _call_desktop_engine(code: str, params: dict) -> tuple[dict, str]:
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         return {}, f"desktop engine returned an unparseable response: {exc}"
 
+    if not isinstance(payload, dict):
+        return {}, f"desktop engine returned a {type(payload).__name__}, expected a JSON object"
     if not payload.get("ok"):
         return {}, f"desktop engine refused: {payload.get('error', 'unknown error')}"
     result = payload.get("result", {})
-    return result.get("metrics", {}), ""
+    metrics = result.get("metrics", {}) if isinstance(result, dict) else None
+    if not isinstance(metrics, dict):
+        return {}, "desktop engine returned a result without a metrics object"
+    return metrics, ""
+
+
+def _write_harness(work_dir: Path, code: str, params: dict) -> Path:
+    """Write strategy_module.py, params.json and harness.py into work_dir and
+    return the harness path. The params travel as a JSON file the harness
+    loads, never as text pasted into Python source: JSON ``true``/``false``/
+    ``null``/``NaN`` are not Python literals."""
+    work_dir.mkdir(parents=True, exist_ok=True)
+    (work_dir / "strategy_module.py").write_text(code, encoding="utf-8")
+    params_path = work_dir / "params.json"
+    params_path.write_text(json.dumps(params), encoding="utf-8")
+    loader_body = _LOCAL_LOADER_BODY.format(data_path=os.environ.get("ATLAS_DATA_PATH", "").strip())
+    harness = _HARNESS_TEMPLATE.format(loader_body=loader_body)
+    harness_path = work_dir / "harness.py"
+    harness_path.write_text(harness, encoding="utf-8")
+    return harness_path
 
 
 def _execute(
     proposal_id: str, code: str, params: dict, target: str, run_id: str | None = None,
 ) -> dict[str, Any]:
+    """Run one approved proposal. Never raises: any failure (disk, sandbox,
+    malformed metrics) is recorded on the returned run as status "failed", so
+    a background run can never be left "running" by an exception."""
     run = BacktestRun(
         id=run_id or _make_id("run"),
         proposal_id=proposal_id,
         target=target,
         started_at=_now(),
     )
+    try:
+        _execute_into(run, proposal_id, code, params, target)
+    except Exception as exc:  # noqa: BLE001 -- recorded on the run, see docstring
+        run.status = "failed"
+        run.error = f"run failed unexpectedly: {type(exc).__name__}: {exc}"
+        run.finished_at = _now()
+    return asdict(run)
 
+
+def _execute_into(run: BacktestRun, proposal_id: str, code: str, params: dict, target: str) -> None:
     if target == "desktop":
         metrics, err = _call_desktop_engine(code, params)
         run.finished_at = _now()
@@ -666,7 +763,7 @@ def _execute(
                 run.explanation = _explain_run(proposal_id, run)
             except RuntimeError as exc:
                 run.explanation = f"(explanation unavailable: {exc})"
-        return asdict(run)
+        return
 
     if not sandbox_available():
         run.status = "failed"
@@ -677,32 +774,25 @@ def _execute(
             "the review gate."
         )
         run.finished_at = _now()
-        return asdict(run)
+        return
 
     work_dir = _workspace_root() / "atlas_lab" / "tmp" / run.id
-    work_dir.mkdir(parents=True, exist_ok=True)
-    (work_dir / "strategy_module.py").write_text(code, encoding="utf-8")
-
-    loader_body = _LOCAL_LOADER_BODY
-    harness = _HARNESS_TEMPLATE.format(
-        strategy_dir=str(work_dir),
-        loader_body=loader_body,
-        params_json=json.dumps(params),
-    )
-    harness_path = work_dir / "harness.py"
-    harness_path.write_text(harness, encoding="utf-8")
-
-    # shlex.quote is not optional here: this repo's own volume name has a
-    # trailing space ("/Volumes/ATLAS /..."), and run_sandboxed's `command`
-    # goes through `/bin/sh -c` — an unquoted path silently word-splits
-    # into "/bin/sh: /Volumes/ATLAS: No such file or directory" (exit 127),
-    # caught live by this module's own test suite.
-    output = run_sandboxed(
-        f"{shlex.quote(sys.executable)} {shlex.quote(str(harness_path))}",
-        cwd=str(work_dir),
-        timeout=_RUN_TIMEOUT_SECONDS,
-        allow_network=False,  # local target never needs network
-    )
+    try:
+        harness_path = _write_harness(work_dir, code, params)
+        # shlex.quote is not optional here: this repo's own volume name has a
+        # trailing space ("/Volumes/ATLAS /..."), and run_sandboxed's `command`
+        # goes through `/bin/sh -c` — an unquoted path silently word-splits
+        # into "/bin/sh: /Volumes/ATLAS: No such file or directory" (exit 127),
+        # caught live by this module's own test suite.
+        output = run_sandboxed(
+            f"{shlex.quote(sys.executable)} {shlex.quote(str(harness_path))}",
+            cwd=str(work_dir),
+            timeout=_RUN_TIMEOUT_SECONDS,
+            allow_network=False,  # local target never needs network
+        )
+    finally:
+        # The directory holds model-written code; it is not kept after the run.
+        shutil.rmtree(work_dir, ignore_errors=True)
 
     metrics, err = _parse_harness_output(output)
     run.finished_at = _now()
@@ -720,16 +810,17 @@ def _execute(
         except RuntimeError as exc:
             run.explanation = f"(explanation unavailable: {exc})"
 
-    return asdict(run)
-
 
 def _parse_harness_output(output: str) -> tuple[dict, str]:
     if "===RESULT===" in output:
         tail = output.split("===RESULT===", 1)[1].strip()
         try:
-            return json.loads(tail.splitlines()[0] if tail.splitlines() else tail), ""
+            parsed = json.loads(tail.splitlines()[0] if tail.splitlines() else tail)
         except (json.JSONDecodeError, IndexError):
             return {}, f"sandbox returned unparseable result: {tail[:500]}"
+        if not isinstance(parsed, dict):
+            return {}, f"sandbox returned a {type(parsed).__name__}, expected a JSON object: {tail[:500]}"
+        return parsed, ""
     if "===ERROR===" in output:
         tail = output.split("===ERROR===", 1)[1].strip()
         return {}, f"strategy code raised: {tail[:500]}"
@@ -754,12 +845,20 @@ def _cap_metrics(metrics: dict) -> dict:
     return metrics
 
 
+def _finite(value: Any) -> float | None:
+    """A real finite number, or None. Metrics come from model-written code, so
+    a string, list, bool or NaN is "not provided", never an exception."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value) if math.isfinite(value) else None
+
+
 def _verdict_from_metrics(m: dict) -> str:
-    n = m.get("n_obs", 0) or 0
+    n = _finite(m.get("n_obs", 0)) or 0
     if not n:
         return "NO DATA"
-    sharpe = m.get("sharpe")
-    mean_ret = m.get("mean_return")
+    sharpe = _finite(m.get("sharpe"))
+    mean_ret = _finite(m.get("mean_return"))
     if sharpe is not None:
         if sharpe > 0.5:
             return "CANDIDATE"

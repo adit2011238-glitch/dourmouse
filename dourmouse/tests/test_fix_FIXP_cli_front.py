@@ -22,7 +22,8 @@ def _fake_cli(monkeypatch):
 
 def test_claude_front_mode_denies_every_native_file_reader():
     denied = set(code_backends._DISALLOWED_NATIVE_TOOLS.split(","))
-    for tool in ("Read", "Glob", "Grep", "LS", "Task", "Agent", "TodoWrite", "NotebookRead", "SlashCommand", "Skill",
+    # finding #181: LS, NotebookRead and SlashCommand are not tools of the installed CLI (it exits 1 on them)
+    for tool in ("Read", "Glob", "Grep", "Task", "Agent", "TodoWrite", "Skill",
                  "Bash", "Write", "Edit", "WebFetch", "WebSearch"):
         assert tool in denied, tool
     assert "ToolSearch" not in denied  # it loads the bridge's tools

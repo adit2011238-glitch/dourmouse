@@ -172,8 +172,10 @@ document.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () =>
 // ---- health ----
 async function health() {
   const set = (id, ok) => { const d = document.getElementById(id); d.className = "dot " + (ok ? "ok" : "bad"); };
-  try { await fetch(ENGINE + "/api/health", {headers: EH}); set("hAtlas", true); } catch (e) { set("hAtlas", false); }
-  try { await fetch(FEED + "/feed?since=0"); set("hFeed", true); } catch (e) { set("hFeed", false); }
+  // fetch resolves for any HTTP answer, so the dot follows r.ok (U1-12): a 401 from a wrong token
+  // or a 500 must not read as healthy
+  try { const r = await fetch(ENGINE + "/api/health", {headers: EH}); set("hAtlas", r.ok); } catch (e) { set("hAtlas", false); }
+  try { const r = await fetch(FEED + "/feed?since=0"); set("hFeed", r.ok); } catch (e) { set("hFeed", false); }
   set("hShell", true);
 }
 health(); setInterval(health, 10000);

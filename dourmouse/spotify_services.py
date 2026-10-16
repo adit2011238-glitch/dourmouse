@@ -184,15 +184,30 @@ def _refresh_access_token(tokens: dict[str, Any]) -> None:
 # HTTP plumbing (stdlib only)
 # --------------------------------------------------------------------------- #
 def _post_form(url: str, body: bytes) -> dict[str, Any]:
-    """POST a form body; returns parsed JSON. Raises RuntimeError on failure."""
+    """POST a form body; returns parsed JSON. Raises RuntimeError on failure
+    (an expired or revoked grant, an unreachable endpoint, a non-JSON reply),
+    so callers that only expect RuntimeError report it instead of crashing."""
     req = urllib.request.Request(
         url,
         data=body,
         headers={"Content-Type": "application/x-www-form-urlencoded"},
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=60) as resp:
-        return json.loads(resp.read().decode("utf-8", errors="replace"))
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            parsed = json.loads(resp.read().decode("utf-8", errors="replace"))
+    except urllib.error.HTTPError as exc:
+        raise RuntimeError(
+            f"SPOTIFY TOKEN ENDPOINT {exc.code}: {_exc_body(exc) or exc.reason} "
+            "(if the grant was revoked or expired, run spotify_login to link again)"
+        ) from exc
+    except (urllib.error.URLError, OSError) as exc:
+        raise RuntimeError(f"SPOTIFY: could not reach the token endpoint: {exc}") from exc
+    except ValueError as exc:
+        raise RuntimeError(f"SPOTIFY: the token endpoint answered with something that is not JSON: {exc}") from exc
+    if not isinstance(parsed, dict):
+        raise RuntimeError("SPOTIFY: the token endpoint answered with an unexpected shape")
+    return parsed
 
 
 def _api(
@@ -200,6 +215,8 @@ def _api(
     path: str,
     params: dict[str, Any] | None = None,
     body: dict[str, Any] | None = None,
+    *,
+    _retried: bool = False,
 ) -> dict[str, Any]:
     """Call the Spotify Web API with automatic one-shot refresh-on-401.
 
@@ -247,7 +264,7 @@ def _api(
             # malformed one is a genuine problem to surface, not to mask.
             return json.loads(raw)
     except urllib.error.HTTPError as exc:
-        return _handle_http_error(exc, method, path, params, body)
+        return _handle_http_error(exc, method, path, params, body, retried=_retried)
 
 
 def _handle_http_error(
@@ -256,14 +273,21 @@ def _handle_http_error(
     path: str,
     params: dict[str, Any] | None,
     body: dict[str, Any] | None = None,
+    retried: bool = False,
 ) -> dict[str, Any]:
 
     if exc.code == 401:
-        # Access token expired or was revoked: refresh ONCE and retry.
+        # Access token expired or was revoked: refresh ONCE and retry. A second
+        # 401 (revoked grant, scope mismatch) ends here instead of looping.
+        if retried:
+            raise RuntimeError(
+                "SPOTIFY AUTH FAILED: the access token was rejected again right after a "
+                "refresh — run spotify_login to link the account again."
+            ) from exc
         tokens = _load_tokens()
         if tokens.get("refresh_token"):
             _refresh_access_token(tokens)
-            return _api(method, path, params, body)
+            return _api(method, path, params, body, _retried=True)
         raise RuntimeError(
             "SPOTIFY AUTH FAILED: access token rejected and no refresh token "
             "exists — run spotify_login to link the account again."
@@ -299,28 +323,57 @@ def _exc_body(exc: Any) -> str:
 # PKCE login — local callback server + browser
 # --------------------------------------------------------------------------- #
 class _CallbackHandler(BaseHTTPRequestHandler):
-    """Loopback-only callback endpoint; captures ?code= and ?state=."""
+    """Loopback-only callback endpoint; captures ?code= and ?state=.
+
+    Only a request to /callback whose ``state`` is the one this login issued
+    counts. Anything else (a web page fetching the loopback port, a probe) gets
+    a 400 and changes nothing, so a stray request can neither abort the login
+    nor plant a code. An ``error=`` answer with the right state is terminal.
+    """
 
     captured_code: str | None = None
     captured_state: str | None = None
+    captured_error: str | None = None
     expected_state: str = ""
     _port: int = _REDIRECT_PORT
+
+    def _reply(self, status: int, html: bytes) -> None:
+        self.send_response(status)
+        self.send_header("Content-Type", "text/html")
+        self.send_header("Content-Length", str(len(html)))
+        self.end_headers()
+        self.wfile.write(html)
 
     def do_GET(self) -> None:
         parsed = urllib.parse.urlparse(self.path)
         qs = urllib.parse.parse_qs(parsed.query)
-        _CallbackHandler.captured_code = (qs.get("code") or [""])[0] or None
-        _CallbackHandler.captured_state = (qs.get("state") or [""])[0] or None
-        body = (
+        state = (qs.get("state") or [""])[0]
+        expected = _CallbackHandler.expected_state
+        if parsed.path != "/callback" or not expected or not secrets.compare_digest(state, expected):
+            self._reply(400, b"<html><body>Not the Dourmouse Spotify login callback.</body></html>")
+            return
+        error = (qs.get("error") or [""])[0]
+        code = (qs.get("code") or [""])[0]
+        if error:
+            _CallbackHandler.captured_error = error
+            self._reply(
+                200,
+                b"<html><body style='font-family:monospace;background:#0a111a;color:#6bb3f5'>"
+                b"<h2>Dourmouse: Spotify was not linked</h2>"
+                b"<p>You can close this tab and return to Dourmouse.</p></body></html>",
+            )
+            return
+        if not code:
+            self._reply(400, b"<html><body>No authorization code in this request.</body></html>")
+            return
+        _CallbackHandler.captured_code = code
+        _CallbackHandler.captured_state = state
+        self._reply(
+            200,
             b"<html><body style='font-family:monospace;background:#0a111a;color:#6bb3f5'>"
-            b"<h2>Dourmouse // Spotify linked</h2>"
-            b"<p>You can close this tab and return to Dourmouse.</p></body></html>"
+            b"<h2>Dourmouse: Spotify linked</h2>"
+            b"<p>You can close this tab and return to Dourmouse.</p></body></html>",
         )
-        self.send_response(200)
-        self.send_header("Content-Type", "text/html")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
 
     def log_message(self, fmt: str, *args: Any) -> None:  # quieter logs
         pass
@@ -337,6 +390,7 @@ def _pkce_pair() -> tuple[str, str]:
 def _start_callback_server(port: int) -> ThreadingHTTPServer:
     _CallbackHandler.captured_code = None
     _CallbackHandler.captured_state = None
+    _CallbackHandler.captured_error = None
     server = DourmouseHTTPServer(("127.0.0.1", port), _CallbackHandler)
     server.timeout = 5.0  # let handle_request() return periodically to poll
     return server
@@ -362,13 +416,29 @@ def _exchange_code(code: str, verifier: str, client_id: str) -> dict[str, Any]:
     return data
 
 
+#: Outcome of the latest login attempt, shown by status() so a background
+#: attempt that failed is not invisible ("" until one has finished).
+_last_login: str = ""
+
+
+def _record_login(outcome: str) -> str:
+    global _last_login
+    _last_login = outcome
+    return outcome
+
+
 def spotify_login(background: bool = False) -> str:
     """One-time account linking: browser + loopback callback + token save.
 
-    ``background=True`` (the tool/HUD path) spawns a daemon thread and
-    returns immediately; the callback completes and saves tokens whenever the
-    user approves in the browser. Foreground mode (CLI) waits up to
-    ``_LOGIN_TIMEOUT`` seconds and reports the outcome.
+    The callback listener is bound BEFORE anything is claimed or opened, so a
+    port that is already taken is reported to the caller instead of being
+    swallowed by a worker thread after "a browser tab opened" was promised.
+
+    ``background=True`` (the tool/HUD path) waits for the callback on a daemon
+    thread and returns immediately once the listener is up; the callback
+    completes and saves tokens whenever the user approves in the browser, and
+    the outcome (success or failure) is reported by status(). Foreground mode
+    (CLI) waits up to ``_LOGIN_TIMEOUT`` seconds and reports the outcome.
     """
     client_id = _client_id()
     if not client_id:
@@ -378,24 +448,8 @@ def spotify_login(background: bool = False) -> str:
             "developer.spotify.com and add redirect "
             f"{_redirect_uri()} to its Redirect URIs). Nothing was opened."
         )
-    if background:
-
-        def _work() -> None:
-            try:
-                spotify_login(background=False)
-            except Exception:  # noqa: BLE001, S110 - background link failures
-                pass  # surface via status()/panel
-
-        threading.Thread(target=_work, daemon=True, name="spotify-login").start()
-        return (
-            "SPOTIFY LINK STARTED: a browser tab opened — approve the app "
-            f"there (timeout {_LOGIN_TIMEOUT}s). The Spotify panel updates "
-            "automatically once linked."
-        )
-
     verifier, challenge = _pkce_pair()
     state = secrets.token_urlsafe(16)
-    _CallbackHandler.expected_state = state
     auth_params = urllib.parse.urlencode(
         {
             "client_id": client_id,
@@ -407,25 +461,60 @@ def spotify_login(background: bool = False) -> str:
             "code_challenge_method": "S256",
         }
     )
-    server = _start_callback_server(_REDIRECT_PORT)
+    try:
+        server = _start_callback_server(_REDIRECT_PORT)
+    except OSError as exc:
+        return _record_login(
+            f"SPOTIFY LOGIN FAILED: could not listen on 127.0.0.1:{_REDIRECT_PORT} for the login "
+            f"callback ({exc}). Another program holds that port; stop it, or set SPOTIFY_REDIRECT_PORT "
+            "to a free port and add the same redirect URI to the Spotify app. Nothing was opened."
+        )
+    _CallbackHandler.expected_state = state
     url = f"{_AUTH_URL}?{auth_params}"
     # Print the URL before opening the browser: if the tab doesn't appear
     # (headless session, focus issues), the user can click the link directly.
     print(f"SPOTIFY LOGIN URL: {url}", flush=True)
-    webbrowser.open(url)
+    opened = webbrowser.open(url)
+    if background:
+
+        def _work() -> None:
+            try:
+                _record_login(_await_callback(server, verifier, state, client_id))
+            except Exception as exc:  # noqa: BLE001 - a background failure is reported through status()
+                _record_login(f"SPOTIFY LOGIN FAILED: {exc}")
+
+        threading.Thread(target=_work, daemon=True, name="spotify-login").start()
+        where = (
+            "a browser tab opened" if opened
+            else f"no browser could be opened automatically, so open this URL yourself: {url}"
+        )
+        return (
+            f"SPOTIFY LINK STARTED: {where} - approve the app "
+            f"there (timeout {_LOGIN_TIMEOUT}s). The Spotify panel updates "
+            "automatically once linked."
+        )
+    return _record_login(_await_callback(server, verifier, state, client_id))
+
+
+def _await_callback(server: ThreadingHTTPServer, verifier: str, state: str, client_id: str) -> str:
+    """Wait for the browser approval on the already-bound listener, exchange the
+    code, save the tokens. Closes the listener on the way out."""
     deadline = time.monotonic() + _LOGIN_TIMEOUT
     try:
         while time.monotonic() < deadline:
             server.handle_request()
-            if _CallbackHandler.captured_code:
+            if _CallbackHandler.captured_code or _CallbackHandler.captured_error:
                 break
+        if _CallbackHandler.captured_error:
+            return (
+                f"SPOTIFY LOGIN DENIED: Spotify answered '{_CallbackHandler.captured_error}'. "
+                "Re-run spotify_login to try again. Nothing was linked."
+            )
         if not _CallbackHandler.captured_code:
             return (
                 "SPOTIFY LOGIN TIMED OUT: no browser approval received. "
                 "Re-run spotify_login. Nothing was linked."
             )
-        if _CallbackHandler.captured_state != state:
-            return "SPOTIFY LOGIN FAILED: state mismatch (CSRF guard). Retry."
         data = _exchange_code(
             _CallbackHandler.captured_code, verifier, client_id
         )
@@ -438,9 +527,10 @@ def spotify_login(background: bool = False) -> str:
             }
         )
         _populate_account_id()
-        return "SPOTIFY LINKED: account connected — playback tools are live."
+        return "SPOTIFY LINKED: account connected - playback tools are live."
     finally:
         server.server_close()
+        _CallbackHandler.expected_state = ""  # this login's state must not outlive it
 
 
 def _populate_account_id() -> None:
@@ -450,6 +540,8 @@ def _populate_account_id() -> None:
     except Exception:  # noqa: BLE001 - cosmetic; never fail a successful link
         return
     tokens = _load_tokens()
+    if not tokens.get("refresh_token"):
+        return  # the token file could not be read just now: never write a stub over the real link
     tokens["user_id"] = me.get("id") or tokens.get("user_id")
     tokens["display_name"] = me.get("display_name") or tokens.get("display_name")
     _save_tokens(tokens)
@@ -532,7 +624,11 @@ def playback_state() -> str:
 def _playback_state_uncached() -> str:
     try:
         data = _api("GET", "/me/player")
-    except RuntimeError:
+    except RuntimeError as exc:
+        # An unlinked account or a failed login is not a device problem: let
+        # the caller report it as what it is.
+        if str(exc).startswith(("NOT LINKED", "SPOTIFY AUTH FAILED", "SPOTIFY TOKEN ENDPOINT")):
+            raise
         return "SPOTIFY: playback not available on this account/device."
     if not data:
         return "SPOTIFY: no active playback device found."
@@ -881,7 +977,9 @@ def list_playlists(limit: int = 20) -> str:
         return "SPOTIFY: no playlists found on this account."
     rows = []
     for p in items:
-        rows.append(f"- {p.get('name')} ({p.get('tracks', {}).get('total', 0)} tracks) {p.get('uri')}")
+        total = (p.get("tracks") or {}).get("total")
+        count = "?" if total is None else total  # an omitted count is unknown, never "0"
+        rows.append(f"- {p.get('name')} ({count} tracks) {p.get('uri')}")
     return "SPOTIFY PLAYLISTS:\n" + "\n".join(rows)
 
 
@@ -903,7 +1001,7 @@ def status() -> dict[str, Any]:
             "hint": "developer.spotify.com -> create app -> set SPOTIFY_CLIENT_ID",
         }
     account = linked_account()
-    return {
+    out = {
         "configured": True,
         "linked": account is not None,
         "detail": (
@@ -911,6 +1009,9 @@ def status() -> dict[str, Any]:
         ),
         "hint": "run spotify_login (or press [LOGIN] in the panel)",
     }
+    if _last_login and account is None:
+        out["last_login"] = _last_login  # why the latest attempt did not link
+    return out
 
 
 def _main(argv: list[str] | None = None) -> int:

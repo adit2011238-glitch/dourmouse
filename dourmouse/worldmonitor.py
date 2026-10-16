@@ -25,6 +25,7 @@ missing key, a rate limit, or a dead endpoint is reported, never masked.
 from __future__ import annotations
 
 import os
+import time
 from collections.abc import Callable
 from typing import Any
 
@@ -43,6 +44,13 @@ _MAX_TOOL_RESULT_CHARS = 8_000
 # docstring promises "no remote network calls" — when it does probe here,
 # a dead API must not stall the report for the SDK's 30s default.
 _PROBE_TIMEOUT = 3.0
+#: Real data calls (forecasts, flight searches, briefs) routinely need longer
+#: than a health probe: the SDK's own default, spelled out so it is not lost.
+_DATA_TIMEOUT = 30.0
+#: How long a tool name confirmed against the live catalog is trusted.
+_CATALOG_TTL = 300.0
+#: name -> monotonic expiry, for names the LIVE catalog advertised.
+_confirmed_tools: dict[str, float] = {}
 
 # A tiny allow-list guard: only the tool names the MCP server actually
 # serves can be called. Re-checked live each run by the catalog — a name
@@ -127,7 +135,8 @@ def _client(transport: Callable[..., Any] | None = None, timeout: float | None =
     """Build the SDK client from env; transport/timeout are injectable.
 
     The probe timeout is short by default so a dead API never stalls a HUD
-    poll (the SDK's 30s default is reserved for real data calls)."""
+    poll; real data calls raise it to ``_DATA_TIMEOUT`` (see
+    ``worldmonitor_call_tool``)."""
     return Client(transport=transport, timeout=timeout or _PROBE_TIMEOUT)
 
 
@@ -179,7 +188,8 @@ def worldmonitor_catalog() -> list[dict[str, str]]:
         if not isinstance(t, dict):
             continue
         name = str(t.get("name", ""))
-        desc = (t.get("description") or "").strip().splitlines()[0] if t.get("description") else ""
+        lines = str(t.get("description") or "").strip().splitlines()
+        desc = lines[0] if lines else ""  # a blank description has no first line
         out.append({"name": name, "description": desc[:200]})
     return out
 
@@ -197,16 +207,26 @@ def _tool_names_text() -> str:
 def _is_known_tool(name: str) -> bool:
     """Is ``name`` a tool the server actually serves today?
 
-    Checks the LIVE keyless catalog first (the source of truth — the API
-    adds/removes tools and the catalog is what the model reads), then falls
-    back to the frozen ``_ALLOWED_TOOLS`` set only when the catalog is
-    unreachable, so an offline API never blocks a call that the safety
-    floor already permits (reviewer fix: catalog/call_tool drift)."""
+    A name in the frozen ``_ALLOWED_TOOLS`` set needs no catalog round trip
+    (a tool the server has since dropped fails honestly at the call). Any other
+    name is checked against the LIVE keyless catalog, the source of truth for
+    tools added after the freeze, and a name it advertises is trusted for
+    ``_CATALOG_TTL`` seconds so repeated calls do not re-fetch the catalog. If
+    the catalog is unreachable only the frozen set is accepted, so an offline
+    API never blocks a call that the safety floor already permits."""
+    if name in _ALLOWED_TOOLS:
+        return True
+    expiry = _confirmed_tools.get(name)
+    if expiry is not None and expiry > time.monotonic():
+        return True
     try:
         catalog = worldmonitor_catalog()
     except WorldMonitorNotAvailable:
-        return name in _ALLOWED_TOOLS
-    return any(t["name"] == name for t in catalog)
+        return False
+    known = any(t["name"] == name for t in catalog)
+    if known:
+        _confirmed_tools[name] = time.monotonic() + _CATALOG_TTL
+    return known
 
 
 def worldmonitor_call_tool(name: str, arguments: dict[str, Any] | None = None) -> Any:
@@ -236,7 +256,9 @@ def worldmonitor_call_tool(name: str, arguments: dict[str, Any] | None = None) -
         )
     args = dict(arguments or {})
     try:
-        result = _client().call_tool(name, args)
+        client = _client()
+        client.timeout = _DATA_TIMEOUT  # not the 3 s health-probe timeout
+        result = client.call_tool(name, args)
     except (MCPError, APIError) as exc:
         raise WorldMonitorNotAvailable(f"World Monitor {name} failed: {exc}") from exc
     except OSError as exc:

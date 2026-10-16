@@ -2125,17 +2125,18 @@ function bootLines(){
   const r = sys.roster ? (sys.roster.subagents||[]).length : null;
   const b = sys.backend||{}, s = sys.server||{}, m = sys.memory||{};
   const L = [];
-  L.push(r!=null ? `CORE  :: ${r} agents mounted <b>READY</b>`
+  L.push(r!=null ? `CORE  :: ${esc(r)} agents mounted <b>READY</b>`
                  : `CORE  :: roster unavailable <span class="dn">DOWN</span>`);
-  L.push(b.model ? `BRAIN :: ${String(b.model).split("/").pop()} <b>ONLINE</b>`
+  // U1-27: every reported string is escaped; only the literal <b>/<span> wrappers are markup
+  L.push(b.model ? `BRAIN :: ${esc(String(b.model).split("/").pop())} <b>ONLINE</b>`
                  : `BRAIN :: backend unreported <span class="dn">DOWN</span>`);
-  L.push(s.online ? `NODE  :: ${s.node} · ${s.detail || ""} <b>READY</b>`
+  L.push(s.online ? `NODE  :: ${esc(s.node)} · ${esc(s.detail || "")} <b>READY</b>`
                   : `NODE  :: offline, using fallback <span class="dn">OFFLINE</span>`);
   /* /api/memory returns {active, count, gate} — NOT `facts`. Reading the
      wrong key made the boot report "memory unavailable DOWN" while the
      HOME screen showed 72 facts from the same payload: a false failure,
      which is worse than a missing line. */
-  L.push(m.count!=null ? `MEM   :: ${m.count} facts recalled <b>OK</b>`
+  L.push(m.count!=null ? `MEM   :: ${esc(m.count)} facts recalled <b>OK</b>`
                        : `MEM   :: memory unavailable <span class="dn">DOWN</span>`);
   L.push(`MODE  :: <b>READY.</b>`);
   return L;
@@ -2778,7 +2779,9 @@ function wireCopies(root){
   root.querySelectorAll("pre").forEach(pre=>{
     if(pre.querySelector(".copybtn")) return;
     const b=document.createElement("button"); b.className="copybtn"; b.type="button"; b.textContent="COPY";
-    b.onclick=async()=>{ try{ await navigator.clipboard.writeText(pre.innerText.replace(/^COPY\n?/,""));
+    // U1-22: copy the code itself, never innerText (it ends with the button's own "COPY" line)
+    const codeText=()=>{ const c=pre.querySelector("code"); return c ? c.textContent : [...pre.childNodes].filter(n=>n!==b).map(n=>n.textContent).join(""); };
+    b.onclick=async()=>{ try{ await navigator.clipboard.writeText(codeText());
       b.textContent="COPIED"; setTimeout(()=>b.textContent="COPY",1200);}catch{b.textContent="FAILED";} };
     pre.appendChild(b);
   });
@@ -2837,7 +2840,9 @@ function addApproval(node, evt, declineMap, screenKey){
   } else {
     const [yes,no]=buttons;
     yes.onclick=()=>decide(true); no.onclick=()=>decide(false);
-    yes.focus();
+    // U1-20: never put focus on APPROVE; the Enter or Space that ends a sentence the owner
+    // is typing would approve a gated action. Focus the box, as the OS shell's card does.
+    box.tabIndex=-1; box.focus({preventScroll:true});
   }
 }
 // v13.2 (live-caught, real bug): measured the raw SSE stream directly
@@ -2976,9 +2981,10 @@ async function submit(){
   ta.value=""; ta.style.height="auto";
   await run(text);
   const q = queueFor(key);
-  while(q.length){ const n=q.shift(); paintQueue(); await run(n); }
+  // U1-23: a queued directive belongs to the thread it was queued on, wherever the owner is now
+  while(q.length){ const n=q.shift(); paintQueue(); await run(n, key); }
 }
-async function run(text){
+async function run(text, originKey){
   // v8.29 (v13.1: +COMMS): the request stays on whichever screen it was
   // asked from — RESEARCH/CODE/MEDIA/NEWS/DESIGN3D/COMMS/HOME each keep
   // their own real conversation now. Asking from a non-thread screen
@@ -2987,8 +2993,10 @@ async function run(text){
   // display and never gets navigated away,
   // but the turn is still recorded into HOME's thread so it's there to
   // review afterward.
-  const targetScreen = threadKey(screen);
-  if(screen!=="VOICE" && screen!==targetScreen) show(targetScreen);
+  // originKey is passed by a queue drain or a retry: the thread is the one the text was written for,
+  // so it neither follows the screen open now nor pulls the owner onto another screen
+  const targetScreen = originKey || threadKey(screen);
+  if(!originKey && screen!=="VOICE" && screen!==targetScreen) show(targetScreen);
   const threadEl = threadFor(targetScreen);
   unhideThread(threadEl);
   addYou(threadEl, text); setBusy(true, targetScreen);
@@ -3263,7 +3271,7 @@ async function run(text){
     c.onclick=async()=>{try{await navigator.clipboard.writeText(buf);c.textContent="COPIED";setTimeout(()=>c.textContent="COPY",1200);}catch{}};
     const rg=document.createElement("button"); rg.className="mini"; rg.type="button";
     rg.textContent = stopped?"CONTINUE":"REGENERATE";
-    rg.onclick=()=>{ if(!busyByScreen[targetScreen]) run(stopped?text+"\n\n(continue)":text); };
+    rg.onclick=()=>{ if(!busyByScreen[targetScreen]) run(stopped?text+"\n\n(continue)":text, targetScreen); };
     node.row.append(c,rg);
     // v8.29: shelving a real, completed answer onto a named project —
     // never offered on a stopped/empty reply, since a shelf is meant to
@@ -3357,7 +3365,7 @@ function restoreReplyTail(node, text, buf, targetScreen){
   const c=document.createElement("button"); c.className="mini"; c.type="button"; c.textContent="COPY";
   c.onclick=async()=>{try{await navigator.clipboard.writeText(buf);c.textContent="COPIED";setTimeout(()=>c.textContent="COPY",1200);}catch{}};
   const rg=document.createElement("button"); rg.className="mini"; rg.type="button"; rg.textContent="REGENERATE";
-  rg.onclick=()=>{ if(!busyByScreen[targetScreen]) run(text); };
+  rg.onclick=()=>{ if(!busyByScreen[targetScreen]) run(text, targetScreen); };
   node.row.append(c,rg);
   if(buf){
     const sh=document.createElement("button"); sh.className="mini"; sh.type="button"; sh.textContent="SHELVE";
@@ -4613,11 +4621,21 @@ function paintDesign3dWorkspace3D(){
   // The module script (type="module", parsed/executed async) may not have
   // registered window.Design3D yet on first paint — poll briefly rather
   // than assume ordering.
+  // U1-26: bounded. If the vendored three.js files are missing the module never registers
+  // window.Design3D, and an unbounded 60 ms retry would run for the life of the page.
+  let tries = 0;
   (function mountWhenReady(){
     const wrap = $("d3dCanvasWrap");
     if(!wrap) return; // navigated away already
-    if(window.Design3D){ window.Design3D.mount(wrap); window.__d3dOnChange(); }
-    else setTimeout(mountWhenReady, 60);
+    if(window.Design3D){ window.Design3D.mount(wrap); window.__d3dOnChange(); return; }
+    if(++tries > 100){
+      const msg = "The 3D editor could not start: its three.js module did not load. Reload the page; if it persists, the vendored three.js files are missing.";
+      const note = document.createElement("div"); note.className = "note"; note.setAttribute("role", "alert"); note.textContent = msg;
+      wrap.appendChild(note);
+      const st = $("d3dSaveStatus"); if(st) st.textContent = msg;
+      return;
+    }
+    setTimeout(mountWhenReady, 60);
   })();
 }
 
@@ -5176,20 +5194,21 @@ function paintSettings(){
             body: JSON.stringify({name, value}),
           });
           const jj = await rr.json();
-          if (!jj.ok) { status.textContent = "Could not save: " + (jj.detail || "unknown error"); return; }
+          if (!jj.ok) { status.textContent = "Could not save: " + (jj.detail || "unknown error"); return false; }
         } catch (err) {
           status.textContent = "Save failed: " + (err.message || err);
-          return;
+          return false;
         }
         input.value = "";
+        return true;
       };
+      // U1-21: repaint only after a save that worked, so a refusal stays readable and the typed key stays
       saveBtn.onclick = async () => {
         const v = input.value.trim();
         if (!v) { status.textContent = "Paste a real key first."; return; }
-        await post(v);
-        paintSettings();
+        if (await post(v)) paintSettings();
       };
-      if (clearBtn) clearBtn.onclick = async () => { await post(""); paintSettings(); };
+      if (clearBtn) clearBtn.onclick = async () => { if (await post("")) paintSettings(); };
       input.addEventListener("keydown", e => { if (e.key === "Enter") saveBtn.click(); });
     });
   })();
@@ -5221,6 +5240,9 @@ function paintSettings(){
         btn.setAttribute("aria-pressed", String(on));
         btn.onclick = async () => {
           note.textContent = "Saving…";
+          // U1-21: repaint only after a save that worked; a repaint rebuilds this note and would
+          // wipe the backend's refusal before it could be read
+          let saved = false;
           try {
             const rr = await fetch("/api/settings/orchestrator-model", {
               method: "POST",
@@ -5236,13 +5258,14 @@ function paintSettings(){
             // actual, helpful explanation was thrown away. This is the
             // real root of "picking Claude/Codex here doesn't work" —
             // it DOES respond, honestly, it just never reached the user.
+            saved = Boolean(jj.ok);
             note.textContent = jj.ok
               ? `Now: ${jj.model}${jj.configured === false ? " (saved, but not configured yet)" : ""}`
               : "Could not save: " + (jj.detail || jj.error || "unknown error");
           } catch (err) {
             note.textContent = "Save failed: " + (err.message || err);
           }
-          paintSettings();
+          if (saved) paintSettings();
         };
         row.appendChild(btn);
       });
@@ -5281,6 +5304,9 @@ function paintSettings(){
         btn.setAttribute("aria-pressed", String(on));
         btn.onclick = async () => {
           note.textContent = "Saving…";
+          // U1-21: repaint only after a save that worked; a repaint rebuilds this note and would
+          // wipe the backend's refusal before it could be read
+          let saved = false;
           try {
             const rr = await fetch("/api/settings/grounded-mode", {
               method: "POST",
@@ -5288,6 +5314,7 @@ function paintSettings(){
               body: JSON.stringify({enabled: val}),
             });
             const jj = await rr.json();
+            saved = Boolean(jj.ok);
             note.textContent = jj.ok
               ? (val
                   ? "On: a zero-tool answer now gets one honest nudge, then a caveat if it still skips grounding."
@@ -5296,7 +5323,7 @@ function paintSettings(){
           } catch (err) {
             note.textContent = "Save failed: " + (err.message || err);
           }
-          paintSettings();
+          if (saved) paintSettings();
         };
         row.appendChild(btn);
       });
@@ -5330,7 +5357,12 @@ function paintSettings(){
         btn.type = "button"; btn.textContent = label;
         btn.setAttribute("aria-pressed", String(on));
         btn.onclick = async () => {
+          // U1-24: turning approvals off is high risk; ask first, as SETTINGS in the OS shell does
+          if (val && !confirm("Skip all confirmations? Deleting files, sending email and running privileged commands will then run at once with no approval prompt. Only turn this on if you trust every directive you send.")) return;
           note.textContent = "Saving…";
+          // U1-21: repaint only after a save that worked; a repaint rebuilds this note and would
+          // wipe the backend's refusal before it could be read
+          let saved = false;
           try {
             const rr = await fetch("/api/settings/auto-approve", {
               method: "POST",
@@ -5338,6 +5370,7 @@ function paintSettings(){
               body: JSON.stringify({enabled: val}),
             });
             const jj = await rr.json();
+            saved = Boolean(jj.ok);
             note.textContent = jj.ok
               ? (val
                   ? "On. Every gated action (deleting files, sending email, running privileged commands) runs immediately with no approval prompt. Only leave this on if you trust every directive you send."
@@ -5346,7 +5379,7 @@ function paintSettings(){
           } catch (err) {
             note.textContent = "Save failed: " + (err.message || err);
           }
-          paintSettings();
+          if (saved) paintSettings();
         };
         row.appendChild(btn);
       });
@@ -5381,6 +5414,9 @@ function paintSettings(){
         btn.setAttribute("aria-pressed", String(on));
         btn.onclick = async () => {
           note.textContent = "Saving…";
+          // U1-21: repaint only after a save that worked; a repaint rebuilds this note and would
+          // wipe the backend's refusal before it could be read
+          let saved = false;
           try {
             const rr = await fetch("/api/settings/claude-front-mode", {
               method: "POST",
@@ -5388,6 +5424,7 @@ function paintSettings(){
               body: JSON.stringify({enabled: val}),
             });
             const jj = await rr.json();
+            saved = Boolean(jj.ok);
             note.textContent = jj.ok
               ? (val
                   ? "On: Claude Code is the front for every tab; non-heavy work splits across Ollama/Gemini behind the scenes."
@@ -5396,7 +5433,7 @@ function paintSettings(){
           } catch (err) {
             note.textContent = "Save failed: " + (err.message || err);
           }
-          paintSettings();
+          if (saved) paintSettings();
         };
         row.appendChild(btn);
       });
@@ -5432,6 +5469,9 @@ function paintSettings(){
         btn.setAttribute("aria-pressed", String(on));
         btn.onclick = async () => {
           note.textContent = "Saving…";
+          // U1-21: repaint only after a save that worked; a repaint rebuilds this note and would
+          // wipe the backend's refusal before it could be read
+          let saved = false;
           try {
             const rr = await fetch("/api/settings/google-full-scopes", {
               method: "POST",
@@ -5439,6 +5479,7 @@ function paintSettings(){
               body: JSON.stringify({enabled: val}),
             });
             const jj = await rr.json();
+            saved = Boolean(jj.ok);
             note.textContent = jj.ok
               ? (val
                   ? "On: Gmail, Calendar and Drive will be requested via Google sign-in. Only works if your Google Cloud OAuth app is verified, OR is in Testing mode with your account added as a test user, otherwise Google's own consent screen will fail. Sign out and sign in again for this to take effect."
@@ -5447,7 +5488,7 @@ function paintSettings(){
           } catch (err) {
             note.textContent = "Save failed: " + (err.message || err);
           }
-          paintSettings();
+          if (saved) paintSettings();
         };
         row.appendChild(btn);
       });
@@ -5482,6 +5523,9 @@ function paintSettings(){
         btn.setAttribute("aria-pressed", String(on));
         btn.onclick = async () => {
           note.textContent = "Saving…";
+          // U1-21: repaint only after a save that worked; a repaint rebuilds this note and would
+          // wipe the backend's refusal before it could be read
+          let saved = false;
           try {
             const rr = await fetch("/api/settings/app-control-dry-run", {
               method: "POST",
@@ -5489,6 +5533,7 @@ function paintSettings(){
               body: JSON.stringify({enabled: val}),
             });
             const jj = await rr.json();
+            saved = Boolean(jj.ok);
             note.textContent = jj.ok
               ? (val
                   ? "On: every app-control action is previewed (validated, blocklist-checked, described) but not executed."
@@ -5497,7 +5542,7 @@ function paintSettings(){
           } catch (err) {
             note.textContent = "Save failed: " + (err.message || err);
           }
-          paintSettings();
+          if (saved) paintSettings();
         };
         row.appendChild(btn);
       });
@@ -6218,6 +6263,9 @@ function renderGlobeFrame(canvas){
    map rather than trying to keep a pinned card glued to a moving SVG
    position — simpler, and just as usable for "read two events side by
    side," which is what this was actually for. */
+// U1-25: feed-supplied links come from external RSS/GDACS/GDELT items; only http(s) is ever
+// rendered into an href or opened (a javascript: or data: link would run in this origin).
+const safeFeedLink = (u) => /^https?:\/\//i.test(String(u || "").trim()) ? String(u).trim() : "";
 function cardHTML(p){
   const parts = [`<b>${esc(p.title||"")}</b>`];
   parts.push(`<div style="font-family:var(--mono);font-size:10px;opacity:.8">${esc(p.chan)} · ${esc(p.severity||"-")}</div>`);
@@ -6225,7 +6273,7 @@ function cardHTML(p){
   if(p.at) parts.push(`<div>${esc(p.at)}</div>`);
   if(p.country) parts.push(`<div>${esc(p.country)}</div>`);
   parts.push(`<div style="font-family:var(--mono);font-size:10px">${Number(p.lat).toFixed(2)}, ${Number(p.lon).toFixed(2)}</div>`);
-  if(p.link) parts.push(`<div><a href="${esc(p.link)}" target="_blank" rel="noopener">source ↗</a></div>`);
+  if(safeFeedLink(p.link)) parts.push(`<div><a href="${esc(safeFeedLink(p.link))}" target="_blank" rel="noopener">source ↗</a></div>`);
   return parts.join("");
 }
 function showCard(wrap, x, y, p){
@@ -8068,7 +8116,8 @@ async function paintNews(){
       const it = newsFeed[i];
       row.querySelector(".n").textContent = `[${(it.channel||"").toUpperCase()}] ${it.title}`;
       row.querySelector(".d").textContent = it.summary || it.at || "";
-      if(it.link){ row.style.cursor = "pointer"; row.onclick = () => window.open(it.link, "_blank", "noopener"); }
+      const link = safeFeedLink(it.link);
+      if(link){ row.style.cursor = "pointer"; row.onclick = () => window.open(link, "_blank", "noopener"); }
     });
   }
   [["Top headlines now","news_headlines"],["Search a story","news_search"]].forEach(([q])=>{
@@ -8341,6 +8390,7 @@ function onPointerDown(ev){
 function disposeCurrent(){
   if(state.raf) cancelAnimationFrame(state.raf);
   state.raf = null;
+  if(state.idleTimer){ clearTimeout(state.idleTimer); state.idleTimer = null; }
   if(state._resizeHandler){ window.removeEventListener("resize", state._resizeHandler); state._resizeHandler = null; }
   if(state.orbit){ try{ state.orbit.dispose(); }catch(e){} state.orbit = null; }
   if(state.gizmo){ try{ state.gizmo.dispose(); }catch(e){} state.gizmo = null; }
@@ -8412,6 +8462,14 @@ function mount(container){
 
   function loop(){
     if(!document.body.contains(container)){ disposeCurrent(); return; }
+    // U1-26: another console screen only hides the pane (it stays in the DOM), so keep the scene
+    // but stop drawing it; a slow timer checks for the pane coming back
+    if(document.hidden || container.getClientRects().length === 0){
+      state.raf = null;
+      state.idleTimer = setTimeout(loop, 300);
+      return;
+    }
+    state.idleTimer = null;
     if(state.orbit) state.orbit.update();
     if(state.renderer && state.scene && state.camera) state.renderer.render(state.scene, state.camera);
     state.raf = requestAnimationFrame(loop);

@@ -33,6 +33,7 @@ class _FakeAccount:
     equity = 1000.0
     balance = 1000.0
     margin_free = 950.0
+    trade_mode = 0  # ACCOUNT_TRADE_MODE_DEMO: demo/live is decided by this, not by the server name (FI1 P3-41)
 
 
 class _FakeSymbol:
@@ -189,6 +190,7 @@ class TestLiveCalls:
 
     def test_live_account_is_double_gated(self, fake_mt5, monkeypatch):
         fake_mt5._account.server = "Broker-Live"
+        fake_mt5._account.trade_mode = 2  # ACCOUNT_TRADE_MODE_REAL
         monkeypatch.delenv("MT5_ALLOW_LIVE", raising=False)
         monkeypatch.delenv("MT5_CONFIRM_LIVE", raising=False)
         out = mt5_ops.mt5_order("ZC", "BUY", paper_confirm=True)

@@ -42,15 +42,38 @@ class NodeInfo:
     roles: tuple[str, ...]
 
 
-def load_registry(path: Path | None = None) -> dict[str, NodeInfo]:
+def _read_registry(path: Path | None = None) -> tuple[dict[str, NodeInfo], list[tuple[str, str]]]:
+    """(valid nodes, [(name, what is wrong)]). A file that cannot be read at
+    all is one problem under the name "(registry)"; an entry without a url or a
+    token is a problem under its own name and never hides the other nodes."""
     p = path or registry_path()
     if not p.exists():
-        return {}
-    raw = json.loads(p.read_text(encoding="utf-8")).get("nodes", {})
-    return {
-        name: NodeInfo(name, str(v["url"]).rstrip("/"), str(v["token"]), tuple(v.get("roles", ())))
-        for name, v in raw.items()
-    }
+        return {}, []
+    try:
+        raw = json.loads(p.read_text(encoding="utf-8"))
+        entries = raw.get("nodes", {}) if isinstance(raw, dict) else None
+    except (OSError, ValueError) as exc:
+        return {}, [("(registry)", f"node registry {p} could not be read: {exc}")]
+    if not isinstance(entries, dict):
+        return {}, [("(registry)", f"node registry {p} has no 'nodes' object")]
+    nodes: dict[str, NodeInfo] = {}
+    problems: list[tuple[str, str]] = []
+    for name, v in entries.items():
+        if not isinstance(v, dict) or not v.get("url") or not v.get("token"):
+            problems.append((str(name), "bad registry entry: needs an object with a url and a token"))
+            continue
+        roles = v.get("roles", ())
+        nodes[name] = NodeInfo(
+            name, str(v["url"]).rstrip("/"), str(v["token"]),
+            tuple(roles) if isinstance(roles, (list, tuple)) else (),
+        )
+    return nodes, problems
+
+
+def load_registry(path: Path | None = None) -> dict[str, NodeInfo]:
+    """The valid registry entries. Bad entries are left out here and reported
+    by network_status; an unreadable file is an empty registry."""
+    return _read_registry(path)[0]
 
 
 def node_for(role: str, path: Path | None = None) -> NodeInfo | None:
@@ -87,9 +110,18 @@ class NodeClient:
         if status == 401:
             raise NodeUnavailable(f"node {self.info.name} refused the token (401)")
         if status >= 400:
-            detail = json.loads(data).get("error", "") if data else ""
+            detail = ""
+            if data:
+                try:
+                    body = json.loads(data)
+                    detail = str(body.get("error", "")) if isinstance(body, dict) else ""
+                except ValueError:
+                    detail = f"non-JSON reply ({data[:80]!r})"
             raise NodeUnavailable(f"node {self.info.name} answered {status}: {detail}")
-        return json.loads(data)
+        try:
+            return json.loads(data)
+        except ValueError as exc:
+            raise NodeUnavailable(f"node {self.info.name} answered with a reply that is not JSON ({exc})") from exc
 
     # health
     def health(self) -> dict[str, Any]:
@@ -154,9 +186,13 @@ class NodeClient:
 
 def network_status(path: Path | None = None) -> list[dict[str, Any]]:
     """Every registered node and whether it answers right now: honest about
-    an offline node, never a cached "online"."""
-    out = []
-    for info in load_registry(path).values():
+    an offline node, never a cached "online". One node (or registry entry)
+    that misbehaves is its own offline row and never stops the listing."""
+    nodes, problems = _read_registry(path)
+    out: list[dict[str, Any]] = [
+        {"name": name, "online": False, "error": why, "roles": []} for name, why in problems
+    ]
+    for info in nodes.values():
         row: dict[str, Any] = {"name": info.name, "url": info.url, "roles": list(info.roles)}
         try:
             t0 = time.monotonic()
@@ -166,5 +202,8 @@ def network_status(path: Path | None = None) -> list[dict[str, Any]]:
         except NodeUnavailable as exc:
             row["online"] = False
             row["error"] = str(exc)
+        except Exception as exc:  # noqa: BLE001 -- reported on this node's row, the others still answer
+            row["online"] = False
+            row["error"] = f"node {info.name} misbehaved: {type(exc).__name__}: {exc}"
         out.append(row)
     return out

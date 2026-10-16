@@ -9,7 +9,7 @@ import { ago } from '../../kit/format.js';
 import { mountThreadView } from '../../kit/thread-view.js';
 import { isAbort } from '../../core/api.js';
 import { readSeen, markSeen } from '../apps/walkthrough.js';
-import { seedAllHands, applyAllHands, counts as ahCounts, newestRuns, runWord, goalLine } from '../orchestration/allhands.js';
+import { seedAllHands, applyAllHands, counts as ahCounts, newestRuns, runMs, runWord, goalLine } from '../orchestration/allhands.js';
 
 function el(tag, cls, text) {
   const n = document.createElement(tag);
@@ -156,9 +156,9 @@ export default {
       paintAllHands();
     }
     function paintAllHands() {
-      const now = Date.now() / 1000;
-      /* the newest run, only while it works or for ten minutes after it finished */
-      const run = newestRuns(runs, 1).find((r) => r.status === 'running' || (r.finished && now - Number(r.finished) < 600));
+      const now = Date.now();
+      /* the newest run, only while it works or for ten minutes after it finished (finished is an ISO string from the server) */
+      const run = newestRuns(runs, 1).find((r) => r.status === 'running' || (r.finished && now - runMs(r.finished) < 600000));
       if (!run) {
         ahEl.hidden = true;
         ahEl.replaceChildren();

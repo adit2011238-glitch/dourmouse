@@ -76,31 +76,67 @@ def atlas_standard() -> dict[str, Any]:
     return {"configured": True, "error": "", **data}
 
 
+def _num(value: Any) -> float | None:
+    """A real number, or None (bools and strings are not numbers here)."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
+def _fmt(value: Any, spec: str, prefix: str = "") -> str:
+    """Format a number with ``spec``; anything else prints as n/a, so a partial
+    standard file reads honestly instead of raising."""
+    n = _num(value)
+    return "n/a" if n is None else f"{prefix}{n:{spec}}"
+
+
+def _pair(value: Any) -> tuple[Any, Any]:
+    if isinstance(value, (list, tuple)) and len(value) >= 2:
+        return value[0], value[1]
+    return "?", "?"
+
+
 def _atlas_standard_tool(arguments: dict[str, Any]) -> str:
     s = atlas_standard()
     if not s.get("configured"):
         return f"ATLAS STANDARD (reported honestly): NOT CONFIGURED — {s.get('error', '')}"
     if s.get("error"):
         return f"ATLAS STANDARD: {s['error']}"
-    nums = s["numbers"]
-    core = nums.get("portfolio_core") or {}
-    boot = nums.get("bootstrap") or {}
-    legs = {k: v for k, v in nums.get("legs", {}).items() if v.get("t") is not None}
+
+    def section(name: str, parent: dict[str, Any]) -> dict[str, Any]:
+        value = parent.get(name)
+        return value if isinstance(value, dict) else {}
+
+    nums = section("numbers", s)
+    protocol = section("protocol", s)
+    config = section("config", s)
+    core = section("portfolio_core", nums)
+    boot = section("bootstrap", nums)
+    legs = {k: v for k, v in section("legs", nums).items()
+            if isinstance(v, dict) and _num(v.get("t")) is not None}
+    in_sample = _pair(protocol.get("in_sample"))
+    perm_p = _num(nums.get("permutation_p"))
+    if perm_p is None:
+        perm_line = "  permutation p: n/a"
+    else:
+        perm_line = (f"  permutation p: {perm_p:.4f} "
+                     f"(bar < 0.01: {'PASS' if perm_p < 0.01 else 'FAIL'})")
+    stages = protocol.get("stages")
+    stage_text = ", ".join(str(x) for x in stages) if isinstance(stages, list) else "?"
     lines = [
         f"ATLAS STANDARD (generated {s.get('generated_utc', '?')}):",
-        f"  protocol: in-sample {s['protocol']['in_sample'][0]} -> "
-        f"{s['protocol']['in_sample'][1]} | OOS from {s['protocol']['oos_start']} | "
-        f"5 stages: {', '.join(s['protocol']['stages'])}",
-        f"  locked config: T={s['config']['T']}, min_n={s['config']['min_n']}, "
-        f"in-sample legs {s['config']['in_sample_legs']}",
-        f"  permutation p: {nums.get('permutation_p'):.4f} "
-        f"(bar < 0.01: {'PASS' if (nums.get('permutation_p') or 1) < 0.01 else 'FAIL'})",
-        f"  core legs (HE_8, HE_4, ZC_12): terminal ${core.get('terminal', '—'):.2f}, "
+        f"  protocol: in-sample {in_sample[0]} -> "
+        f"{in_sample[1]} | OOS from {protocol.get('oos_start', '?')} | "
+        f"5 stages: {stage_text}",
+        f"  locked config: T={config.get('T', '?')}, min_n={config.get('min_n', '?')}, "
+        f"in-sample legs {config.get('in_sample_legs', '?')}",
+        perm_line,
+        f"  core legs (HE_8, HE_4, ZC_12): terminal ${_fmt(core.get('terminal'), '.2f')}, "
         f"Sharpe {core.get('sharpe', '—')}, max DD {core.get('maxdd_pct', '—')}%",
-        f"  all-gated portfolio: terminal ${nums.get('portfolio_all', {}).get('terminal', '—')}",
+        f"  all-gated portfolio: terminal ${section('portfolio_all', nums).get('terminal', '—')}",
         f"  bootstrap: median ${boot.get('terminal_median', '—')}, "
         f"P(loss) = {boot.get('p_loss_pct', '—')}%",
-        "  leg t-stats (OOS): " + ", ".join(f"{k} {v['t']:+.2f}" for k, v in sorted(legs.items())),
+        "  leg t-stats (OOS): " + ", ".join(f"{k} {_fmt(v['t'], '+.2f')}" for k, v in sorted(legs.items())),
         f"  verdict: {s.get('verdict', '')}",
     ]
     return "\n".join(lines)
@@ -165,9 +201,12 @@ def _atlas_paper_open_tool(arguments: dict[str, Any]) -> str:
         return "ERROR: price and size must be numbers."
     if not leg or not date:
         return "ERROR: leg (e.g. HE_8) and date (YYYY-MM-DD) are required."
-    code, out, err = _run_script(
-        ["scripts/paper_log.py", "open", leg, "--date", date,
-         "--price", str(price), "--size", str(size)], _SHORT)
+    from dourmouse.tradingview_ops import paper_log_lock
+
+    with paper_log_lock():  # finding #181: serialise paper-log edits with the other writers
+        code, out, err = _run_script(
+            ["scripts/paper_log.py", "open", leg, "--date", date,
+             "--price", str(price), "--size", str(size)], _SHORT)
     return (f"ATLAS PAPER OPEN {leg} (exit {code}):\n" +
             (_tail(out, 12) if code == 0 else _tail(err, 8)))
 
@@ -181,9 +220,12 @@ def _atlas_paper_close_tool(arguments: dict[str, Any]) -> str:
         return "ERROR: price must be a number."
     if not leg or not date:
         return "ERROR: leg (e.g. HE_8) and date (YYYY-MM-DD) are required."
-    code, out, err = _run_script(
-        ["scripts/paper_log.py", "close", leg, "--date", date,
-         "--price", str(price)], _SHORT)
+    from dourmouse.tradingview_ops import paper_log_lock
+
+    with paper_log_lock():
+        code, out, err = _run_script(
+            ["scripts/paper_log.py", "close", leg, "--date", date,
+             "--price", str(price)], _SHORT)
     return (f"ATLAS PAPER CLOSE {leg} (exit {code}):\n" +
             (_tail(out, 12) if code == 0 else _tail(err, 8)))
 

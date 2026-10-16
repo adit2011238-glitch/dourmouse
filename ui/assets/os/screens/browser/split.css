@@ -1,0 +1,87 @@
+/* BROWSER split view: the page beside a chat column. Loaded by split.js (the router loads only browser.css).
+   Everything is scoped to [data-screen="BROWSER"]. The widths come from split-model.js through --bw-chat-w. */
+
+[data-screen="BROWSER"] .bw-split { position: relative; flex: 1 1 auto; display: flex; align-items: stretch; width: 100%; min-width: 0; min-height: 360px; }
+[data-screen="BROWSER"] .bw-split[data-side="left"] { flex-direction: row-reverse; }
+[data-screen="BROWSER"] .bw-left { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; }
+[data-screen="BROWSER"] .bw-left > .cb-wrap { flex: 1 1 auto; }
+
+/* the divider: wider hit area than line, above the page frame's own width handle */
+[data-screen="BROWSER"] .bw-sdiv { flex: 0 0 8px; width: 8px; position: relative; z-index: 4; display: flex; align-items: center; justify-content: center; cursor: ew-resize; touch-action: none; background: transparent; }
+[data-screen="BROWSER"] .bw-sdiv::before { content: ""; width: 3px; height: 38px; border-radius: 3px; background: var(--os-edge-hi); transition: background .1s; }
+[data-screen="BROWSER"] .bw-sdiv:hover::before, [data-screen="BROWSER"] .bw-sdiv.drag::before, [data-screen="BROWSER"] .bw-sdiv:focus-visible::before { background: var(--dm-active); }
+[data-screen="BROWSER"] .bw-sdiv:focus-visible { outline: 2px solid var(--dm-active); outline-offset: -2px; border-radius: 4px; }
+[data-screen="BROWSER"] .bw-split:not([data-mode="split"]) .bw-sdiv { display: none; }
+
+/* the column; when hidden (or under 900 pixels) only the slim rail is in the flow */
+[data-screen="BROWSER"] .bw-chat { position: relative; flex: 0 0 var(--bw-chat-w, 280px); width: var(--bw-chat-w, 280px); min-width: 0; display: flex; flex-direction: column; box-sizing: border-box; }
+[data-screen="BROWSER"] .bw-split[data-mode="rail"] .bw-chat, [data-screen="BROWSER"] .bw-split[data-mode^="overlay"] .bw-chat { flex: 0 0 34px; width: 34px; padding-left: 6px; }
+[data-screen="BROWSER"] .bw-split[data-mode="rail"][data-side="left"] .bw-chat, [data-screen="BROWSER"] .bw-split[data-mode^="overlay"][data-side="left"] .bw-chat { padding-left: 0; padding-right: 6px; }
+
+[data-screen="BROWSER"] .bw-chat-body { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; border: 1px solid var(--os-edge-hi); border-radius: 12px; overflow: hidden; background: #0b120f; box-shadow: var(--os-elev-rest, 0 8px 30px rgba(0,0,0,.35)); }
+[data-screen="BROWSER"] .bw-split[data-mode="rail"] .bw-chat-body, [data-screen="BROWSER"] .bw-split[data-mode="overlay-closed"] .bw-chat-body { display: none; }
+[data-screen="BROWSER"] .bw-split[data-mode="overlay-open"] .bw-chat-body { position: absolute; top: 0; bottom: 0; right: 100%; width: var(--bw-chat-w); z-index: 6; box-shadow: 0 12px 40px rgba(0,0,0,.55); }
+[data-screen="BROWSER"] .bw-split[data-mode="overlay-open"][data-side="left"] .bw-chat-body { right: auto; left: 100%; }
+
+/* the slim rail */
+[data-screen="BROWSER"] .bw-rail { display: none; flex: 1 1 auto; min-height: 0; flex-direction: column; align-items: center; gap: 10px; padding: 10px 0; border: 1px solid var(--os-edge-lo); border-radius: 12px; background: rgba(255,255,255,.03); color: var(--dm-fg-body); font: inherit; cursor: pointer; }
+[data-screen="BROWSER"] .bw-split[data-mode="rail"] .bw-rail, [data-screen="BROWSER"] .bw-split[data-mode^="overlay"] .bw-rail { display: flex; }
+[data-screen="BROWSER"] .bw-rail:hover { background: rgba(255,255,255,.08); color: var(--dm-fg); }
+[data-screen="BROWSER"] .bw-rail:focus-visible { outline: 2px solid var(--dm-active); outline-offset: 1px; }
+[data-screen="BROWSER"] .bw-rail svg { width: 16px; height: 16px; flex: 0 0 auto; }
+[data-screen="BROWSER"] .bw-rail .t { writing-mode: vertical-rl; letter-spacing: .1em; font-size: 11px; text-transform: uppercase; }
+[data-screen="BROWSER"] .bw-rail .d { width: 8px; height: 8px; border-radius: 50%; background: transparent; flex: 0 0 auto; }
+[data-screen="BROWSER"] .bw-rail .d[data-busy="1"] { background: var(--dm-active); }
+[data-screen="BROWSER"] .bw-rail .d[data-attn="1"] { background: var(--os-warn); }
+
+/* the column header */
+[data-screen="BROWSER"] .bw-chat-head { flex: 0 0 auto; background: var(--os-mat-regular); border-bottom: 1px solid var(--os-edge-lo); }
+[data-screen="BROWSER"] .bw-chat-top { display: flex; align-items: center; gap: 2px; padding: 6px 6px 4px 12px; }
+[data-screen="BROWSER"] .bw-chat-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; font-weight: 600; color: var(--dm-fg); }
+[data-screen="BROWSER"] .bw-chat-ctl .cb-ask { border-bottom: 0; border-top: 1px solid var(--os-edge-lo); padding: 6px 12px; gap: 6px 8px; font-size: 12px; }
+[data-screen="BROWSER"] .bw-chat-ctl:empty { display: none; }
+[data-screen="BROWSER"] .bw-chat-ctx { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; padding: 6px 12px 8px; border-top: 1px solid var(--os-edge-lo); font-size: 11.5px; color: var(--dm-fg-dim); min-width: 0; }
+[data-screen="BROWSER"] .bw-chat-ctx .k { letter-spacing: .06em; text-transform: uppercase; font-size: 10.5px; flex: 0 0 auto; }
+[data-screen="BROWSER"] .bw-chat-ctx .t { color: var(--dm-fg); min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+[data-screen="BROWSER"] .bw-chat-ctx .h { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+[data-screen="BROWSER"] .bw-chat-ctx .u { flex-basis: 100%; color: var(--os-warn); }
+[data-screen="BROWSER"] .bw-chat-ctx[data-kind="loading"] .t::after { content: " (loading)"; color: var(--dm-fg-dim); }
+
+/* the thread: the shell's thread view, styled to fit a narrow column */
+[data-screen="BROWSER"] .bw-chat-scroll { flex: 1 1 0; min-height: 0; overflow-y: auto; padding: 10px 12px; overflow-wrap: anywhere; }
+[data-screen="BROWSER"] .bw-chat-thread { min-height: 40px; }
+[data-screen="BROWSER"] .bw-chat .turn { margin-bottom: 14px; }
+[data-screen="BROWSER"] .bw-chat .turn-you { margin-bottom: 10px; }
+[data-screen="BROWSER"] .bw-chat .turn .you { color: var(--dm-fg); white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--dm-text-sm); line-height: 1.55; }
+[data-screen="BROWSER"] .bw-chat .turn-bot .who { min-height: 1em; }
+[data-screen="BROWSER"] .bw-chat .chips { margin-top: 2px; display: flex; flex-wrap: wrap; gap: 4px; }
+[data-screen="BROWSER"] .bw-chat .chips .tag { font-family: var(--dm-font-mono); text-transform: none; letter-spacing: .02em; }
+[data-screen="BROWSER"] .bw-chat .chipdetail { margin: 4px 0 8px; padding: 8px 10px; border-radius: 8px; background: rgba(0,0,0,.28); border: 1px solid var(--os-edge-lo); }
+[data-screen="BROWSER"] .bw-chat .chipdetail[hidden] { display: none; }
+[data-screen="BROWSER"] .bw-chat .chip-pre, [data-screen="BROWSER"] .bw-chat .think-text { margin: 0 0 8px; font-family: var(--dm-font-mono); font-size: var(--dm-text-xs); color: var(--dm-fg-body); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 200px; overflow: auto; }
+[data-screen="BROWSER"] .bw-chat .think { margin: 6px 0; font-size: var(--dm-text-xs); color: var(--dm-fg-dim); }
+[data-screen="BROWSER"] .bw-chat .think[hidden] { display: none; }
+[data-screen="BROWSER"] .bw-chat .think summary { cursor: pointer; letter-spacing: .1em; }
+[data-screen="BROWSER"] .bw-chat .reply { margin-top: 6px; font-size: var(--dm-text-sm); line-height: 1.55; overflow-wrap: anywhere; }
+[data-screen="BROWSER"] .bw-chat .reply:empty { display: none; }
+[data-screen="BROWSER"] .bw-chat .reply pre { max-width: 100%; overflow-x: auto; }
+[data-screen="BROWSER"] .bw-chat .terr { margin-top: 6px; color: var(--dm-error); font-size: var(--dm-text-sm); overflow-wrap: anywhere; }
+[data-screen="BROWSER"] .bw-chat .terr:empty { display: none; }
+[data-screen="BROWSER"] .bw-chat .turn-actions { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 6px; }
+[data-screen="BROWSER"] .bw-chat .turn-actions[hidden] { display: none; }
+[data-screen="BROWSER"] .bw-chat .approve .r { flex-wrap: wrap; }
+[data-screen="BROWSER"] .bw-chat .st-suggest { flex-direction: column; align-items: stretch; }
+[data-screen="BROWSER"] .bw-chat .st-sugg { text-align: left; white-space: normal; }
+[data-screen="BROWSER"] .bw-chat .st { color: var(--dm-fg-body); padding: 14px 4px; }
+
+/* the box at the bottom of the column */
+[data-screen="BROWSER"] .bw-chat-compose { flex: 0 0 auto; display: flex; flex-direction: column; gap: 6px; padding: 8px; border-top: 1px solid var(--os-edge-lo); background: rgba(0,0,0,.2); }
+[data-screen="BROWSER"] .bw-chat-input { width: 100%; box-sizing: border-box; resize: none; height: 34px; min-height: 34px; max-height: 130px; line-height: 1.4; padding-top: 7px; padding-bottom: 7px; }
+[data-screen="BROWSER"] .bw-chat-row { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
+[data-screen="BROWSER"] .bw-chat-q { margin-right: auto; font-size: 11px; color: var(--dm-fg-dim); }
+[data-screen="BROWSER"] .bw-chat-q[hidden] { display: none; }
+
+/* with the column showing, the AI's control bar is in its header; the page chrome keeps its own only when the column is hidden */
+[data-screen="BROWSER"] .bw-split[data-chat-visible="1"] .cb-control-slot { display: none; }
+
+[data-screen="BROWSER"] .bw-split[data-dragging="1"] { cursor: ew-resize; user-select: none; }

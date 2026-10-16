@@ -186,7 +186,7 @@ class ArtifactStore:
                 # NaN/Inf pass float() but would render a broken SVG chart.
                 raise ValueError(f"series value {v!r} is not finite")
             nums.append(num)
-        labels = [str(l)[:80] for l in labels[:_MAX_SERIES_POINTS]]
+        labels = [str(label)[:80] for label in labels[:_MAX_SERIES_POINTS]]
         return {"labels": labels, "values": nums}
 
 

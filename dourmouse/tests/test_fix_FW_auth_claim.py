@@ -243,3 +243,13 @@ def test_claim_redeem_needs_the_owner_proof_when_the_owner_gate_is_enforced(serv
 
     status, _, set_cookie, _ = _get(port, "/api/auth/claim", cookie=cookie + "; dourmouse_owner=" + "o" * 40)
     assert status == 200 and "dourmouse_user_session=" in set_cookie
+
+
+def test_start_can_answer_json_for_the_sign_in_pages(server):
+    """Finding #181 (U1-9): ?claim=1&format=json answers 200 JSON {ok, url} and still sets the claim cookie."""
+    _srv, port = server
+    status, location, cookie, body = _get(port, "/api/auth/google/start?claim=1&format=json")
+    assert status == 200 and location is None
+    data = json.loads(body)
+    assert data["ok"] is True and data["url"].startswith("https://accounts.google.com/")
+    assert "dourmouse_claim=" in (cookie or "")

@@ -20,6 +20,7 @@ import contextlib
 import csv
 import json
 import os
+import re
 import subprocess
 import threading
 from dataclasses import asdict, dataclass, field
@@ -351,39 +352,73 @@ def _parse_csv_strategies(
     return strategies
 
 
+class _ParsedCatalog(dict):
+    """The catalog's strategy rows, plus ``problems``: what was skipped or
+    unreadable, so the sync can surface it on sync_error."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.problems: list[str] = []
+
+
 def _parse_catalog_json(path: Path) -> dict[str, StrategyMetrics]:
-    """Parse the strategy_catalog.json into metrics."""
-    strategies = {}
+    """Parse the strategy_catalog.json into metrics.
+
+    One malformed entry never costs the other rows: it is skipped and named
+    in the result's ``problems`` list."""
+    strategies = _ParsedCatalog()
+    problems = strategies.problems
     if not path.is_file():
         return strategies
     try:
         data = json.loads(path.read_text(encoding="utf-8", errors="replace"))
-    except (json.JSONDecodeError, Exception):
+    except ValueError as exc:
+        problems.append(f"catalog is not valid JSON: {exc}")
         return strategies
+    except OSError as exc:
+        problems.append(f"catalog could not be read: {exc}")
+        return strategies
+    if not isinstance(data, dict):
+        problems.append("catalog is not a JSON object")
+        return strategies
+
+    def section(name: str) -> dict:
+        block = data.get(name, {})
+        if isinstance(block, dict):
+            return block
+        problems.append(f"catalog section {name} is not an object")
+        return {}
+
     # Seasonal locked candidates.
-    for key, entry in data.get("seasonal_locked", {}).items():
-        strategies[key] = StrategyMetrics(
-            name=key,
-            direction=entry.get("direction", "LONG"),
-            mean_return_pct=float(entry.get("is_mean_pct", entry.get("mean_pct", 0)) or 0),
-            t_stat=float(entry.get("is_t", entry.get("t", 0)) or 0),
-            n_observations=int(entry.get("is_n", entry.get("n", 0)) or 0),
-            verdict="CANDIDATE",
-            passed_gates="locked after in-sample",
-            description=f"Seasonal {entry.get('direction', 'LONG')} on {entry.get('commodity', key)} (month {entry.get('month', '?')})",
-        )
+    for key, entry in section("seasonal_locked").items():
+        try:
+            strategies[key] = StrategyMetrics(
+                name=key,
+                direction=entry.get("direction", "LONG"),
+                mean_return_pct=float(entry.get("is_mean_pct", entry.get("mean_pct", 0)) or 0),
+                t_stat=float(entry.get("is_t", entry.get("t", 0)) or 0),
+                n_observations=int(entry.get("is_n", entry.get("n", 0)) or 0),
+                verdict="CANDIDATE",
+                passed_gates="locked after in-sample",
+                description=f"Seasonal {entry.get('direction', 'LONG')} on {entry.get('commodity', key)} (month {entry.get('month', '?')})",
+            )
+        except (ValueError, TypeError, AttributeError) as exc:
+            problems.append(f"skipped malformed seasonal_locked entry {key!r}: {exc}")
     # FX candidates (if present).
-    for key, entry in data.get("fx_candidates", {}).items():
-        strategies[key] = StrategyMetrics(
-            name=key,
-            direction=entry.get("direction", "LONG"),
-            mean_return_pct=float(entry.get("holdout_mean_pct", 0) or 0),
-            t_stat=float(entry.get("holdout_t", 0) or 0),
-            n_observations=int(entry.get("n", 0) or 0),
-            verdict="CANDIDATE",
-            passed_gates=entry.get("gates_passed", ""),
-            description=entry.get("description", ""),
-        )
+    for key, entry in section("fx_candidates").items():
+        try:
+            strategies[key] = StrategyMetrics(
+                name=key,
+                direction=entry.get("direction", "LONG"),
+                mean_return_pct=float(entry.get("holdout_mean_pct", 0) or 0),
+                t_stat=float(entry.get("holdout_t", 0) or 0),
+                n_observations=int(entry.get("n", 0) or 0),
+                verdict="CANDIDATE",
+                passed_gates=entry.get("gates_passed", ""),
+                description=entry.get("description", ""),
+            )
+        except (ValueError, TypeError, AttributeError) as exc:
+            problems.append(f"skipped malformed fx_candidates entry {key!r}: {exc}")
     return strategies
 
 
@@ -436,6 +471,16 @@ def _initial_sync_worker() -> None:
         _sync()
 
 
+def _ensure_state() -> StrategyLabState:
+    """The lab state, created if no GET endpoint has touched it yet. Unlike
+    get_state() this starts no background thread: a sync is already running."""
+    global _LAB_STATE
+    with _LAB_LOCK:
+        if _LAB_STATE is None:
+            _LAB_STATE = StrategyLabState()
+        return _LAB_STATE
+
+
 def sync() -> dict[str, Any]:
     """Force a sync of the strategy lab repo. Returns a status dict."""
     return _sync()
@@ -454,9 +499,7 @@ def _sync() -> dict[str, Any]:
 
 def _sync_locked() -> dict[str, Any]:
     """Body of _sync(). Runs with _SYNC_LOCK held and _LAB_LOCK NOT held."""
-    with _LAB_LOCK:
-        state = _LAB_STATE
-    assert state is not None
+    state = _ensure_state()
 
     error = _ensure_repo()
     if error:
@@ -464,15 +507,18 @@ def _sync_locked() -> dict[str, Any]:
             state.sync_error = error
         return {"ok": False, "error": error}
 
-    # Parse all sources. Strict batteries last: they carry every strategy
-    # ever tested (PASS/FAIL verdicts) but are sparse on description — the
-    # catalog/locked rows (with descriptions) must win the merge.
+    # Parse all sources. The strict batteries carry every strategy ever
+    # tested (PASS/FAIL verdicts) but are sparse on description, so the
+    # catalog/locked rows (with descriptions) are applied LAST and win the
+    # merge.
     strategies = {}
-    strategies.update(_parse_catalog_json(STRATEGY_CATALOG_PATH))
     strategies.update(_parse_fx_leaderboard(FX_LEADERBOARD_PATH))
     strategies.update(_parse_seasonal_leaderboard(SEASONAL_LEADERBOARD_PATH))
     strategies.update(_parse_strict_battery(STRICT_BATTERY_PATH))
     strategies.update(_parse_strict_battery(FX_STRICT_BATTERY_PATH))
+    catalog = _parse_catalog_json(STRATEGY_CATALOG_PATH)
+    problems = list(getattr(catalog, "problems", []))
+    strategies.update(catalog)
 
     # Read reports.
     reports = {}
@@ -488,7 +534,7 @@ def _sync_locked() -> dict[str, Any]:
     version = ""
     try:
         data = json.loads(STRATEGY_CATALOG_PATH.read_text(encoding="utf-8", errors="replace"))
-        version = data.get("version", "")
+        version = data.get("version", "") if isinstance(data, dict) else ""
     except Exception:
         pass  # a missing or malformed catalog just leaves the version blank
 
@@ -497,7 +543,10 @@ def _sync_locked() -> dict[str, Any]:
         state.strategies = strategies
         state.recent_reports = reports
         state.last_sync = last_sync
-        state.sync_error = ""
+        # Skipped or unreadable catalog rows are reported, not hidden: the
+        # sync still lands (partial data beats a stale board) with the
+        # reason on the line the window shows.
+        state.sync_error = "; ".join(problems)
         state.version = version
 
     # Broadcast to the SSE hub so every connected HUD sees the update live.
@@ -733,6 +782,10 @@ def prompt_to_strategy(prompt: str) -> dict[str, Any]:
         raise RuntimeError(
             f"LLM output was not valid JSON. Raw response:\n{raw[:1000]}"
         ) from exc
+    if not isinstance(spec, dict):
+        raise RuntimeError(
+            f"LLM output was not a JSON object. Raw response:\n{raw[:1000]}"
+        )
     # Validate required fields.
     for key in ("strategy_name", "strategy_type", "pair", "explanation"):
         if key not in spec:
@@ -746,6 +799,37 @@ def prompt_to_strategy(prompt: str) -> dict[str, Any]:
 # --------------------------------------------------------------------------- #
 # Backtest execution
 # --------------------------------------------------------------------------- #
+
+_PAIR_RE = re.compile(r"[A-Z]{6}")
+#: The strategy_type enum from _STRATEGY_SYSTEM_PROMPT. The value goes into the
+#: CLI argv, so anything outside it is refused rather than passed on.
+_STRATEGY_TYPES = frozenset({
+    "momentum", "mean_reversion", "breakout", "calendar", "cross_asset",
+    "volatility", "seasonal", "news", "custom",
+})
+_DEFAULT_PAIR = BacktestRequest.pair
+
+
+def _resolve_cli_args(spec: dict, requested_pair: str) -> tuple[str, str]:
+    """The (pair, strategy_type) for ``atlas fx-research``, both validated.
+
+    A pair the user asked for (anything other than the form default) wins over
+    the model's pair; otherwise the model's pair is used. Neither value
+    reaches the CLI argv unless it is a plain six-letter FX code / a known
+    strategy type, so a prompt-injected spec cannot smuggle in CLI options.
+    Raises RuntimeError so the worker records a clean failure."""
+    user_pair = requested_pair.strip().upper() if isinstance(requested_pair, str) else ""
+    pair = user_pair if user_pair and user_pair != _DEFAULT_PAIR else spec.get("pair", user_pair or _DEFAULT_PAIR)
+    if not isinstance(pair, str) or not _PAIR_RE.fullmatch(pair.strip().upper()):
+        raise RuntimeError(f"Refusing to run: pair {pair!r} is not a six-letter FX pair like EURUSD.")
+    strategy_type = spec.get("strategy_type", "momentum")
+    if not isinstance(strategy_type, str) or strategy_type not in _STRATEGY_TYPES:
+        raise RuntimeError(
+            f"Refusing to run: strategy_type {strategy_type!r} is not one of "
+            f"{', '.join(sorted(_STRATEGY_TYPES))}."
+        )
+    return pair.strip().upper(), strategy_type
+
 
 def _make_backtest_id() -> str:
     """Generate a unique backtest ID."""
@@ -775,7 +859,7 @@ def _run_backtest_worker(req_id: str) -> None:
                 state.backtest_requests[req_id].progress = 0.15
 
         # Step 2: Run the atlas fx-research with the strategy parameters.
-        pair = spec.get("pair", req.pair)
+        pair, strategy_type = _resolve_cli_args(spec, req.pair)
         # We'll use the atlas CLI to run fx-research on the pair.
         from dourmouse.atlas.atlas_cli import run_atlas_cli
 
@@ -789,7 +873,6 @@ def _run_backtest_worker(req_id: str) -> None:
         # engineering-audit find, 2026-09-17: this exact copy was almost
         # certainly the source of _build_report's own real bare-name bug,
         # see docs/ENGINEERING_AUDIT.md finding #011).
-        strategy_type = spec.get("strategy_type", "momentum")
         explanation = spec.get("explanation", "Strategy description not provided.")
 
         # Run the research command. We use the managed CLI runner.
@@ -857,18 +940,39 @@ def _build_report(
     Parses the JSON output (if any) and produces a human-readable report
     with all the metrics a trader actually reads.
     """
-    # Try to parse the CLI output as JSON (fx-research outputs JSON).
-    parsed = {}
-    try:
-        # Find the JSON block in the output.
-        lines = raw_output.strip().split("\n")
-        for i, line in enumerate(lines):
-            if line.strip().startswith("{"):
-                candidate = "\n".join(lines[i:])
-                parsed = json.loads(candidate)
+    # Try to parse the CLI output as JSON (fx-research outputs JSON). Decode
+    # from each "{" line with raw_decode, so a progress line before the result
+    # or a summary after it does not defeat the parse; the first object that
+    # decodes to something with a "validation" block (directly or per pair)
+    # wins, and failing that the first object that decodes at all.
+    parsed: Any = {}
+    unparsed = False
+    text = raw_output.strip()
+    if text:
+        decoder = json.JSONDecoder()
+        decoded: list[Any] = []
+        offset = 0
+        for line in text.split("\n"):
+            if line.lstrip().startswith("{"):
+                start = offset + (len(line) - len(line.lstrip()))
+                try:
+                    obj, _end = decoder.raw_decode(text, start)
+                except json.JSONDecodeError:
+                    obj = None
+                if isinstance(obj, dict):
+                    decoded.append(obj)
+            offset += len(line) + 1
+        for obj in decoded:
+            if "validation" in obj or any(
+                isinstance(v, dict) and "validation" in v for v in obj.values()
+            ):
+                parsed = obj
                 break
-    except (json.JSONDecodeError, IndexError):
-        pass
+        else:
+            if decoded:
+                parsed = decoded[0]
+        if not decoded and "{" in text:
+            unparsed = True
 
     # Extract metrics from the parsed output.
     validation = parsed.get("validation", {}) if isinstance(parsed, dict) else {}
@@ -902,6 +1006,8 @@ def _build_report(
     verdict = "HOLD"
     if exit_code != 0:
         verdict = "FAILED"
+    elif unparsed:
+        verdict = "UNPARSED"
     elif sharpe is not None and sharpe > 0.5 and p_value is not None and p_value < 0.05:
         verdict = "PAPER TRADE"
     elif sharpe is not None and sharpe > 0.3 and p_value is not None and p_value < 0.10:
@@ -941,7 +1047,10 @@ def _build_report(
     # Add a human-readable summary.
     lines = [f"## {report['strategy_name']} — {pair} ({report['direction']})"]
     lines.append(f"\n**Verdict: {verdict}**")
-    if report["worth_paper_trading"]:
+    if verdict == "UNPARSED":
+        lines.append("⚠ *Could not parse the research output, so no metrics are available. "
+                     "This is not a HOLD result; see the raw output snippet.*")
+    elif report["worth_paper_trading"]:
         lines.append("✅ *This strategy is worth paper trading.*")
     else:
         lines.append("⏸ *More observation needed before paper trading.*")

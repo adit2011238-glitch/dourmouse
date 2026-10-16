@@ -84,7 +84,10 @@ class TestPreambleIsSentOncePerSession:
 
         from dourmouse import code_backends
 
-        source = inspect.getsource(code_backends.stream_claude)
+        # read the module file, not the attribute: another test may leave a patched stream_claude behind
+        text = inspect.getsource(code_backends)
+        start = text.index("def stream_claude(")
+        source = text[start:text.index("\ndef ", start + 10)]
         assert "_first_turn_task" in source
         # finding P3-12: the briefing is keyed on the --session-id the run actually uses
         helper = inspect.getsource(code_backends._first_turn_task)

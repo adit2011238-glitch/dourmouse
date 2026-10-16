@@ -4,7 +4,9 @@
    is deterministic and performs nothing; this screen carries out its answer:
    open a screen, or hand a message to the companion on HOME (where every
    mail send still stops at the approval gate). Text the parser does not
-   recognise is sent to the companion as an ordinary message, never dropped.
+   recognise is NOT sent anywhere: the log says "Nothing was sent", and the owner
+   may send that text to HOME with the SEND TO HOME button, which is opt-in
+   because a chat turn spends model credit.
 
    Capture is honest about its engine: server Whisper when it is configured and
    this window can record, else the window's own speech recognition, else typed
@@ -275,11 +277,17 @@ export default {
         }
         return;
       }
+      /* the permission prompt can stay open for seconds; a second press during it must not open a
+         second capture whose stream and timer can no longer be stopped (U1-7) */
+      if (st.starting) return;
+      st.starting = true;
       try {
         st.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       } catch (err) {
         note('Microphone not available: ' + (err && err.message ? err.message : String(err)), 'error');
         return;
+      } finally {
+        st.starting = false;
       }
       if (ctx.signal.aborted) {
         endRecording();

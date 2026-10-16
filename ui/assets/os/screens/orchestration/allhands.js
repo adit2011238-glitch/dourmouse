@@ -6,6 +6,8 @@
    The start event carries no goal and no roster, so a run first seen from an
    event is a "partial" skeleton and the screen reads the list again. */
 
+import { toMs } from '../../kit/format.js';
+
 export const RUN_KEEP = 5;
 export const PREVIEW = 200;
 
@@ -55,9 +57,17 @@ export function counts(run) {
   };
 }
 
+/* The server stores run.started and run.finished as ISO strings (null while running); a run first
+   seen from an event carries epoch seconds. Both read as epoch milliseconds here, so a comparison
+   or a sort never meets NaN (U1-15). 0 when there is no time. */
+export function runMs(ts) {
+  const ms = toMs(ts);
+  return Number.isFinite(ms) ? ms : 0;
+}
+
 export function newestRuns(runs, n = RUN_KEEP) {
   return Object.values(runs)
-    .sort((a, b) => Number(b.started || 0) - Number(a.started || 0))
+    .sort((a, b) => runMs(b.started) - runMs(a.started))
     .slice(0, n);
 }
 

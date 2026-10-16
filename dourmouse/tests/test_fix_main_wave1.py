@@ -77,3 +77,28 @@ def test_long_private_data_starting_with_error_is_still_gated():
     turn = privacy.TurnPrivacy(chat="t", private=True, placeholders=privacy.PlaceholderMap())
     out = privacy.gate_tool_result("run_privileged_command", {"command": "cat ~/Documents/x"}, text, turn=turn)
     assert out != text
+
+
+def test_live_feeds_error_text_hides_secret_query_values():
+    """Finding #181: URL errors keep the host and path but not api keys."""
+    from dourmouse.live_feeds import _safe_url
+
+    out = _safe_url("https://api.example.com/v1/x?symbol=AAPL&api_key=SECRET123&token=abc#f")
+    assert "SECRET123" not in out and "abc" not in out and "symbol=AAPL" in out
+
+
+def test_webui_broadcast_uses_the_bus_constant():
+    import pathlib
+
+    src = (pathlib.Path(__file__).resolve().parents[2] / "dourmouse" / "webui.py").read_text()
+    assert 'bus.post(sender, "BROADCAST"' not in src
+
+
+
+def test_claude_deny_list_has_no_name_the_cli_rejects():
+    """Finding #181: the CLI exits 1 on a deny rule that matches no known tool; these five did."""
+    from dourmouse import code_backends
+
+    names = set(code_backends._DISALLOWED_NATIVE_TOOLS.split(","))
+    assert not names & {"MultiEdit", "NotebookRead", "LS", "SlashCommand", "REPL"}
+    assert {"Bash", "Write", "Edit", "Read", "Glob", "Grep"} <= names  # the file readers stay denied
