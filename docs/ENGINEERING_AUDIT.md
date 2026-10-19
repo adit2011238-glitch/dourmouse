@@ -6054,3 +6054,9 @@ Fix: a RESEARCH FIRST rule in the base prompt, the orchestrator and research_inf
 
 Honest limits: this is prompt and routing change, so a model can still ignore it (T-7 showed gpt-oss skipping tools); the study agent stays knowledge-first on purpose (owner design); latency rises for factual questions because they now search first. Dry-checked only (classification table, prompt text, 315 targeted tests); not yet seen live because the owner asked for no playback.
 
+### 185 -- Security read-through of the whole code base and security test plan (2026-10-19)
+
+Medium (assessment, no code changed). Four read-only reviewers read about 65,000 lines in four groups (network and auth, agent gates and execution, privacy and detection, Electron and UI). 73 findings: 0 critical, 7 high, 31 medium, 35 low, all in the fix ledger as SEC1-1 to SEC4-11. Highs: file-write protection is a deny-list so a steered model can plant files that run later (SEC2-2, 4, 6); tool scope is not enforced at execution (SEC2-1); the own-server guard checks only the typed URL (SEC2-5); the sentry cannot see root listeners (SEC3-7) and one malformed LaunchAgents plist silently stops every scan (SEC3-9, confirmed by me). The assessment (about 6 of 10 today, 8 reachable) and a seven-layer test design with acceptance gates are in docs/plans/SECURITY_ASSESSMENT_2026-10-19.md.
+
+Honest limits: findings come from model reviewers; two re-verified by me, several reviewer-verified, some from reading only (marked verify live in the plan); no fixes made yet.
+
