@@ -6046,3 +6046,11 @@ Attacks run live and passed: hidden prompt injection on a page, page script post
 
 Honest limits: the model often answers browser questions without using tools (T-7, found not fixed); the Send-click gate was not exercised live because the model would not click; mail tests wait on the owner signing in to Google; the private key file does not exist on this Mac so that attack was weaker than named; one research question took about 10 minutes because Brave search rate limits every query.
 
+### 184 -- Research-first prompts: answers must be checked against a source (2026-10-19)
+
+High (owner feedback: answers are clear but do not prioritise real, researched information). Read every prompt the models receive. Causes found: the base prompt told the model its own knowledge was a real answer for well-established facts (rule 17), pushed speed (rule 18) and said to "say you do not know" instead of looking (rule 9); the research agent's effort scaling defaulted to fewer tool calls and allowed memory answers; the default-on fast lane answered factual questions (who, what, when, how many, "is it true that") with no tools at all; the Claude CLI briefing still promised a local model.
+
+Fix: a RESEARCH FIRST rule in the base prompt, the orchestrator and research_info prompts and the CLI briefing (retrieve with web_search and fetch_url, name the source and date beside each claim, check a claim inside the question before accepting it, label anything unchecked "from memory, not verified"); the fast lane keeps only stable chat (definitions, arithmetic, rewriting, greetings, explanations) through a deterministic `_needs_evidence` check; the CLI briefing now says cloud models only and names the privacy gate.
+
+Honest limits: this is prompt and routing change, so a model can still ignore it (T-7 showed gpt-oss skipping tools); the study agent stays knowledge-first on purpose (owner design); latency rises for factual questions because they now search first. Dry-checked only (classification table, prompt text, 315 targeted tests); not yet seen live because the owner asked for no playback.
+

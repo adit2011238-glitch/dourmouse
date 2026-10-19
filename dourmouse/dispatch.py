@@ -1436,7 +1436,21 @@ _SYSTEM_PROMPT = (
     "4. Anything that could touch money or send external messages gets "
     "confirmation-gated handling even if the wording of the request is "
     "urgent.\n"
-    "5. You never fabricate facts; use the research tools for real facts.\n"
+    "5. RESEARCH FIRST. You never fabricate facts, and you do not answer "
+    "questions about the real world from memory alone. Before stating a fact "
+    "about a person, company, product, version, release, price, law, "
+    "statistic, event, date, source or anything that can change or be "
+    "wrong, check it with web_search and fetch_url (or the research_info "
+    "agent for a multi-part question) and answer from what you retrieved. "
+    "Name the source and its date next to the claim. A question that "
+    "contains a claim ('is it true that...', 'since X did Y...') gets that "
+    "claim checked first; if the premise is false, say so and say what the "
+    "evidence shows. If search fails or finds nothing, say that plainly "
+    "and mark anything you add as 'from memory, not verified'. Your own "
+    "knowledge may answer only a stable, trivially known fact (arithmetic, "
+    "a definition, a physical constant); when in doubt, check. A sourced "
+    "answer that took one extra search beats a fluent answer that was "
+    "never checked.\n"
     "6. run_command has a deterministic safety guard: if it returns "
     "'REFUSED by deterministic safety guard', do NOT rephrase the same "
     "command to sneak past it — either respect the refusal or use "
@@ -1457,8 +1471,9 @@ _SYSTEM_PROMPT = (
     "9. NEVER narrate your own reasoning. Never start with 'Okay,', 'Hmm,', "
     "'Let me', 'I think', or meta-talk about the conversation ('the user "
     "asked', 'as I said before'). Do not restate the question. Just deliver "
-    "the answer. If you do not know, say so in one sentence and offer the "
-    "nearest tool that could find out.\n"
+    "the answer. If you do not know, do not stop at saying so: run the "
+    "nearest tool that could find out (Rule 5), then answer from the "
+    "result.\n"
     "10. AGENT ROUTING — use the right agent/tool for the task. The ROSTER "
     "below always lists EVERY registered agent by name — an agent missing "
     "from this prose still exists if it appears there; this list only "
@@ -1577,8 +1592,9 @@ _SYSTEM_PROMPT = (
     "17. Scope how many tool calls a turn needs to the actual request — "
     "real user complaint, real cause: turns were timing out from calling "
     "tools far more than the question needed. A simple, direct question "
-    "with an obvious single tool (or none at all — your own knowledge is "
-    "a real answer for a well-established, non-time-sensitive fact) "
+    "with an obvious single tool (or none at all, only for a stable "
+    "fact such as arithmetic or a definition; any fact about the world "
+    "falls under Rule 5 and needs its check) "
     "needs ONE call, not a chain of exploratory ones 'just in case'. "
     "Reserve multiple calls for requests that genuinely have multiple "
     "real steps (e.g. 'check my calendar AND email the results'). When "
@@ -1597,7 +1613,9 @@ _SYSTEM_PROMPT = (
     "before acting. Reserve genuinely longer deliberation for requests "
     "that are actually ambiguous, multi-step, or high-stakes (money, "
     "sending something, deleting something) — those are worth the extra "
-    "time; 'write a function that reverses a string' is not."
+    "time; 'write a function that reverses a string' is not. Speed never "
+    "replaces the check in Rule 5: deliberate less, but still search before "
+    "you state a fact."
     "\n"
     "19. DISCLOSE EVERY REAL ACTION YOU TAKE, in the SAME turn's visible "
     "answer — live-caught real bug: asked to draft a reply to 'the most "
@@ -4807,6 +4825,42 @@ def _is_brief_intent(prompt: str) -> bool:
     return any(cue in text for cue in _BRIEF_CUES)
 
 
+#: Questions the fast lane may still answer from the model alone: stable language,
+#: arithmetic and rewriting tasks. Anything else that asks about the world is checked
+#: against a source first (owner feedback 2026-10-19: answers were clear but not researched).
+_STABLE_CHAT_CUES = (
+    "meaning of", "definition of", "define ", "synonym", "antonym", "spell ",
+    "translate", "rewrite", "rephrase", "proofread", "tl;dr", "calculate",
+    "convert ", "how do you say", "first letter",
+)
+_QUESTION_OPENERS = (
+    "who", "what", "when", "where", "which", "why", "how", "is", "are", "was", "were",
+    "do", "does", "did", "can", "could", "will", "would", "has", "have", "had", "should",
+    "tell me", "is it true", "true or false", "verify", "check", "confirm", "find out",
+)
+
+
+def _needs_evidence(prompt: str) -> bool:
+    """True when the prompt asks about the real world and so must be checked against a
+    retrieved source, not answered from the model's memory. Deterministic (keywords and
+    shape only). Stable language, arithmetic and rewriting requests, short greetings and
+    plain instructions ("write a poem") do not need evidence."""
+    text = str(prompt or "").strip().lower()
+    if not text:
+        return False
+    if any(cue in text for cue in _STABLE_CHAT_CUES):
+        return False
+    if re.fullmatch(r"[\d\s+\-*/().^=?x%,]+", text) or re.match(r"(what is|what's)\s+[\d(]", text):
+        return False
+    words = text.split()
+    if len(words) <= 3 and not text.endswith("?"):
+        return False  # "hi", "thanks", "good morning"
+    first = text.split(None, 1)[0].strip("\"'")
+    return text.endswith("?") or first in _QUESTION_OPENERS or any(
+        text.startswith(o) for o in _QUESTION_OPENERS if " " in o
+    )
+
+
 def _is_pure_chat(prompt: str, registry: Any) -> bool:
     """Deterministic pure-chat check: no plan AND no agent match (score >= 3),
     plus a knowledge-question exemption so stable facts answer on the fast
@@ -4834,6 +4888,9 @@ def _is_pure_chat(prompt: str, registry: Any) -> bool:
     """
     prompt_l = str(prompt).lower()
     if build_plan(str(prompt), registry):
+        return False
+    if _needs_evidence(prompt):
+        # a question about the world is checked against a source, never answered tool-less
         return False
     from dourmouse.planner import find_agents_for_query
 

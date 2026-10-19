@@ -1119,7 +1119,7 @@ class TestModelOverride:
         assert brain_events[0]["backend"] == "ollama"
         assert brain_events[0]["local"] is True
 
-    def test_fast_lane_takes_knowledge_questions(self, monkeypatch):
+    def test_fast_lane_takes_stable_chat_not_factual_questions(self, monkeypatch):
         """A stable-fact question ("what is the tallest mountain...") answers
         in the fast lane with NO tools even when a research agent nominally
         matches — web research adds seconds for facts the model already knows.
@@ -1130,9 +1130,14 @@ class TestModelOverride:
         from dourmouse.general_roster import build_general_registry
 
         registry = build_general_registry()
-        assert _is_pure_chat("what is the tallest mountain on earth", registry)
-        assert _is_pure_chat("who is the current pope", registry)
+        # 2026-10-19 owner feedback: a question about the world is checked
+        # against a source, so it is no longer a tool-less fast-lane turn
+        assert not _is_pure_chat("what is the tallest mountain on earth", registry)
+        assert not _is_pure_chat("who is the current pope", registry)
+        assert not _is_pure_chat("Is it true that Python 3.15 removes the GIL?", registry)
+        # stable language, arithmetic and explanations stay on the fast lane
         assert _is_pure_chat("explain how dns works", registry)
+        assert _is_pure_chat("define ephemeral", registry)
         # live-data intent must still escalate even in knowledge phrasing
         assert not _is_pure_chat("what is the weather in London today", registry)
         assert not _is_pure_chat("what is the stock price of AAPL", registry)
@@ -1141,7 +1146,7 @@ class TestModelOverride:
         # integration: a knowledge question routes to the fast model and
         # carries no tools at all
         client = FakeClient([_FakeResponse(_FakeMessage(content="Everest."))])
-        run_dispatch("what is the tallest mountain on earth", registry, client=client)
+        run_dispatch("explain how dns works", registry, client=client)
         call = client.chat.completions.calls[0]
         assert call["model"] != "qwen3:4b"  # FIX-P H-PRIV-5: no small local model any more
         assert not call.get("tools")

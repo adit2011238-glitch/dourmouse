@@ -96,16 +96,27 @@ def test_design_3d_prompt_is_honest_about_scope() -> None:
 
 
 def test_research_info_scopes_effort_to_the_request() -> None:
-    # backlog #11, real user complaint: the research agent "uses too many
-    # tool calls and often overcomplicates" simple requests. Regression
-    # lock for the fix — a real EFFORT SCALING section with a concrete
-    # simple-vs-complex example, not just vague "be efficient" advice.
+    # backlog #11 asked for effort scaled to the request; the 2026-10-19 owner
+    # feedback (answers clear but not researched) removed the "answer from
+    # knowledge" escape: depth scales, the check does not.
     prompt = AGENT_SYSTEM_PROMPTS["research_info"]
     assert "EFFORT SCALING" in prompt
-    assert "0-1 tool" in prompt
     lowered = prompt.lower()
-    assert "boiling point of water" in lowered  # the simple-case example
-    assert "diverge" in lowered  # the genuine-multi-step-case example
+    assert "at least one retrieved source" in lowered
+    assert "do not answer a factual question from memory" in lowered
+    assert "check the premise first" in lowered
+    assert "diverge" not in lowered or "multi-step research" in lowered
+
+
+def test_research_first_is_in_the_base_and_orchestrator_prompts() -> None:
+    from dourmouse.dispatch import _SYSTEM_PROMPT
+
+    assert "RESEARCH FIRST" in _SYSTEM_PROMPT
+    assert "from memory, not verified" in _SYSTEM_PROMPT
+    # the old escape hatches that let a fluent unchecked answer through
+    assert "your own knowledge is a real answer" not in _SYSTEM_PROMPT
+    assert "offer the nearest tool" not in _SYSTEM_PROMPT
+    assert "RESEARCH FIRST" in AGENT_SYSTEM_PROMPTS["orchestrator"]
 
 
 def test_rnd_prompt_treats_fetched_content_as_untrusted() -> None:

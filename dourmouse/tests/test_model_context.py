@@ -37,10 +37,17 @@ class TestOrchestratorPreamble:
         for tool in ("gmail_search", "drive_search", "delegate_to_models"):
             assert tool in text, f"{tool} is missing from the briefing"
 
-    def test_it_states_the_privacy_routing_rule(self):
+    def test_it_states_the_privacy_gate_and_cloud_only_rule(self):
+        # the app is cloud-only now (PRIV): the briefing must not promise a local model
         text = claude_orchestrator_preamble().lower()
-        assert "privacy-first" in text
-        assert "local model" in text
+        assert "privacy gate" in text
+        assert "cloud models only" in text
+        assert "stays on the local model" not in text
+
+    def test_it_tells_the_model_to_research_first(self):
+        text = claude_orchestrator_preamble()
+        assert "RESEARCH FIRST" in text
+        assert "from memory, not verified" in text
 
     def test_it_forbids_presenting_a_failure_as_an_answer(self):
         assert "NOT CONFIGURED" in claude_orchestrator_preamble()
