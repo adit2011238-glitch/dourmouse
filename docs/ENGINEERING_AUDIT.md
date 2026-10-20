@@ -6060,3 +6060,17 @@ Medium (assessment, no code changed). Four read-only reviewers read about 65,000
 
 Honest limits: findings come from model reviewers; two re-verified by me, several reviewer-verified, some from reading only (marked verify live in the plan); no fixes made yet.
 
+### 186 -- COMMAND CENTER: live full chain-of-thought for every agent, plus the full security sentry (2026-10-21)
+
+Medium (owner request: see the AI sentries' full chain of thought live, a command centre, everything). Before this, the only always-on live view (ActivityTracker's agent_activity) was status only (idle/computing/auth, a one-line "last tool"), the per-request SSE stream carried full reasoning but only reached the one browser tab that started that turn, and a background goal or routine produced no live trace anywhere until it finished.
+
+Fix: dispatch.py's _emit_event now fans every dispatch event (thinking_delta included) out to a new global hub (webui.py's _LIVE_EVENTS_HUB, set by run_server) as an "agent_trace" event, tagged with the real agent and call_id, BEFORE the event_sink-is-None early return -- so a background run with no requesting tab still appears. Careful not to mutate the real transcript entry for a sink-less, ctx-less call (several real callers compare it for exact equality): the broadcast uses a tagged copy in that case, the real entry only when a sink already existed to tag it for (unchanged from before).
+
+A new COMMAND CENTER screen (ui/assets/os/screens/command_center/) renders this live, full text, grouped into one lane per call_id (capped at 8 concurrent lanes, generous per-lane text caps, oldest evicted first, never the lane just touched), seeded once from GET /api/activity. The right column renders the security sentry's full, uncollapsed analyst text (summary, every point's full meaning and first step) and every finding, fed by the existing security_* events the SECURITY screen already uses -- this screen just does not truncate to 160 characters the way that one's own activity line deliberately does.
+
+Added to the registry as a second screen beyond the mockup's eighteen (same deliberate exception as APPS and OFFICE); the mockup's own static page was not hand-extended for it, since its whole point is live server-pushed data a static page cannot show -- the registry test documents this explicitly instead.
+
+Verification: 4 new dispatch.py tests (broadcasts with no sink, a missing hub is a no-op, a raising hub never breaks dispatch, the real agent/call_id reach the hub with a sink); 8 node-executed screen tests (lane ordering, full text kept not truncated, assistant_text marks a lane done, tool_use/tool_result both kept, a ctx-less entry gets a per-agent lane instead of vanishing, the lane cap evicts the oldest never the one just touched, the screen subscribes to both event families and never truncates the analyst, no POST/fetch anywhere -- read only). Full suite run in two halves after this change.
+
+Honest limits: the lane feed is push-only (events.js's own documented "replays nothing" contract) -- opening the screen after a run already finished shows nothing for it; the activity seed only covers runs already in ActivityTracker's snapshot at mount time. Not yet seen live in the real app (built and tested, not yet exercised through a real multi-agent run with the app open).
+

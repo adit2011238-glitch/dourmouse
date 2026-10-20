@@ -4632,3 +4632,69 @@ def test_cloud_routing_uses_the_configured_cloud_model(monkeypatch):
     brain = [e for e in events if e.get("type") == "brain"]
     assert brain and brain[0]["model"] == "gpt-oss:120b"
     assert sent and set(sent) == {"gpt-oss:120b"}
+
+
+class TestCommandCenterLiveTrace:
+    """Finding #186: every dispatch event fans out to a global command-center
+    hub (dourmouse.webui._LIVE_EVENTS_HUB), independent of whether this run
+    has its own requesting event_sink at all -- a background goal or routine
+    becomes visible live, not just the final result."""
+
+    def _registry(self):
+        return _test_registry()
+
+    def test_broadcasts_even_with_no_event_sink(self, monkeypatch):
+        import dourmouse.webui as webui_module
+        from dourmouse.dispatch import run_dispatch
+
+        broadcasts: list[dict] = []
+        fake_hub = type("H", (), {"broadcast": staticmethod(broadcasts.append)})()
+        monkeypatch.setattr(webui_module, "_LIVE_EVENTS_HUB", fake_hub)
+        client = FakeClient([_FakeResponse(_FakeMessage(content="Hello."))])
+
+        report = run_dispatch("Say hi", self._registry(), client=client)  # no event_sink
+
+        assert report["transcript"] == [{"type": "assistant_text", "text": "Hello."}]  # untouched
+        kinds = [b["type"] for b in broadcasts]
+        assert "agent_trace" in kinds
+        traced = [b["entry"] for b in broadcasts if b["type"] == "agent_trace"]
+        assert any(e.get("type") == "assistant_text" and e.get("agent") for e in traced)
+
+    def test_a_missing_hub_is_a_silent_no_op(self, monkeypatch):
+        import dourmouse.webui as webui_module
+        from dourmouse.dispatch import run_dispatch
+
+        monkeypatch.setattr(webui_module, "_LIVE_EVENTS_HUB", None)
+        client = FakeClient([_FakeResponse(_FakeMessage(content="Hello."))])
+        report = run_dispatch("Say hi", self._registry(), client=client)  # must not raise
+        assert report["final_text"] == "Hello."
+
+    def test_a_raising_hub_never_breaks_dispatch(self, monkeypatch):
+        import dourmouse.webui as webui_module
+        from dourmouse.dispatch import run_dispatch
+
+        def _boom(_payload):
+            raise RuntimeError("down")
+
+        fake_hub = type("H", (), {"broadcast": staticmethod(_boom)})()
+        monkeypatch.setattr(webui_module, "_LIVE_EVENTS_HUB", fake_hub)
+        client = FakeClient([_FakeResponse(_FakeMessage(content="Hello."))])
+        report = run_dispatch("Say hi", self._registry(), client=client)
+        assert report["final_text"] == "Hello."
+
+    def test_the_tag_carries_the_real_agent_and_call_id_with_a_sink(self, monkeypatch):
+        import dourmouse.webui as webui_module
+        from dourmouse.dispatch import run_dispatch_messages
+
+        broadcasts: list[dict] = []
+        fake_hub = type("H", (), {"broadcast": staticmethod(broadcasts.append)})()
+        monkeypatch.setattr(webui_module, "_LIVE_EVENTS_HUB", fake_hub)
+        client = FakeClient([_FakeResponse(_FakeMessage(content="ok"))])
+        events: list[dict] = []
+
+        run_dispatch_messages(
+            [{"role": "user", "content": "hi"}], self._registry(), client=client,
+            event_sink=events.append,
+        )
+        traced_agents = {b["entry"].get("agent") for b in broadcasts if b["type"] == "agent_trace"}
+        assert traced_agents  # at least one real agent name reached the global hub

@@ -1163,3 +1163,4 @@ and a real build sequence, not just a requirement statement:
 - [x] Finding #183 2026-10-16 -- AI-as-user test day: sign-in fallback, research pipeline extraction, security download listing (T-1 to T-9).
 - [x] Finding #184 2026-10-19 -- research-first prompts and fast lane narrowed so factual questions are checked against a source (P-1).
 - [x] Finding #185 2026-10-19 -- security read of the whole code base: 73 findings (7 high) and a seven-layer security test plan; fixes planned in waves S1 to S3.
+- [x] Finding #186 2026-10-21 -- COMMAND CENTER screen: global agent_trace broadcast (every agent's full live reasoning, even background runs), full uncollapsed security sentry analysis.

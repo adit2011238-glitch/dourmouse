@@ -2807,6 +2807,38 @@ def _resolve_brain_model(
     return fast, False
 
 
+def _broadcast_live_trace(entry: dict[str, Any]) -> None:
+    """COMMAND CENTER (finding #186): fan this event out to EVERY connected
+    /api/events client, as its own ``agent_trace`` envelope -- independent of
+    whether THIS run has its own requesting browser tab listening at all.
+
+    A background goal, a scheduled routine, a nested delegate_task run, or a
+    chat tab the owner is not currently looking at all call _emit_event with
+    event_sink=None or with a sink nobody is reading right now -- before
+    this, that work produced no live trace anywhere; only the final result
+    (or ActivityTracker's own status-only idle/computing/auth line) was ever
+    visible. This is intentionally a SEPARATE, lightweight path from
+    ActivityTracker (status board) and from the per-request SSE stream
+    (one tab's own answer rendering): it exists only so a human watching the
+    COMMAND CENTER screen can see full reasoning and tool activity for every
+    agent run on the machine, live, the moment it happens.
+
+    Lazy-imports webui.py (dispatch.py must never import it at module level
+    -- webui.py already imports dispatch.py) and reads its current hub fresh
+    every call, never caching it, so a hermetic test's run_server() (which
+    never sets _LIVE_EVENTS_HUB) is completely unaffected. A missing hub, or
+    any failure reaching it, is a silent no-op -- the same "a pure observer
+    must never break dispatch" rule this function's caller already follows."""
+    try:
+        from dourmouse import webui as _webui
+
+        hub = getattr(_webui, "_LIVE_EVENTS_HUB", None)
+        if hub is not None:
+            hub.broadcast({"type": "agent_trace", "entry": entry})
+    except Exception:
+        pass
+
+
 def _emit_event(
     event_sink: Callable[[dict[str, Any]], None] | None,
     entry: dict[str, Any],
@@ -2827,6 +2859,19 @@ def _emit_event(
     (...)``/``entry["type"]`` keeps working unchanged; nothing in this
     codebase asserts exact dict equality on a transcript/event entry.
     """
+    # Finding #186: broadcast a TAGGED COPY regardless of whether a per-
+    # request sink exists at all -- see _broadcast_live_trace's own
+    # docstring for why this must fire even when event_sink is None (a
+    # background goal/routine/unwatched tab). This never mutates `entry`
+    # itself except in the one case the original code already did (below,
+    # gated on event_sink is not None): several real callers compare
+    # `entry`/`transcript` for exact equality with NO ctx tag at all when
+    # no sink was given, and that contract must survive unchanged.
+    agent = (ctx.forced_agent or "orchestrator") if ctx is not None else entry.get("agent", "orchestrator")
+    trace = {**entry, "agent": entry.get("agent", agent)}
+    if ctx is not None:
+        trace.setdefault("call_id", ctx.call_id)
+    _broadcast_live_trace(trace)
     if event_sink is None:
         return
     if ctx is not None:

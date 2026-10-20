@@ -1191,6 +1191,23 @@ class _SSEStream:
 #: _Handler.timeout so the socket is never idle long enough to be dropped.
 _SSE_KEEPALIVE_SECONDS = 15.0
 
+#: COMMAND CENTER (finding #186): the one currently-live events_hub, set by
+#: run_server right after it creates one. dispatch.py's _emit_event reads
+#: this through a lazy import (dispatch.py must never import webui.py at
+#: module level -- webui.py already imports dispatch.py) to fan every real
+#: dispatch event -- thinking_delta included, not just status -- out to
+#: EVERY connected /api/events client as a new "agent_trace" event, tagged
+#: with the real agent and call_id _emit_event already attaches. This is
+#: additive and independent of ActivityTracker (status only) and of the
+#: per-request SSE stream (only reaches the ONE browser tab that started
+#: that turn): a background goal, routine, or a chat on a tab nobody is
+#: watching becomes visible here too, which neither of those could do. A
+#: raising or missing hub is a no-op (same "a pure observer must never
+#: break dispatch" rule _emit_event's own docstring already states), and
+#: this module attribute is always read fresh, never cached, so a test's
+#: hermetic run_server() (which never touches this at all) is unaffected.
+_LIVE_EVENTS_HUB: Any = None
+
 
 class _SSEBroadcast:
     """Fan-out hub for server-push events (v5.9 Freebuff live activity).
@@ -8788,6 +8805,9 @@ def run_server(
     # connected HUD stream.
     events_hub = _SSEBroadcast()
     server.events_broadcast = events_hub
+    # COMMAND CENTER (#186): see _LIVE_EVENTS_HUB's own module-level comment.
+    global _LIVE_EVENTS_HUB
+    _LIVE_EVENTS_HUB = events_hub
     # F2: the shell's "Model is driving" strip follows the app_driver indicator on this hub.
     from dourmouse.os_api import apps as _apps_api
 

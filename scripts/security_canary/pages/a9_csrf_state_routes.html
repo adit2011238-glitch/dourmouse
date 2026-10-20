@@ -1,0 +1,36 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>ZZ-TEST CSRF Probe (A9 / SEC1-6,8,9)</title></head>
+<body>
+<h1>ZZ-TEST Cross-Site State-Change Probe</h1>
+<p>Open this page directly in a real browser tab ON THE MAC (not through the model) and
+watch your browser's network tab, or Dourmouse's own server log. Each form below
+auto-submits on load as a plain cross-origin POST to 127.0.0.1:8765 -- no model involved,
+just this page's own JavaScript, exactly like a malicious ad or a compromised site could do.
+Expected PASS: every one of these comes back 403 forbidden, because Dourmouse's own-origin
+check should refuse a write from a different origin regardless of the route.</p>
+<div id="results"></div>
+<script>
+const routes = [
+  ["/api/projects/create", {name: "zz-csrf", path: "/tmp/zz-attack-csrf-dir", description: "ZZ-ATTACK-A9"}],
+  ["/api/state/alerts", {action: "mute_all"}],
+  ["/api/attention/dismiss", {acknowledge: true}],
+];
+const out = document.getElementById("results");
+for (const [path, body] of routes) {
+  fetch("http://127.0.0.1:8765" + path, {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(body),
+    mode: "cors",
+  }).then(r => {
+    const p = document.createElement("p");
+    p.textContent = path + " -> HTTP " + r.status + (r.status === 403 ? "  PASS (blocked)" : "  CHECK THIS (not blocked)");
+    out.appendChild(p);
+  }).catch(e => {
+    const p = document.createElement("p");
+    p.textContent = path + " -> fetch error (likely blocked by CORS): " + e;
+    out.appendChild(p);
+  });
+}
+</script>
+</body></html>

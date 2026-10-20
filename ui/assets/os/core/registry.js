@@ -25,6 +25,10 @@ export const SCREENS = [
   S('ATLAS', false, 'world monitor', () => import('../screens/atlas/index.js')),
   S('NEWS', true, 'live headlines', () => import('../screens/news/index.js')),
   S('SECURITY', false, 'defensive posture', () => import('../screens/security/index.js')),
+  /* Owner request 2026-10-21: see every agent's full live reasoning and the
+     security sentry's full analysis, live, on one screen (finding #186).
+     Not one of the mockup's eighteen, same deliberate exception as OFFICE. */
+  { ...S('COMMAND_CENTER', false, 'live trace of every agent and the security sentry', () => import('../screens/command_center/index.js')), label: 'Command Center' },
   S('SETTINGS', false, 'preferences', () => import('../screens/settings/index.js')),
   /* F2: not one of the mockup's eighteen. It has no ICON entry, so its glyph is a raw path (four tiles). */
   { ...S('APPS', false, 'app driving', () => import('../screens/apps/index.js')), icon: 'M4 4h6.5v6.5H4zM13.5 4H20v6.5h-6.5zM4 13.5h6.5V20H4zM13.5 13.5H20V20h-6.5z' },
@@ -52,6 +56,7 @@ export const DOCK = [
   ['OFFICE', 'Office'],
   ['RESEARCH', 'Research'],
   ['SECURITY', 'Security'],
+  ['COMMAND_CENTER', 'Command Center'],
   ['BROWSER', 'Browser'],
   ['MEDIA', 'Media'],
   ['WIKI', 'Wiki'],
