@@ -676,7 +676,7 @@ def _log(kind: str, text: str) -> None:
 # --------------------------------------------------------------------------- #
 
 
-async def _ensure_browser(quiet: bool = False) -> Any:
+async def _ensure_browser_raw(quiet: bool = False) -> Any:
     """The page the tools act on: the owner's active pane tab when the Electron shell is there,
     otherwise a Chrome launched here (once per process). ``quiet`` skips the "following the
     owner" notice for a caller that tells the model something more specific itself."""
@@ -768,6 +768,62 @@ async def _ensure_browser(quiet: bool = False) -> Any:
     _PAGE_MODE = "headless"
     _LAUNCH_ERROR = None  # a fresh launch just succeeded — don't keep reporting the old one
     _log("engine", "Chrome ready (headless)" if headless else "Chrome ready (visible)")
+    return page
+
+
+def _is_own_server_url(url: str) -> bool:
+    """True when ``url`` is Dourmouse's own server, Electron debug port or pane bridge, in any
+    spelling a browser accepts (localhost, a trailing dot, 127.1, a decimal or hex address, an
+    IPv6 loopback). Finding SEC2-5 (confirmed live 2026-10-23): the typed-address gate only sees
+    the address the model was given, so a page on any local port that answers with a redirect
+    landed the model's browser on the app itself, and the model read and relayed the owner's
+    security dashboard. The check has to be made on where the tab IS, not where it was sent."""
+    import ipaddress
+    import socket
+    import urllib.parse
+
+    from dourmouse.dispatch import _own_ports
+
+    try:
+        parts = urllib.parse.urlsplit(str(url or "").strip())
+        host = (parts.hostname or "").rstrip(".").lower()
+        port = parts.port
+    except ValueError:
+        return False
+    if parts.scheme not in ("http", "https") or not host:
+        return False
+    if port is None:
+        port = 443 if parts.scheme == "https" else 80
+    if port not in _own_ports():
+        return False
+    if host == "localhost" or host.endswith(".localhost"):
+        return True
+    try:
+        ip = ipaddress.ip_address(host.strip("[]").split("%", 1)[0])
+        return ip.is_loopback or ip.is_unspecified
+    except ValueError:
+        pass
+    try:
+        return ipaddress.IPv4Address(socket.inet_aton(host)).is_loopback
+    except (OSError, ValueError):
+        return False
+
+
+_OWN_SERVER_REFUSAL = (
+    "REFUSED: this tab is Dourmouse's own server or browser-control port (it got here by a link "
+    "or redirect). A page the model drives never reads or acts on the app itself, because it "
+    "holds the owner's data and buttons. Nothing on it was read. Use browser_open to go to a "
+    "different address."
+)
+
+
+async def _ensure_browser(quiet: bool = False, allow_own: bool = False) -> Any:
+    """The page the tools act on, refusing when that page is the app's own server (SEC2-5).
+    ``allow_own`` is for the two tools that navigate away (browser_open, browser_back) and for
+    internal probes that read nothing back to the model."""
+    page = await _ensure_browser_raw(quiet=quiet)
+    if not allow_own and _is_own_server_url(getattr(page, "url", "") or ""):
+        raise RuntimeError(_OWN_SERVER_REFUSAL)
     return page
 
 
@@ -1256,6 +1312,8 @@ async def _extract_by_id(page: Any, num: int) -> str:
 
 async def _page_summary(page: Any, max_elems: int = 60) -> str:
     """Readable state of the current page: URL, title, tab, interactive elements with ids."""
+    if _is_own_server_url(getattr(page, "url", "") or ""):
+        return _OWN_SERVER_REFUSAL  # SEC2-5: never read the app itself back to the model
     try:
         title = await page.title()
     except Exception:  # noqa: BLE001
@@ -1340,7 +1398,7 @@ async def _settle_after_action(page: Any, mark: dict[str, Any]) -> Any:
             if data.get("active") != before.get("active") or ids != before.get("ids") or page.is_closed():
                 opened = sorted(i for i in ids - before.get("ids", frozenset()) if i is not None)
                 tabs_by_id = {t.get("id"): t for t in (data.get("tabs") or []) if isinstance(t, dict)}
-                new_page = await _ensure_browser(quiet=True)
+                new_page = await _ensure_browser(quiet=True, allow_own=True)
                 if opened and data.get("active") in opened:
                     _note(f"your action opened {_tab_label(tabs_by_id[data['active']])} and the agent switched to it (the owner sees it too).")
                 elif opened:
@@ -1351,7 +1409,7 @@ async def _settle_after_action(page: Any, mark: dict[str, Any]) -> Any:
                     _note(f"the tab the owner is viewing changed while the action ran: now on {_tab_label(tabs_by_id.get(data.get('active'), {'id': data.get('active')}))}.")
                 return new_page
         if page.is_closed():
-            return await _ensure_browser()
+            return await _ensure_browser(allow_own=True)
         return page
     # A separate headless Chrome: a popup is a new page in the context.
     for delay in _POPUP_POLL_SECONDS:
@@ -1368,7 +1426,7 @@ async def _settle_after_action(page: Any, mark: dict[str, Any]) -> Any:
             _note(f"your action opened a new tab ({newest.url or 'blank'}); the agent switched to it.")
             return newest
     if page.is_closed():
-        return await _ensure_browser()
+        return await _ensure_browser(allow_own=True)
     return page
 
 
@@ -1745,7 +1803,7 @@ def click_gate(arguments: dict[str, Any]) -> tuple[str, str] | None:
         return None
 
     async def _probe() -> tuple[dict[str, Any] | None, str, str]:
-        page = await _ensure_browser(quiet=True)
+        page = await _ensure_browser(quiet=True, allow_own=True)
         return await _click_facts(page, target), page.url, await _safe_title(page)
 
     try:
@@ -1846,7 +1904,7 @@ def press_gate(arguments: dict[str, Any]) -> tuple[str, str] | None:
     if _electron_pane_configured() is not None or (_PAGE is not None and not _PAGE.is_closed()):
 
         async def _probe() -> tuple[dict[str, Any], str, str]:
-            page = await _ensure_browser(quiet=True)
+            page = await _ensure_browser(quiet=True, allow_own=True)
             return await _focus_facts(page), page.url, await _safe_title(page)
 
         try:
@@ -1907,7 +1965,7 @@ def browser_open(arguments: dict[str, Any]) -> str:
         )
 
     async def _go():
-        page = await _ensure_browser()
+        page = await _ensure_browser(allow_own=True)
         async with _acting(page, "open"):
             try:
                 await page.goto(url, timeout=30_000, wait_until="domcontentloaded")
@@ -1916,6 +1974,13 @@ def browser_open(arguments: dict[str, Any]) -> str:
                 raise RuntimeError(
                     f"BROWSER OPEN FAILED: {type(exc).__name__}: {exc} (url={url})"
                 ) from exc
+            if _is_own_server_url(page.url):
+                # a redirect (or a page's own script) took the tab to the app: leave it
+                # blank rather than showing it, and tell the model nothing was read
+                _log("open", f"{url} landed on the app's own server; tab blanked")
+                with contextlib.suppress(Exception):
+                    await page.goto("about:blank", timeout=10_000)
+                return _OWN_SERVER_REFUSAL
         return await _page_summary(page)
 
     _log("open", url)
@@ -2237,7 +2302,7 @@ def browser_wait(arguments: dict[str, Any]) -> str:
 
 def browser_back(arguments: dict[str, Any]) -> str:
     async def _back():
-        page = await _ensure_browser()
+        page = await _ensure_browser(allow_own=True)
         async with _acting(page, "back"):
             try:
                 await page.go_back(timeout=15_000)

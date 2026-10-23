@@ -186,7 +186,7 @@ def pane(shell, monkeypatch):
     monkeypatch.setattr(ba, "_PAGE_MODE", "pane")
     monkeypatch.setattr(ba, "_PANE_SEEN", {"active": shell.t1, "ids": frozenset({shell.t1, shell.t2})})
 
-    async def fake_ensure(quiet=False):
+    async def fake_ensure(quiet=False, allow_own=False):
         return page
 
     async def fake_world(pg, op, params, *, fresh_ok, api="__dmAgent"):
