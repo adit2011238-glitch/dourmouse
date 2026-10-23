@@ -18,7 +18,8 @@ Dourmouse's own port, a cross-site POST, a local-service URL variant). See
 pages/index.html for the list and what a PASS looks like for each one.
 
 Usage:
-    python3 server.py [port]            # default port 8799
+    python3 server.py [port] [host]     # default port 8799, host 0.0.0.0
+    python3 server.py 8799 127.0.0.1    # same-Mac test: reachable from this Mac only
 
 Then on the Mac, point Dourmouse's BROWSER at http://<this box's LAN IP>:<port>/
 (find the IP with `ifconfig`/`ipconfig` on this box) and ask the model to
@@ -106,9 +107,10 @@ class CanaryHandler(http.server.SimpleHTTPRequestHandler):
 
 def main() -> None:
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8799
+    host = sys.argv[2] if len(sys.argv) > 2 else "0.0.0.0"
     LOG.unlink(missing_ok=True)
-    with socketserver.TCPServer(("0.0.0.0", port), CanaryHandler) as httpd:
-        print(f"Security canary server on 0.0.0.0:{port}")
+    with socketserver.TCPServer((host, port), CanaryHandler) as httpd:
+        print(f"Security canary server on {host}:{port}")
         print(f"Pages dir: {PAGES}")
         print(f"Log file:  {LOG}")
         print("On the Mac's LAN, this box's address is whatever `ifconfig`/`ipconfig` shows.")
