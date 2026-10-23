@@ -8,7 +8,7 @@ the fake/throwaway items named below.
 ## 0. Before you start
 - Pick the attacker box (your laptop or desktop). It needs Python 3 only, no installs.
 - Find its LAN IP (`ifconfig` on Mac/Linux, `ipconfig` on Windows).
-- Find the Mac's LAN IP too (`ifconfig | grep "inet "` -- this Mac is 192.168.1.54
+- Find the Mac's LAN IP too (`ifconfig | grep "inet "` -- this Mac was 172.16.1.165 on 2026-10-23, it was 192.168.1.54 before, so re-check
   at time of writing, but re-check, it can change).
 - Make sure both devices are on the same network (same Wi-Fi/LAN).
 - The real Dourmouse app should already be running on the Mac as normal.
