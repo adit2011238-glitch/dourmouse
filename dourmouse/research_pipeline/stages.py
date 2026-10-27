@@ -455,6 +455,7 @@ def run_full_pipeline(
     *,
     max_sources_per_sub_question: int = 3,
     skipped: list[str] | None = None,
+    checkpoint: Any = None,
     **dispatch_kwargs: Any,
 ) -> ResearchRecord:
     """The real multi-source/multi-sub-question orchestration loop -- the
@@ -496,9 +497,18 @@ def run_full_pipeline(
     # yet and this run has not tried, so a pre-discovered source is used.
     attempted: set[int] = set()
     for sub_question_index in range(len(record.plan)):
-        discover_sources(
-            record, registry, sub_question_index=sub_question_index, **dispatch_kwargs
-        )
+        try:
+            discover_sources(
+                record, registry, sub_question_index=sub_question_index, **dispatch_kwargs
+            )
+        except Exception as exc:  # noqa: BLE001 - STRESS1-14: one failed search must not discard the rest of a long run
+            if skipped is not None:
+                skipped.append(f"discovery for sub-question {sub_question_index + 1} failed: {str(exc)[:160]}")
+            if checkpoint is not None:
+                checkpoint()
+            continue
+        if checkpoint is not None:
+            checkpoint()  # sources found so far survive a killed run
         cited = {c.url for c in record.claims}
         candidates = [
             i for i, u in enumerate(record.sources) if u not in cited and i not in attempted
@@ -511,12 +521,14 @@ def run_full_pipeline(
                     source_index=source_index, sub_question_index=sub_question_index,
                     **dispatch_kwargs,
                 )
-            except ValueError as exc:
+            except Exception as exc:  # noqa: BLE001 - a rate limit, timeout or network error is a skipped source too
                 # one bad source must never block the rest of the real run,
                 # but the reason is kept so a zero-claim run can say why
                 if skipped is not None:
                     skipped.append(str(exc))
                 continue
+            if checkpoint is not None:
+                checkpoint()  # every verified claim is on disk before the next source starts
     return record
 
 

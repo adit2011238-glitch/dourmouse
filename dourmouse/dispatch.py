@@ -4885,6 +4885,9 @@ _QUESTION_OPENERS = (
 )
 
 
+_URL_IN_PROMPT = re.compile(r"https?://\S+", re.IGNORECASE)
+
+
 def _needs_evidence(prompt: str) -> bool:
     """True when the prompt asks about the real world and so must be checked against a
     retrieved source, not answered from the model's memory. Deterministic (keywords and
@@ -5173,6 +5176,27 @@ def _run_dispatch_loop(
             # its own real Claude escalation matters most.
             if matches and _is_heavy_workflow_agent(matches[0]["name"]):
                 plan_agents = {matches[0]["name"]}
+        # CAP1-1 (found 2026-10-27, confirmed on the real roster): the RESEARCH FIRST rule says to
+        # check every real-world fact with web_search and fetch_url, but tools are only attached
+        # for agents that score 3 or more, and an ordinary question scores nothing ("who is the
+        # current UK prime minister" -> browser 2.8, so NO tools; "is it true that Python 3.15
+        # removes the GIL" -> the coding agent). The rule was inert exactly where it matters. So a
+        # prompt that needs evidence, or that carries a link to read, always gets the research
+        # agent's tools too, unless an agent that already fetches live information is attached.
+        _live_fetchers = {"research_info", "news", "worldmonitor", "rnd"}
+        # an operational request (the Mac, mail, calendar, files, apps, tasks) is not a fact lookup:
+        # "how much free disk space do I have" starts with "how" but needs the system agent, and
+        # carrying 20 more tool definitions on every such turn is real latency and cost
+        _operational = {"system", "mail", "comms", "scheduling", "admin_ops", "apps", "tasks", "goals",
+                        "memory", "docs", "google_workspace", "music", "messenger"}
+        if (
+            not ctx.forced_agent
+            and "research_info" in registry.subagent_names
+            and not (plan_agents & _live_fetchers)
+            and not (plan_agents & _operational)
+            and (_needs_evidence(str(last_user)) or _URL_IN_PROMPT.search(str(last_user)))
+        ):
+            plan_agents = set(plan_agents) | {"research_info"}
     scoped_tools = (
         _scoped_tool_specs(
             registry,

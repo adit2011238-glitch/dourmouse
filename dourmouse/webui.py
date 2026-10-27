@@ -46,7 +46,9 @@ import os
 import re
 import secrets
 import select
+import socket
 import sys
+import queue
 import threading
 import time
 import traceback
@@ -465,8 +467,27 @@ class _PendingConfirmation:
         self.answered = answered
         self._event.set()
 
-    def wait(self) -> bool:
-        self._event.wait(_CONFIRM_TIMEOUT_SECONDS)
+    def wait(self, should_stop: Callable[[], bool] | None = None) -> bool:
+        """Block until the owner answers, the timeout passes, or the window that asked has gone.
+        STRESS1-2 (2026-10-27): this used to be one 300 s wait that ignored a closed window, while
+        the chat thread held the session lock, so closing the window with a card open froze every
+        other chat for five minutes per gated call. A card nobody can see is a decline."""
+        deadline = time.monotonic() + _CONFIRM_TIMEOUT_SECONDS
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            if self._event.wait(min(1.0, remaining)):
+                return self._approved
+            if should_stop is not None:
+                try:
+                    gone = bool(should_stop())
+                except Exception:  # noqa: BLE001 - a broken probe must never approve or hang a card
+                    gone = False
+                if gone:
+                    self.answered = False
+                    self._approved = False
+                    return False
         return self._approved
 
 
@@ -499,6 +520,11 @@ class WebConfirmationGate:
 
     def set_emit(self, emit: Callable[[dict[str, Any]], None]) -> None:
         self._emit = emit
+        self._should_stop = None  # the next set_should_stop call (same turn) installs the window probe
+
+    def set_should_stop(self, probe: Callable[[], bool] | None) -> None:
+        """STRESS1-2: a predicate that is True once the window that is showing a card has gone."""
+        self._should_stop = probe
 
     def __call__(self, prompt_text: str) -> bool:
         # 2026-09-14 (live-caught, user-directed): a real, explicit,
@@ -534,7 +560,7 @@ class WebConfirmationGate:
             event["details_id"] = details_id
         try:
             self._emit(event)
-            approved = pending.wait()
+            approved = pending.wait(getattr(self, "_should_stop", None))
         finally:
             _drop_confirmation_details(details_id)
         with self._lock:
@@ -562,7 +588,7 @@ class WebConfirmationGate:
         }
         try:
             self._emit(event)
-            approved = pending.wait()
+            approved = pending.wait(getattr(self, "_should_stop", None))
         finally:
             with self._lock:
                 self._pending.pop(confirm_id, None)
@@ -1168,6 +1194,58 @@ class _SSEStream:
                 self.client_gone = True  # client went away; loop continues harmlessly,
                 # but should_stop() can now see it and end the dispatch run early
 
+    #: Events waiting for one slow /api/events client. A client that stops reading (a
+    #: sleeping laptop, a hidden window, a hung renderer) must never hold up the agent
+    #: thread that produced the event (stress finding ST-1, 2026-10-27: one non-reading
+    #: client blocked a broadcast for the whole 60 s socket timeout, then stayed
+    #: registered so every later event stalled again). Past this many waiting events the
+    #: newest are dropped for that client only.
+    _OUTBOX_CAP = 1000
+
+    def offer(self, payload: dict[str, Any]) -> bool:
+        """Queue one event for this client without ever blocking the caller. A writer
+        thread (started on first use) does the actual socket write, so only that thread
+        waits on a slow client. False when the event was dropped (queue full, or the
+        client is gone)."""
+        if self.client_gone:
+            return False
+        outbox = getattr(self, "_outbox", None)
+        if outbox is None:
+            with self._lock:
+                outbox = getattr(self, "_outbox", None)
+                if outbox is None:
+                    self._outbox = outbox = queue.Queue(maxsize=self._OUTBOX_CAP)
+                    self.dropped = 0
+                    threading.Thread(target=self._pump, args=(outbox,), name="sse-pump", daemon=True).start()
+        try:
+            outbox.put_nowait(payload)
+            return True
+        except queue.Full:
+            self.dropped = getattr(self, "dropped", 0) + 1
+            return False
+
+    def _pump(self, outbox: "queue.Queue[Any]") -> None:
+        while True:
+            item = outbox.get()
+            if item is None:  # close() sentinel
+                return
+            try:
+                self.emit(item)
+            except OSError:  # includes the socket timeout of a client that stopped reading
+                self.client_gone = True
+            if self.client_gone:
+                return
+
+    def close(self) -> None:
+        """Stop the writer thread (the handler calls this when the client is unregistered)."""
+        self.client_gone = True
+        outbox = getattr(self, "_outbox", None)
+        if outbox is not None:
+            try:
+                outbox.put_nowait(None)
+            except queue.Full:
+                pass
+
     def ping(self) -> bool:
         """Write an SSE comment so the connection is never idle. False when
         the client is gone (the write failed), True otherwise."""
@@ -1185,6 +1263,18 @@ class _SSEStream:
         dispatch.run_dispatch_messages — see this class's own client_gone
         comment and that function's should_stop docstring paragraph."""
         return self.client_gone
+
+
+def _connection_alive(conn: Any) -> bool:
+    """False once the peer has closed this connection. A zero-timeout peek: nothing is read from
+    the stream, and an open idle socket (no data waiting) is alive."""
+    try:
+        readable, _, _ = select.select([conn], [], [], 0)
+        if not readable:
+            return True
+        return bool(conn.recv(1, socket.MSG_PEEK))  # b"" means the peer closed
+    except (OSError, ValueError):
+        return False
 
 
 #: How often an idle /api/events stream is pinged. Must stay well under
@@ -1239,7 +1329,15 @@ class _SSEBroadcast:
         # emit() swallows write errors internally; clients that went away
         # are dropped when their handler's finally unregisters them.
         for c in clients:
-            c.emit(payload)
+            offer = getattr(c, "offer", None)
+            if offer is not None:
+                offer(payload)  # never blocks the producing (agent) thread, see _SSEStream.offer
+            else:
+                c.emit(payload)
+        dead = [c for c in clients if getattr(c, "client_gone", False)]
+        if dead:  # a client whose writer gave up (timeout or broken pipe) leaves the hub now
+            with self._lock:
+                self._clients = [c for c in self._clients if c not in dead]
 
 
 def _security_posture(
@@ -2568,7 +2666,7 @@ class _Handler(BaseHTTPRequestHandler):
         raw = self.rfile.read(length) if length else b"{}"
         try:
             data = json.loads(raw or b"{}")
-        except (json.JSONDecodeError, UnicodeDecodeError, RecursionError):
+        except (ValueError, RecursionError):  # JSONDecodeError and UnicodeDecodeError are ValueErrors; so is an over-long integer
             return {}
         # a JSON list or string broke about 26 routes that call .get() on it
         return data if isinstance(data, dict) else {}
@@ -5178,6 +5276,12 @@ class _Handler(BaseHTTPRequestHandler):
         if not data:
             self._send_json({"ok": False, "error": "empty upload body"}, status=400)
             return
+        if len(data) < length:
+            # ST-4 (2026-10-27): a client that goes away part-way used to leave the bytes that did
+            # arrive in the uploads folder as if they were the whole file
+            self._send_json({"ok": False, "error": "the upload was cut off before it finished; nothing was saved"}, status=400)
+            self.close_connection = True
+            return
         try:
             root = _uploads_root()
             target = (root / name).resolve()
@@ -5237,6 +5341,12 @@ class _Handler(BaseHTTPRequestHandler):
         data = self.rfile.read(length) if length else b""
         if not data:
             self._send_json({"ok": False, "error": "empty upload body"}, status=400)
+            return
+        if len(data) < length:
+            # ST-4 (2026-10-27): a client that goes away part-way used to leave the bytes that did
+            # arrive in the uploads folder as if they were the whole file
+            self._send_json({"ok": False, "error": "the upload was cut off before it finished; nothing was saved"}, status=400)
+            self.close_connection = True
             return
         try:
             root = _uploads_root()
@@ -5935,6 +6045,7 @@ class _Handler(BaseHTTPRequestHandler):
             previous_client = session.client
             previous_config = session.config
             gate.set_emit(stream.emit)
+            gate.set_should_stop(lambda: stream.should_stop() or not _connection_alive(self.connection))
             gate.autonomous = autonomous
             session.confirmation_gate = gate
             if tab_id:
@@ -6323,6 +6434,7 @@ class _Handler(BaseHTTPRequestHandler):
                     break
         finally:
             hub.unregister(stream)
+            stream.close()
             self.close_connection = True
 
     def _resolve_confirmation(self, confirm_id: str, approved: bool, tab_id: str = "") -> bool:

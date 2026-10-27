@@ -198,7 +198,8 @@ def _build_run_pipeline_tool(registry: DispatchRegistry) -> ToolSpec:
         before_sources, before_claims = len(record.sources), len(record.claims)
         skipped: list[str] = []
         run_full_pipeline(
-            record, registry, max_sources_per_sub_question=max_sources, skipped=skipped
+            record, registry, max_sources_per_sub_question=max_sources, skipped=skipped,
+            checkpoint=lambda: _save(record),
         )
         _save(record)
         summary = (

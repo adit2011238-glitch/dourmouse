@@ -74,9 +74,9 @@ class TestOfficeLoggerAgentEvents:
         log.on_event({"type": "tool_use", "name": "x", "agent": "reviewer", "call_id": "c2"})
         log.on_event({"type": "tool_use", "name": "y", "agent": "security", "call_id": "c3"})
         by_call = log.transcript(call_id="c1")
-        assert [r["text"] for r in by_call] == ["step 1", "step 2"]
+        assert [r["text"] for r in by_call] == ["step 1step 2"]  # STRESS1-12: consecutive deltas of one run are one row
         by_agent = log.transcript(agent="reviewer")
-        assert len(by_agent) == 3  # both c1 events + the c2 tool_use
+        assert len(by_agent) == 2  # the joined c1 row + the c2 tool_use
         security_rows = log.transcript(agent="security")
         assert len(security_rows) == 1
         assert security_rows[0]["call_id"] == "c3" and security_rows[0]["name"] == "y"

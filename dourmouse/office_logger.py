@@ -124,6 +124,11 @@ _AGENT_EVENT_TYPES = frozenset({
 #: the log (same discipline message_bus.post's own 1200-char body cap uses).
 _MAX_EVENT_TEXT = 4000
 
+#: Streamed token types that are joined into chunks before they are logged (STRESS1-12).
+_DELTA_TYPES = frozenset({"thinking_delta", "assistant_delta"})
+_DELTA_FLUSH_CHARS = 1500
+_DELTA_FLUSH_SECONDS = 0.5
+
 
 class OfficeLogger:
     """Thread-safe, append-only SQLite log. A pure observer, same contract
@@ -134,6 +139,8 @@ class OfficeLogger:
     def __init__(self, path: str | Path | None = None) -> None:
         self._path = Path(path) if path is not None else default_db()
         self._lock = threading.Lock()
+        self._delta_lock = threading.Lock()
+        self._deltas: dict[tuple[str, str, str], dict[str, Any]] = {}
         self._path.parent.mkdir(parents=True, exist_ok=True)
         with self._lock, self._conn() as conn:
             conn.execute("PRAGMA journal_mode=WAL")
@@ -180,9 +187,40 @@ class OfficeLogger:
             if etype == "delegate_parallel_branch":
                 self._log_fanout(entry)
             elif etype in _AGENT_EVENT_TYPES and entry.get("call_id"):
-                self._log_agent_event(entry)
+                if etype in _DELTA_TYPES:
+                    self._buffer_delta(entry)  # STRESS1-12: one row per chunk, not per token
+                else:
+                    self._flush_deltas()  # every waiting buffer goes first, so rows stay in event order across runs
+                    self._log_agent_event(entry)
         except Exception:
             pass  # an observer must never break a real chat turn
+
+    # Streaming deltas arrive one token at a time. Writing one committed row per token put a
+    # disk sync on the dispatch thread between every token and filled the table with millions
+    # of one-word rows (stress finding STRESS1-12, 2026-10-27). They are now joined per
+    # (agent, call_id, type) and written as one row when the chunk is big enough, old enough,
+    # when another kind of event arrives for the same run, or when somebody reads.
+    def _buffer_delta(self, entry: dict[str, Any]) -> None:
+        key = (str(entry.get("agent", "")), str(entry.get("call_id", "")), str(entry.get("type", "")))
+        now = time.monotonic()
+        with self._delta_lock:
+            buf = self._deltas.setdefault(key, {"text": "", "since": now, "depth": entry.get("depth")})
+            buf["text"] += str(entry.get("text") or "")
+            ready = len(buf["text"]) >= _DELTA_FLUSH_CHARS or now - buf["since"] >= _DELTA_FLUSH_SECONDS
+        if ready:
+            self._flush_deltas(key[1])
+
+    def _flush_deltas(self, call_id: str | None = None) -> None:
+        with self._delta_lock:
+            keys = [k for k in self._deltas if call_id is None or k[1] == call_id]
+            taken = [(k, self._deltas.pop(k)) for k in keys]
+        for (agent, cid, etype), buf in taken:
+            text = buf["text"]
+            if not text:
+                continue
+            for i in range(0, len(text), _MAX_EVENT_TEXT):  # the per-row cap still applies
+                self._log_agent_event({"agent": agent, "call_id": cid, "type": etype,
+                                       "depth": buf.get("depth"), "text": text[i:i + _MAX_EVENT_TEXT]})
 
     def _migrate(self) -> None:
         """Finding #123: fan-out rows carry the branch's call_id (to join its
@@ -326,6 +364,7 @@ class OfficeLogger:
         conversation. Each branch's events (joined by the call_id the branch
         announced) are merged in time order, streamed deltas are folded into
         whole lines, and each branch's task and outcome frame its part."""
+        self._flush_deltas()  # tokens still waiting in a buffer belong in the conversation
         with self._lock, self._conn() as conn:
             rows = conn.execute(
                 "SELECT phase, branch_index, agent, ok, error, elapsed_s, ts, call_id, parent_call_id, task "
@@ -377,6 +416,7 @@ class OfficeLogger:
         history across runs) or one exact ``call_id`` (one specific run),
         OLDEST FIRST (a transcript reads top-to-bottom, unlike the other
         "recent" methods here which are newest-first activity feeds)."""
+        self._flush_deltas(call_id or None)  # a reader sees tokens still waiting in a buffer
         limit = max(1, min(int(limit), 2000))
         clauses: list[str] = []
         params: list[Any] = []

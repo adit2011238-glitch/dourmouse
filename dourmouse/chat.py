@@ -421,7 +421,14 @@ class ChatSession:
             # never silently loses the turn that was already in memory.
             self._turn_count += 1
             elapsed_ms = round((time.monotonic() - started) * 1000, 1)
-            self._persist(prompt, report, elapsed_ms, display_text=display_text, screen=screen)
+            try:
+                self._persist(prompt, report, elapsed_ms, display_text=display_text, screen=screen)
+            except OSError as exc:
+                # STRESS1-10: a full disk (or a read-only volume) used to replace the finished
+                # answer with an error from inside this finally block. The answer is returned
+                # and the report says it was not saved, so the screen can show both.
+                if isinstance(report, dict):
+                    report["persist_warning"] = f"The answer was not saved to the session history: {exc}"
             # v2.9 Store & Learn: auto-ingest the completed turn into the
             # long-term store (idempotent upsert). Only when the turn actually
             # completed with an answer — we never learn from a failed turn
@@ -628,7 +635,17 @@ class ChatSession:
             "prev_hash": self._prev_hash,
         }
         record["hash"] = _record_hash(record)
+        lead = ""
+        try:  # STRESS1-10: a torn last line (a write cut off mid-record) must not swallow the next one
+            if self.session_file.exists() and self.session_file.stat().st_size:
+                with self.session_file.open("rb") as probe:
+                    probe.seek(-1, os.SEEK_END)
+                    lead = "" if probe.read(1) == b"\n" else "\n"
+        except OSError:
+            lead = ""
         with self.session_file.open("a", encoding="utf-8") as fh:
+            if lead:
+                fh.write(lead)
             # default=str: the hash above was computed with it, so the bytes
             # written must be the bytes hashed, and an odd transcript value
             # must not raise from inside ask()'s finally block (P4-15).
