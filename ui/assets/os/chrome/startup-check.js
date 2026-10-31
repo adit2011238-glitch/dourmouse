@@ -15,6 +15,7 @@
    sign-in problem was reported", never "everything is signed in". */
 
 import { html, setHtml } from '../kit/html.js';
+import { startGoogleSignIn } from './google-signin.js';
 
 const DISMISSED_KEY = 'dm.os.signinDismissed';
 
@@ -68,7 +69,7 @@ export function createStartupCheck({ root, api, toasts, prefs = null }) {
         <span class="sb-sub">Optional. Dourmouse works without these.</span>
         ${list.map((it) => html`<span class="sb-item"><span class="sb-label">${it.label}</span>
           ${it.command ? html`<button type="button" class="su-cmd" data-copy="${it.command}" title="Click to copy" data-spec="Copies this command so you can paste it into a terminal.">${it.command}</button>` : ''}
-          ${it.href ? html`<a class="os-btn" href="${it.href}" data-spec="Starts the Google sign-in for this app.">Sign in with Google</a>` : ''}</span>`)}
+          ${it.href ? html`<button type="button" class="os-btn" data-google-signin data-spec="Opens Google in your browser. Approve it there and this window signs you in.">Sign in with Google</button>` : ''}</span>`)}
       </div>
       <button type="button" class="os-btn" id="suDismiss" data-spec="Hides this. It stays hidden on later launches until something new needs signing in. The launcher can bring it back.">Not now</button>`);
     root.querySelectorAll('[data-copy]').forEach((b) => {
@@ -79,6 +80,25 @@ export function createStartupCheck({ root, api, toasts, prefs = null }) {
       });
     });
     root.querySelector('#suDismiss').addEventListener('click', () => api_.dismiss());
+    root.querySelectorAll('[data-google-signin]').forEach((b) => b.addEventListener('click', () => signInWithGoogle(b)));
+  }
+
+  /* Said step by step because the owner has to act in another window (the system browser). */
+  function reportSignin(s) {
+    if (s.state === 'waiting') toasts.show({ level: 'ok', title: 'Google opened in your browser', detail: 'Approve it there. This window signs you in when you do.', ttl: 9000 });
+    else if (s.state === 'manual') toasts.show({ level: 'warn', title: 'Could not open your browser', detail: `Copy this link into Chrome: ${s.url}`, ttl: 30000 });
+    else if (s.state === 'signed-in') toasts.show({ level: 'ok', title: 'Signed in with Google', ttl: 4000 });
+    else if (s.state === 'error') toasts.show({ level: 'warn', title: 'Could not start Google sign-in', detail: s.message });
+    else if (s.state === 'dead-end') toasts.show({ level: 'warn', title: 'This window cannot finish the sign-in', detail: 'Press Sign in with Google again from the Dourmouse app window.' });
+    else if (s.state === 'timeout') toasts.show({ level: 'warn', title: 'Google sign-in timed out', detail: 'Press Sign in with Google to try again.' });
+  }
+
+  async function signInWithGoogle(button) {
+    button.disabled = true;
+    const result = await startGoogleSignIn({ onStatus: reportSignin });
+    if (result.outcome === 'redirect') return; // a real browser tab: the page is leaving for Google
+    button.disabled = false;
+    if (result.ok) await api_.run(); // signed in: read the status again so the banner goes away
   }
 
   const api_ = {

@@ -65,7 +65,37 @@
         });
         block.appendChild(code);
       } else if (it.href) {
-        block.appendChild(el("a", { class: "dm-google-link", href: it.href }, ["Sign in with Google →"]));
+        // A plain link started the sign-in in THIS window while Google's page and callback ran in the
+        // system browser (no cookie there: "this sign-in was not started in this browser"). The shared
+        // module runs the claim bridge instead; the plain href stays as the fallback.
+        var google = el("button", { class: "dm-google-link" }, ["Sign in with Google"]);
+        var note = el("div", { class: "dm-google-status" }, []);
+        google.addEventListener("click", function () {
+          google.disabled = true;
+          import("/assets/os/chrome/google-signin.js")
+            .then(function (m) {
+              return m.startGoogleSignIn({
+                onStatus: function (s) {
+                  var words = {
+                    waiting: "Google opened in your browser. Approve it there; this window signs you in.",
+                    manual: "Could not open your browser. Copy this link into Chrome: " + (s.url || ""),
+                    error: "Could not start Google sign-in: " + (s.message || ""),
+                    "dead-end": "This window cannot finish the sign-in. Press the button again from the app window.",
+                    timeout: "Timed out. Press the button to try again.",
+                    "signed-in": "Signed in.",
+                  };
+                  if (words[s.state]) note.textContent = words[s.state];
+                },
+              });
+            })
+            .then(function (res) {
+              if (res && res.outcome === "signed-in") { location.reload(); return; }
+              google.disabled = false;
+            })
+            .catch(function () { location.href = it.href; });
+        });
+        block.appendChild(google);
+        block.appendChild(note);
       }
       card.appendChild(block);
     });

@@ -348,7 +348,12 @@ class TestMessengerTools:
         # query_shared_memory (shared_rag.py) rides every non-orchestrator
         # subagent — see build_general_registry's own comment. v13.7:
         # query_desktop_vault (desktop_rag.py) rides alongside it now too.
-        assert names == {"send_message", "read_agent_inbox", "query_shared_memory", "query_desktop_vault"}
+        # finding #189: ask_agent and list_agents (peer_tools.py) are owned by the messenger, the
+        # agent whose job is agents talking to each other, and offered to every agent from there.
+        assert names == {
+            "send_message", "read_agent_inbox", "query_shared_memory", "query_desktop_vault",
+            "ask_agent", "list_agents",
+        }
         assert "messenger" in reg.subagent_names
 
 

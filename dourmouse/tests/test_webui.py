@@ -2362,6 +2362,29 @@ class TestSseChat:
         models = [c["model"] for c in srv.session.client.chat.completions.calls]
         assert models and all(m == "nvidia/echo-70b" for m in models)
 
+    def test_a_pinned_chat_is_told_it_may_ask_a_different_agent(self, server):
+        """finding #189: the wrapper put in front of every pinned screen's prompt used to say
+        "never another subagent's tools" with only the desk as an exception, so a model that
+        obeyed it to the letter would refuse ask_agent even though the tool was on its list."""
+        srv, port = server
+        srv.session.client = FakeClient([_FakeResponse(_FakeMessage(content="ok"))])
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        conn.request(
+            "POST",
+            "/api/chat",
+            body=json.dumps({"prompt": "echo hi", "focus_agent": "echo_agent"}),
+            headers={"Content-Type": "application/json"},
+        )
+        resp = conn.getresponse()
+        while resp.readline():
+            pass
+        conn.close()
+        sent = srv.session.client.chat.completions.calls[0]["messages"]
+        user = [m["content"] for m in sent if m["role"] == "user"][-1]
+        assert "[ROUTING DIRECTIVE] You may ONLY use the 'echo_agent' subagent's tools" in user
+        assert "ask_agent" in user and "list_agents" in user and "delegate_to_models" in user
+        assert user.rstrip().endswith("TASK: echo hi")
+
     def test_focus_agent_uses_the_configured_backends_model(self, server, monkeypatch):
         """PRIV-3 / A-13 (2026-10-12): this used to assert that a privacy-
         pinned focus agent ran on a forced-LOCAL model ("qwen2.5:7b"), the

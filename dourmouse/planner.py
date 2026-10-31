@@ -54,7 +54,7 @@ _ROLLUP_AGENT_NAMES = frozenset({"google_workspace"})
 #: the scoring haystack/capability-stem checks below only — both tools
 #: still work exactly as before when an agent's roster is actually used;
 #: this only stops them from being a routing SIGNAL.
-_AMBIENT_SHARED_TOOLS = frozenset({"query_shared_memory", "query_desktop_vault"})
+_AMBIENT_SHARED_TOOLS = frozenset({"query_shared_memory", "query_desktop_vault", "ask_agent", "list_agents"})
 
 # Cheap multi-step markers: explicit sequencing language ("then", "after
 # that") or 2+ distinct outcome verbs. Deliberately conservative — a false

@@ -66,6 +66,7 @@ from dourmouse.dispatch import (
     system_message,
 )
 from dourmouse.goal_tools import build_goals_subagent
+from dourmouse.peer_tools import build_peer_tools
 from dourmouse.librarian import librarian_tools
 from dourmouse.message_bus import BROADCAST, get_message_bus
 from dourmouse.research_mesh_tools import build_research_mesh_subagent
@@ -2952,6 +2953,7 @@ def _build_delegate_tool(registry: DispatchRegistry) -> ToolSpec:
                 forced_agent=target or None,
                 fanout_branch=ctx.fanout_branch,  # finding #134
                 policy=ctx.policy,  # finding #140
+                agent_chain=ctx.agent_chain + ((ctx.forced_agent,) if ctx.forced_agent else ()),
             )
         except Exception as exc:  # honest failure surface (Rule 2.2)
             if ctx.jobs is not None and job_id:
@@ -3357,6 +3359,7 @@ def _build_delegate_parallel_tool(registry: DispatchRegistry) -> ToolSpec:
                     call_id=branch_call_id,
                     fanout_branch=True,
                     policy=ctx.policy,  # finding #140
+                    agent_chain=ctx.agent_chain + ((ctx.forced_agent,) if ctx.forced_agent else ()),
                 )
                 if is_backend_failure_text(report.get("final_text") or ""):
                     # Finding #134: the backend's own failure report is not an answer.
@@ -4817,6 +4820,10 @@ def build_general_registry() -> DispatchRegistry:
     registry.register_subagent(build_security_subagent())
 
     registry.register_subagent(_build_messenger_subagent(registry))
+    # Agents talking to each other: ask_agent and list_agents, owned by the messenger and offered to
+    # every run that gets tools (dispatch.PEER_TOOLS). ask_agent reuses delegate_task's nested run.
+    for _peer_tool in build_peer_tools(registry, _delegate_tool):
+        registry.extend_subagent("messenger", _peer_tool)
 
     registry.register_subagent(_build_memory_subagent(registry))
 

@@ -104,7 +104,7 @@ _SERVER_VERSION = "13.0"
 #: excluded (recursion risk / pointless self-delegation, not safety-gated
 #: but structurally wrong to hand to an external CLI).
 _EXCLUDED_TOOL_NAMES = {
-    "delegate_task", "delegate_parallel",
+    "delegate_task", "delegate_parallel", "ask_agent",
     "claude_code", "codex_code",
     "code_claude", "code_codex", "code_nvidia", "code_deepseek", "code_ollama",
 }

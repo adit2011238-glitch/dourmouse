@@ -119,7 +119,7 @@ _T0_TOOLS = frozenset({
     "worldmonitor_status", "worldmonitor_catalog", "worldmonitor_call_tool", "world_pulse",
     "world_pulse_details", "world_brief", "world_correlations", "globe_control",
     "stock_quote", "market_movers", "mt5_quote", "mt5_universe", "forex_events", "forex_strategy",
-    "generate_image", "spotify_search", "research_mesh_status", "research_mesh_qualify",
+    "generate_image", "spotify_search", "research_mesh_status", "research_mesh_qualify", "list_agents",
 })
 _T0_PREFIXES = ("research_",)
 
@@ -146,7 +146,7 @@ _T1_TOOLS = frozenset({
     "email_identity_status", "email_own_send", "sheets_create", "sheets_append", "drive_create_doc",
     "docs_append", "docs_insert_image", "slides_create", "drive_share",
     "t212_status", "t212_order", "mt5_order",
-    "delegate_task", "delegate_parallel", "delegate_to_models", "query_desktop_vault",
+    "delegate_task", "delegate_parallel", "delegate_to_models", "ask_agent", "query_desktop_vault",
     "get_goal_status", "list_goals", "device_wiki_status", "device_wiki_scan",
 })
 
@@ -1292,7 +1292,7 @@ def gate_tool_result(
 # --------------------------------------------------------------------------- #
 
 PRIV_TAG = "_priv_source"
-_DELEGATE_TOOLS = frozenset({"delegate_task", "delegate_parallel", "delegate_to_models"})
+_DELEGATE_TOOLS = frozenset({"delegate_task", "delegate_parallel", "delegate_to_models", "ask_agent"})
 
 
 def result_sources(name: str, arguments: Any, text: str, agent: str | None, turn: TurnPrivacy) -> list[str]:

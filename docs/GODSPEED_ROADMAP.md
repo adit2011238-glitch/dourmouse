@@ -1166,3 +1166,6 @@ and a real build sequence, not just a requirement statement:
 - [x] Finding #186 2026-10-21 -- COMMAND CENTER screen: global agent_trace broadcast (every agent's full live reasoning, even background runs), full uncollapsed security sentry analysis.
 - [x] Finding #187 2026-10-23 -- security canary A13 found SEC2-5 live (redirect to own server read and relayed by the model); fixed at the tab URL, not the typed URL.
 - [x] Finding #188 2026-10-27 -- stress test fixes (SSE stall, approval wait, full disk, per-token log writes, research checkpoint, upload cut-off) and research-first tool routing (CAP1-1).
+- [x] Finding #189 2026-10-31 -- agents talk to each other: ask_agent and list_agents offered to all 44 agents (owner prompt when a page-reading conversation asks an agent that acts), plus three bugs found live (directive wording, nested model label 404, max_turns hint).
+- [x] Finding #190 2026-10-31 -- Google sign-in from the app window runs the claim bridge (banner and classic popup), fixing "this sign-in was not started in this browser".
+

@@ -1359,15 +1359,35 @@ SHARED_DESK_TOOLS: tuple[str, ...] = (
 )
 
 
-def shared_desk_specs(registry: DispatchRegistry) -> list[ToolSpec]:
-    """The shared desk tools that exist in this registry (a tool the registry
-    does not carry is simply absent, never invented)."""
+def _specs_named(registry: DispatchRegistry, names: tuple[str, ...]) -> list[ToolSpec]:
+    """The tools called ``names`` that exist anywhere in this registry, in the
+    order of ``names`` (a tool the registry does not carry is simply absent,
+    never invented)."""
     found: dict[str, ToolSpec] = {}
     for sub in registry.all_subagents():
         for t in sub.tools:
-            if t.name in SHARED_DESK_TOOLS and t.name not in found:
+            if t.name in names and t.name not in found:
                 found[t.name] = t
-    return [found[n] for n in SHARED_DESK_TOOLS if n in found]
+    return [found[n] for n in names if n in found]
+
+
+def shared_desk_specs(registry: DispatchRegistry) -> list[ToolSpec]:
+    """The shared desk tools that exist in this registry."""
+    return _specs_named(registry, SHARED_DESK_TOOLS)
+
+
+#: How agents reach each other. Every chat screen pins ONE agent's tools (and
+#: drops delegate_task, v8.12), so before these existed an agent such as the
+#: browser could not hand a job to another agent at all. Added to every run
+#: that gets tools, like the desk above, but kept apart from SHARED_DESK_TOOLS
+#: on purpose: that tuple is also what the Claude CLI bridge must expose, and
+#: ask_agent runs a nested dispatch that only exists inside this process.
+PEER_TOOLS: tuple[str, ...] = ("ask_agent", "list_agents")
+
+
+def peer_tool_specs(registry: DispatchRegistry) -> list[ToolSpec]:
+    """The peer tools that exist in this registry."""
+    return _specs_named(registry, PEER_TOOLS)
 
 
 def _scoped_tool_specs(
@@ -1376,6 +1396,7 @@ def _scoped_tool_specs(
     *,
     include_delegate: bool = True,
     include_shared_desk: bool = False,
+    include_peer_tools: bool = False,
 ) -> list[dict[str, Any]]:
     """Full tool schemas ONLY for the named agents (plus, by default, the
     orchestrator's delegate tool, so mid-task delegation stays possible).
@@ -1420,6 +1441,11 @@ def _scoped_tool_specs(
             if t.name not in seen:
                 seen.add(t.name)
                 out.append(t.openai_spec())
+    if include_peer_tools:
+        for t in peer_tool_specs(registry):
+            if t.name not in seen:
+                seen.add(t.name)
+                out.append(t.openai_spec())
     return out
 
 
@@ -1461,7 +1487,9 @@ _SYSTEM_PROMPT = (
     "with delegate_task (the orchestrator's own tool) — a fresh sub-dispatch "
     "against the same roster, depth-bounded and audit-logged as a job. Only "
     "delegate when the sub-task is genuinely self-contained; otherwise use "
-    "the roster tools directly.\n"
+    "the roster tools directly. Any agent can also hand one job to one OTHER "
+    "agent with ask_agent (list_agents shows who does what); never ask your "
+    "own agent.\n"
     "8. RESPONSE STYLE (always): answer the question FIRST — one or two clear "
     "sentences for the headline, then detail. Use short paragraphs, headers "
     "and bullet lists for anything multi-part. Summarize tool results in "
@@ -2962,6 +2990,17 @@ UNTRUSTED_CONTENT_AGENTS: frozenset[str] = frozenset({
     "worldmonitor", "system", "study", "app_driver", "freebuff",
 })
 
+#: Agents that only read, look things up or compute: asking one of them never
+#: needs the owner, even from a conversation that reads pages written by other
+#: people. Every other agent can act on this Mac or for the owner (files, apps,
+#: mail, trading, memory, schedules, other models), so a request to it from such
+#: a conversation is put to the owner first. A new agent is NOT in this set, so
+#: it starts out asking (the safe default).
+PEER_ASK_OPEN_TARGETS: frozenset[str] = frozenset({
+    "research_info", "study", "reviewer", "news", "markets", "worldmonitor", "rnd",
+    "globe", "panel_control", "design_3d", "device_wiki",
+})
+
 #: Tools that open a URL in a browser.
 _URL_OPEN_TOOLS: frozenset[str] = frozenset({"browser_open", "open_browser_pane", "open_url"})
 
@@ -3060,12 +3099,30 @@ def _url_gate(spec_name: str, url: str, actor: str) -> tuple[str, str] | None:
 
 def _argument_gate(
     spec: ToolSpec, arguments: dict[str, Any], actor: str, routed: frozenset[str] = frozenset(),
+    chain: tuple[str, ...] = (),
 ) -> tuple[str, str] | None:
     """``("refuse", reason)``, ``("confirm", prompt)`` or None for this call.
 
     ``routed`` is the set of agents the planner scoped this turn's tools to (empty when the call did
-    not come from an ordinary routed turn)."""
+    not come from an ordinary routed turn). ``chain`` is the agents that asked their way down to this
+    run (DispatchContext.agent_chain)."""
     name = spec.name
+    if name == "ask_agent":
+        # Any agent may ask any other (the owner asked for agents that can talk). The one thing that must
+        # not happen is a hostile web page or mail steering a reader agent into handing a job to an agent
+        # that can act: so when anything in this conversation reads text written by other people, asking
+        # an agent that is not read-only goes to the owner first, the same stance send_message takes below.
+        # The chain counts, not just the caller: browser -> markets -> system is still the browser's page
+        # talking.
+        target = _first_nonempty_str(arguments, "agent", "subagent", "to_agent", "agent_name")
+        speakers = set(chain) | set(routed) | ({actor} if actor not in ("", "orchestrator", "mcp_bridge") else set())
+        through = sorted(speakers & UNTRUSTED_CONTENT_AGENTS)
+        if through and target and target != actor and target not in PEER_ASK_OPEN_TARGETS:
+            asked = _one_line_text(_first_nonempty_str(arguments, "question", "task", "prompt", "instructions"), 200)
+            return ("confirm", f"Ask the {target} agent: {asked!r}? This conversation reads web pages, mail or "
+                    f"files written by other people ({', '.join(through)}), so the request may have been steered by "
+                    f"what they read, and {target} can act on this Mac or for you.")
+        return None
     readers = routed & UNTRUSTED_CONTENT_AGENTS
     if name == "send_message" and actor in ("", "orchestrator") and "messenger" in routed and readers:
         # The turn speaks as the messenger (finding P2-22), but it also holds the tools of an agent that
@@ -3140,6 +3197,7 @@ def _execute_tool(
     actor: str = "",
     scope: str = "",
     routed: frozenset[str] = frozenset(),
+    chain: tuple[str, ...] = (),
 ) -> str:
     """R7 (finding #133): the model proposes, the runtime decides. Every
     call is recorded in the action ledger (proposed, then denied / declined
@@ -3150,7 +3208,7 @@ def _execute_tool(
     actor = actor or (getattr(policy, "actor", "") if policy is not None else "")
     _ep.record("proposed", spec.name, arguments, actor, permission=spec.permission.name)
     decision = (
-        _argument_gate(spec, arguments, actor, routed)
+        _argument_gate(spec, arguments, actor, routed, chain)
         if spec.permission is not Permission.PROHIBITED and isinstance(arguments, dict)
         else None
     )
@@ -3996,6 +4054,12 @@ class DispatchContext:
     # piece, so it never gets delegate_parallel. Inherited through
     # delegate_task, so a grandchild cannot fan out either.
     fanout_branch: bool = False
+    # The agents that asked their way down to this run, outermost first, this
+    # run's own agent not included. ask_agent reads it to refuse a loop
+    # (browser asks research_info, which asks browser) and _argument_gate reads
+    # it to tell whether any agent up the chain reads text written by other
+    # people. Inherited by every nested run, extended by the parent's own agent.
+    agent_chain: tuple[str, ...] = ()
     # Finding #067 (agent-ecosystem "full chain of thought, any agent, any
     # meeting, on demand" gap): a fresh, real per-RUN identifier, distinct
     # for every DispatchContext instance (default_factory runs once per
@@ -4181,6 +4245,7 @@ def run_dispatch_messages(
     call_id: str | None = None,
     fanout_branch: bool = False,
     policy: RunPolicy | None = None,
+    agent_chain: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     """Run the tool loop over an existing message list (conversation-aware).
 
@@ -4285,6 +4350,7 @@ def run_dispatch_messages(
     # the engine never guesses.
     escalated_brain = False
     _explicit_model = model  # the caller's override, captured before resolution
+    _client_supplied = client is not None  # captured before the client is built below
     last_user = next(
         (m.get("content", "") for m in reversed(messages) if m.get("role") == "user"),
         "",
@@ -4350,7 +4416,14 @@ def run_dispatch_messages(
     # floor for the same prompt). Report the REAL answering backend
     # honestly instead of the stale config-derived guess.
     _orch_mode = "" if force_plain_dispatch else _orchestrator_backend_mode()
-    if _orch_mode == "split":
+    if _client_supplied and depth > 0:
+        # A nested run (delegate_task, delegate_parallel, ask_agent) works through its PARENT's client
+        # and the model it was handed. Deriving a backend from the target agent here put a Claude model
+        # name on an Ollama client (live, finding #189: a pinned markets run asking research_info got
+        # "HTTP Error 404: Not Found", because research_info splits to Claude). The label is only ever
+        # shown for the top-level run (the brain event below is depth 0 only), so skip it.
+        _orch_mode = ""
+    elif _orch_mode == "split":
         # Same effective-agent peek _build_client() used above to pick
         # the REAL client — must agree, or this event would report a
         # different backend than the one actually built.
@@ -4407,6 +4480,7 @@ def run_dispatch_messages(
         # branch's fan-out events and every event of its run share one id.
         call_id=call_id or uuid.uuid4().hex[:12],
         fanout_branch=fanout_branch,
+        agent_chain=tuple(agent_chain),
         # Finding #140: a nested run shares its parent's policy, so the limit on
         # approval-gated actions and on repeated calls covers the whole request
         # instead of restarting at zero in every delegate and every branch.
@@ -5204,6 +5278,8 @@ def _run_dispatch_loop(
             include_delegate=not ctx.forced_agent,
             # Phase J: any screen that gets tools at all also gets the desk.
             include_shared_desk=True,
+            # And the way to reach the other agents (ask_agent, list_agents).
+            include_peer_tools=True,
         )
         if plan_agents
         else []
@@ -5934,6 +6010,7 @@ def _run_dispatch_loop(
                                     # calls (finding P2-31).
                                     scope=ctx.call_id if ctx.fanout_branch else "",
                                     routed=ctx.routed_agents,
+                                    chain=ctx.agent_chain,
                                 )
                             except Exception as exc:  # surface handler errors honestly
                                 result_text = f"ERROR: tool '{name}' failed: {exc}"

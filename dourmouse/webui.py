@@ -1032,6 +1032,27 @@ class ActivityTracker:
             }
 
 
+def _focus_routing_directive(focus_agent: str) -> str:
+    """The sentence a pinned chat screen puts in front of the owner's prompt.
+
+    Pinned means this agent's own tools, plus the shared desk, plus the two ways
+    to reach a DIFFERENT agent (finding #189). Without naming the peer tools
+    here, a model that follows "never another subagent's tools" to the letter
+    would refuse to ask another agent even though the tool is on its list."""
+    return (
+        f"[ROUTING DIRECTIVE] You may ONLY use the '{focus_agent}' subagent's tools for this, "
+        "never another subagent's tools, except the shared desk tools (open_browser_pane, "
+        "browser_open, open_file_preview, player_play, player_pause, player_seek, "
+        "player_now_playing), which every chat screen may use to open a page, open a file, or "
+        "drive the media player, and the two peer tools ask_agent and list_agents, which every "
+        "chat screen may use to hand one job to a DIFFERENT agent (list_agents shows who does "
+        "what; on the Claude CLI use list_agents and delegate_to_models with one task that names "
+        "the agent). Never ask your own agent. If you already know the answer, answer directly; "
+        "only call a tool for live/current data, something you're unsure of, or when the user "
+        "explicitly asks you to look something up or take an action."
+    )
+
+
 class AttentionQueue:
     """v13: cross-screen "needs attention" feed.
 
@@ -5900,18 +5921,7 @@ class _Handler(BaseHTTPRequestHandler):
             # budget instead of just answering from what the model
             # already knows. The scope restriction stays; added the
             # answer-directly-when-you-can escape hatch.
-            prompt = (
-                f"[ROUTING DIRECTIVE] You may ONLY use the '{focus_agent}' "
-                f"subagent's tools for this — never another subagent's "
-                f"tools, except the shared desk tools (open_browser_pane, "
-                f"browser_open, open_file_preview, player_play, player_pause, "
-                f"player_seek, player_now_playing), which every chat screen "
-                f"may use to open a page, open a file, or drive the media "
-                f"player. If you already know the answer, answer directly; "
-                f"only call a tool for live/current data, something you're "
-                f"unsure of, or when the user explicitly asks you to look "
-                f"something up or take an action. TASK: {prompt}"
-            )
+            prompt = f"{_focus_routing_directive(focus_agent)} TASK: {prompt}"
             if self.server.config is not None:
                 # The focus agent's own model on the configured backend. PRIV
                 # (2026-10-12): no per-agent local swap any more; the privacy
@@ -6762,7 +6772,13 @@ class _Handler(BaseHTTPRequestHandler):
             # Finished in a different browser than the one that started it:
             # someone else's sign-in link. The state is already spent.
             self._send_json(
-                {"ok": False, "error": "this sign-in was not started in this browser - start the login again"},
+                {
+                    "ok": False,
+                    "error": (
+                        "this sign-in was not started in this browser. Go back to the Dourmouse app, "
+                        "press Sign in with Google there, and approve it in the browser it opens."
+                    ),
+                },
                 status=400,
             )
             return
