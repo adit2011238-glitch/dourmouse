@@ -71,7 +71,7 @@ from dourmouse.governance import (
     validate_against_schema,
     validate_tool_arguments,
 )
-from dourmouse.planner import build_plan, looks_multi_step
+from dourmouse.planner import build_plan, domain_agents_in_query, looks_multi_step
 from dourmouse.privacy import DispatcherText
 
 
@@ -168,6 +168,56 @@ _HONEST_FAILURE = re.compile(r"^[A-Z][A-Z0-9 _-]{1,40} \(reported honestly\):")
 
 def is_backend_failure_text(text: str) -> bool:
     return bool(_HONEST_FAILURE.match((text or "").lstrip()))
+
+
+# Finding #192 (live, 2026-11-06): "top three headlines, how the S&P 500 is doing, and my free disk space"
+# ran out of its 8 steps with nothing answered. Three of the eight were waste: list_agents twice (reading a
+# roster before doing any work) and one call to "markets.stock_quote", a real tool under a made-up
+# namespace. Steps that only look something up inside the app, and change nothing, are not charged to the
+# run; the cap keeps a model that loops on them from running free.
+FREE_LOOKUP_TOOLS = frozenset({"list_agents"})
+_MAX_FREE_LOOKUP_TURNS = 3
+
+#: "markets.stock_quote", "functions/web_search", "tools:news_headlines": a namespace in front of a tool.
+_TOOL_NAMESPACE_SPLIT = re.compile(r"[./:]")
+
+_RATE_LIMIT_WORDS = re.compile(r"rate[- ]?limit|too many requests|\b429\b", re.IGNORECASE)
+#: Tools that run another agent: what they return is that agent's answer, never a source's error.
+_NESTED_RUN_TOOLS = FANOUT_TOOLS | {"delegate_task", "ask_agent"}
+
+
+def _is_rate_limit_result(text: Any) -> bool:
+    """A short tool message that says the source is rate-limiting. Length-bounded so a long page or search
+    result that merely mentions a rate limit (or the number 429) is never taken for one."""
+    body = str(text or "")
+    return len(body) <= 500 and bool(_RATE_LIMIT_WORDS.search(body))
+
+
+def _resolve_tool_alias(name: str, offered: set[str]) -> str | None:
+    """The tool a namespaced name meant, or None. Models often write the agent or a namespace in front of a
+    real tool name. When what follows the last separator is exactly a tool this run OFFERED, that is the call
+    they meant, so it runs now instead of costing a step to say "did you mean". Only offered tools resolve:
+    an alias never reaches a tool the run was not given."""
+    tail = _TOOL_NAMESPACE_SPLIT.split(name or "")[-1].strip()
+    if not tail or tail == name:
+        return None
+    for candidate in (tail, tail.lower().replace("-", "_")):
+        if candidate in offered:
+            return candidate
+    return None
+
+
+def _tool_digest(transcript: list[dict[str, Any]], *, limit: int = 6, width: int = 240) -> str:
+    """One line per tool result that gathered something, for the answer a spent budget still owes the owner."""
+    lines: list[str] = []
+    for entry in transcript:
+        if entry.get("type") != "tool_result":
+            continue
+        text = " ".join(str(entry.get("text") or "").split())
+        if not text or text.startswith(_NOT_AN_ANSWER_PREFIXES):
+            continue
+        lines.append(f"- {entry.get('name')}: {text[:width]}{'...' if len(text) > width else ''}")
+    return "\n".join(lines[:limit])
 
 
 # Hard cap on a single LLM response (Ollama ``num_predict`` / OpenAI
@@ -1489,7 +1539,9 @@ _SYSTEM_PROMPT = (
     "delegate when the sub-task is genuinely self-contained; otherwise use "
     "the roster tools directly. Any agent can also hand one job to one OTHER "
     "agent with ask_agent (list_agents shows who does what); never ask your "
-    "own agent.\n"
+    "own agent. Every step spends from a small budget, so when a request needs "
+    "several independent lookups, ask for all of them in ONE step (several tool "
+    "calls at once) and call a tool by its exact name, with no agent in front.\n"
     "8. RESPONSE STYLE (always): answer the question FIRST — one or two clear "
     "sentences for the headline, then detail. Use short paragraphs, headers "
     "and bullet lists for anything multi-part. Summarize tool results in "
@@ -5114,6 +5166,10 @@ def _run_dispatch_loop(
     # real call with the same arguments.
     _DEDUP_GUARDED_TOOLS = {"claude_code", "codex_code"}
     _seen_tool_calls: dict[tuple[str, str], str] = {}
+    # Finding #192: a tool whose source said "rate limit" this run. A rate limit belongs to the source, not to
+    # the arguments, so asking again with another symbol or wording only spends steps (live: stock_quote seven
+    # times in one run). Later calls to that tool get the same answer back, with a note to say so and move on.
+    _rate_limited_tools: dict[str, str] = {}
     # Deterministic tool->owner map: plans name SUBAGENTS but the model calls
     # TOOLS, so the loop ties them together to tell when a plan step has
     # actually been executed.
@@ -5250,6 +5306,13 @@ def _run_dispatch_loop(
             # its own real Claude escalation matters most.
             if matches and _is_heavy_workflow_agent(matches[0]["name"]):
                 plan_agents = {matches[0]["name"]}
+        # Finding #192: a request that names two or more domains ("the headlines, how the S&P 500 is doing and
+        # my free disk space") needs every one of those agents on the first step. Ranking keeps the best two, so
+        # the third agent's tools were missing and the model spent steps finding them. Single-domain requests
+        # keep the selection above; a heavy-workflow agent in the mix keeps its own focused turn.
+        _named_agents = {a for a in domain_agents_in_query(str(last_user)) if a in registry.subagent_names}
+        if len(_named_agents) >= 2 and not any(_is_heavy_workflow_agent(a) for a in set(plan_agents) | _named_agents):
+            plan_agents = set(plan_agents) | set(sorted(_named_agents)[:4])
         # CAP1-1 (found 2026-10-27, confirmed on the real roster): the RESEARCH FIRST rule says to
         # check every real-world fact with web_search and fetch_url, but tools are only attached
         # for agents that score 3 or more, and an ordinary question scores nothing ("who is the
@@ -5436,10 +5499,20 @@ def _run_dispatch_loop(
             except Exception:  # noqa: BLE001 - memory retrieval must never break a turn
                 memory_context = ""
 
-    for turn_index in range(max_turns):
+    # Finding #192: a request that spans several agents needs more than one agent's worth of steps. The top-level
+    # budget grows with the agents the request touches (never below what the caller asked for); a nested run
+    # keeps the budget its caller gave it.
+    if ctx.depth == 0 and not ctx.forced_agent and len(plan_agents) > 1:
+        max_turns = max(max_turns, 3 * len(plan_agents) + 2)
+    offered_tool_names = {t.get("function", {}).get("name", "") for t in scoped_tools}
+    free_lookup_turns = 0  # turns that only looked something up: refunded, up to _MAX_FREE_LOOKUP_TURNS
+    for turn_index in range(max_turns + _MAX_FREE_LOOKUP_TURNS):
+        spent_turns = turn_index - free_lookup_turns
+        if spent_turns >= max_turns:
+            break  # falls through to the forced synthesis below, exactly as running out of the range did
         # Finding #134: how many turns remain AFTER this one. A nudge asks the
         # model to act on the next turn, so it only makes sense when one exists.
-        turns_left = max_turns - turn_index - 1
+        turns_left = max_turns - spent_turns - 1
         # Deterministic cost cap BEFORE each LLM call (spec: prevent runaway
         # execution loop costs). A tripped budget ends the run honestly.
         if cost_budget is not None:
@@ -5514,7 +5587,9 @@ def _run_dispatch_loop(
                 if any(tool_owner.get(u) == s["subagent"] for u in used_tools)
                 or s["subagent"] in delegated
             }
-            return [s for s in plan if s["n"] not in touched_steps]
+            # A step the orchestrator carries itself (no agent matched it) is conversation, not a tool step:
+            # it can never be "not executed via tools" (finding #192).
+            return [s for s in plan if s["n"] not in touched_steps and s["subagent"] != "orchestrator"]
 
         def _inject_plan_reminder(missing: list[dict[str, Any]]) -> None:
             nonlocal plan_reminders
@@ -5884,6 +5959,12 @@ def _run_dispatch_loop(
                     )
                 return {"final_text": "", "transcript": transcript, "messages": messages}
             name = tool_call.function.name
+            called_as = None
+            if registry.lookup(name) is None:
+                # Finding #192: "markets.stock_quote" is the tool stock_quote under an agent's name. Run it now.
+                _aliased = _resolve_tool_alias(name, offered_tool_names)
+                if _aliased is not None:
+                    called_as, name = name, _aliased
             use_entry = {
                 "type": "tool_use",
                 "name": name,
@@ -5892,6 +5973,8 @@ def _run_dispatch_loop(
                     if dlp is not None else tool_call.function.arguments
                 ),
             }
+            if called_as:
+                use_entry["called_as"] = called_as
             transcript.append(use_entry)
             _emit_event(event_sink, use_entry, ctx=ctx)
             spec = registry.lookup(name)
@@ -5987,7 +6070,15 @@ def _run_dispatch_loop(
                         prior_result = (
                             _seen_tool_calls.get(dedup_key) if dedup_key else None
                         )
-                        if prior_result is not None:
+                        if prior_result is None and name in _rate_limited_tools:
+                            result_text = (
+                                f"[DOURMOUSE: '{name}' reported a rate limit earlier in this run. Another call "
+                                "will not help, so it was not made. Tell the user the source is rate-limited, "
+                                "answer the rest of the request, and do not retry it.]\n"
+                                + _rate_limited_tools[name]
+                            )
+                            result_is_own = True
+                        elif prior_result is not None:
                             # Same tool + identical arguments already ran this
                             # turn — reuse the real prior result instead of
                             # replaying the instruction into the same live
@@ -6018,6 +6109,9 @@ def _run_dispatch_loop(
                                 result_is_own = isinstance(result_text, DispatcherText)
                                 if dedup_key:
                                     _seen_tool_calls[dedup_key] = result_text
+                                # An agent's answer is not a source error, even when it talks about one.
+                                if name not in _NESTED_RUN_TOOLS and _is_rate_limit_result(result_text):
+                                    _rate_limited_tools[name] = result_text
 
             # DLP at the API boundary: redact credential-shaped text from tool
             # results before they reach the model or the audit transcript.
@@ -6071,6 +6165,14 @@ def _run_dispatch_loop(
             _maybe_ingest_memory(ctx.depth, str(last_user), shown(result_text), plan_agents)
             return {"final_text": shown(result_text), "transcript": transcript, "messages": messages}
 
+        # Finding #192: a turn made only of free lookups did not spend the run's budget.
+        if (
+            tool_calls
+            and free_lookup_turns < _MAX_FREE_LOOKUP_TURNS
+            and all(c.function.name in FREE_LOOKUP_TOOLS for c in tool_calls)
+        ):
+            free_lookup_turns += 1
+
     # v8.28: the loop ran out of tool-call turns (max_turns) while the model
     # was still mid-research — observed live on a completely reasonable
     # question ("latest stable PyTorch version"): 7 web_search calls + 1
@@ -6092,48 +6194,65 @@ def _run_dispatch_loop(
     }
     transcript.append(forced_entry)
     _emit_event(event_sink, forced_entry, ctx=ctx)
-    forced_messages = messages + [
-        {
-            "role": "system",
-            "content": (
-                "[OUT OF TOOL BUDGET] You have used every tool call available "
-                "for this turn. Do not attempt to call any more tools — none "
-                "are available. Answer the user's original question RIGHT "
-                "NOW using only what you already found above. If what you "
-                "gathered is incomplete, give your best answer from it and "
-                "say plainly what remains uncertain — never return an empty "
-                "reply."
-            ),
-        }
-    ]
-    try:
-        forced_response = _call_with_retry(
-            client,
-            model=model,
-            messages=_bounded_context(forced_messages, _context_budget(ctx.config)),
-            tools=[],  # no tools offered: the model cannot keep stalling on search
-            config=ctx.config,
-            event_sink=event_sink,
-        )
-        forced_text = _strip_leaked_harmony_channel(forced_response.choices[0].message.content or "")
-    except Exception as exc:  # noqa: BLE001 - the forced call itself must never crash the turn
-        forced_text = ""
-        _emit_event(
-            event_sink,
-            {"type": "assistant_text", "text": f"[forced synthesis call failed: {exc}]"},
-            ctx=ctx,
-        )
+    forced_instruction = (
+        "[OUT OF TOOL BUDGET] You have used every tool call available "
+        "for this turn. Do not attempt to call any more tools — none "
+        "are available. Answer the user's original question RIGHT "
+        "NOW using only what you already found above. If what you "
+        "gathered is incomplete, give your best answer from it and "
+        "say plainly what remains uncertain — never return an empty "
+        "reply."
+    )
+    forced_text = ""
+    # Finding #192: a model sometimes answers a trailing SYSTEM note with nothing at all (live, gpt-oss:120b
+    # after a tool exchange: the run reported "no complete answer" with the headlines and the disk figure
+    # already gathered). The second try says the same thing as a user turn, once, behind a bridging assistant
+    # line so a tool message is never followed straight by a user message.
+    for forced_attempt in (
+        [{"role": "system", "content": forced_instruction}],
+        [
+            {"role": "assistant", "content": "I have finished using tools for this turn."},
+            {"role": "user", "content": forced_instruction},
+        ],
+    ):
+        try:
+            forced_response = _call_with_retry(
+                client,
+                model=model,
+                messages=_bounded_context(messages + forced_attempt, _context_budget(ctx.config)),
+                tools=[],  # no tools offered: the model cannot keep stalling on search
+                config=ctx.config,
+                event_sink=event_sink,
+            )
+            forced_message = forced_response.choices[0].message
+            forced_text = _strip_leaked_harmony_channel(forced_message.content or "")
+        except Exception as exc:  # noqa: BLE001 - the forced call itself must never crash the turn
+            forced_text = ""
+            _emit_event(
+                event_sink,
+                {"type": "assistant_text", "text": f"[forced synthesis call failed: {exc}]"},
+                ctx=ctx,
+            )
+            break
+        if forced_text.strip() or getattr(forced_message, "tool_calls", None):
+            break
 
     if not forced_text.strip():
         # Even the forced, tool-free call came back empty (rare) — say so
         # honestly instead of a silent blank reply (Rule 2.2: no fabricated
-        # success, but also no silent failure the user can't see).
+        # success, but also no silent failure the user can't see). What the tools did return
+        # is shown, so the work is not lost (finding #192).
         tool_names = [e["name"] for e in transcript if e.get("type") == "tool_use"]
         forced_text = (
             "I wasn't able to reach a complete answer within my tool budget "
             f"({len(tool_names)} tool call(s): {', '.join(tool_names) or 'none'}). "
-            "Try rephrasing the question more narrowly, or ask again — a "
-            "second attempt often converges faster."
+        )
+        digest = _tool_digest(transcript)
+        if digest:
+            forced_text += f"This is what the tools returned before it ran out:\n{digest}\n"
+        forced_text += (
+            "Ask me to continue and I will pick up from there, or try a narrower "
+            "question."
         )
 
     if dlp is not None:

@@ -142,6 +142,17 @@ _DOMAIN_ROUTE: dict[str, str] = {
     "price": "markets",
     "prices": "markets",
     "forex": "markets",
+    # finding #192: "how is the S&P 500 doing today" scored the markets agent 1 (the bar is 3), so the
+    # agent that owns stock_quote was never offered and the model spent its steps improvising. "S&P 500"
+    # is folded to sp500 below (a lone "s" and "p" are dropped as noise by the tokenizer).
+    "sp500": "markets",
+    "nasdaq": "markets",
+    "dow": "markets",
+    "ticker": "markets",
+    "tickers": "markets",
+    "crypto": "markets",
+    "ethereum": "markets",
+    "markets": "markets",
     "task": "tasks",
     "tasks": "tasks",
     "todo": "tasks",
@@ -263,6 +274,22 @@ def looks_multi_step(prompt: str) -> bool:
     return neural_is_multi_step(prompt)
 
 
+_SP500 = re.compile(r"\bs\s*&\s*p(?:\s*500)?\b")
+
+
+def _fold_index_names(text: str) -> str:
+    """"s&p 500" and "s & p" become one token. The tokenizer drops one-letter words, which left only "500"."""
+    return _SP500.sub("sp500", text)
+
+
+def domain_agents_in_query(query: str) -> set[str]:
+    """The agents a query names outright through a high-confidence domain word (finding #192). A request that
+    names two or more ("the headlines, the S&P 500 and my disk space") needs all of them on the first step;
+    ranking alone keeps the best two, and the model then spends its steps discovering the third."""
+    cleaned = _fold_index_names(re.sub(r"\S*/\S+", " ", (query or "").lower()))
+    return {_DOMAIN_ROUTE[t] for t in re.findall(r"[a-z0-9]{2,}", cleaned) if t in _DOMAIN_ROUTE}
+
+
 def find_agents_for_query(
     registry: Any, query: str, limit: int = 3
 ) -> list[dict[str, Any]]:
@@ -287,7 +314,7 @@ def find_agents_for_query(
     for a given query + registry.
     """
     # 1) Strip path fragments first — a file path is not intent.
-    cleaned = re.sub(r"\S*/\S+", " ", query.lower())
+    cleaned = _fold_index_names(re.sub(r"\S*/\S+", " ", query.lower()))
     tokens = {
         t
         for t in re.findall(r"[a-z0-9]{2,}", cleaned)
@@ -572,6 +599,9 @@ def build_plan(prompt: str, registry: Any, max_steps: int = 6) -> list[dict[str,
     steps: list[dict[str, Any]] = []
     for i, piece in enumerate(pieces[:max_steps], 1):
         matches = find_agents_for_query(registry, piece, limit=1)
-        subagent = matches[0]["name"] if matches else "orchestrator"
+        # Finding #192: below the scoping bar (3) a fragment is not a task for any agent. "why? Keep it to
+        # three sentences." went to the security agent at score 2 and the answer ended with a note that a
+        # security step had not run. The orchestrator carries such a clause conversationally.
+        subagent = matches[0]["name"] if matches and matches[0]["score"] >= 3 else "orchestrator"
         steps.append({"n": i, "task": piece, "subagent": subagent})
     return steps

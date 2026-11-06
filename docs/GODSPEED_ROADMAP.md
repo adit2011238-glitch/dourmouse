@@ -1168,4 +1168,5 @@ and a real build sequence, not just a requirement statement:
 - [x] Finding #188 2026-10-27 -- stress test fixes (SSE stall, approval wait, full disk, per-token log writes, research checkpoint, upload cut-off) and research-first tool routing (CAP1-1).
 - [x] Finding #189 2026-10-31 -- agents talk to each other: ask_agent and list_agents offered to all 44 agents (owner prompt when a page-reading conversation asks an agent that acts), plus three bugs found live (directive wording, nested model label 404, max_turns hint).
 - [x] Finding #190 2026-10-31 -- Google sign-in from the app window runs the claim bridge (banner and classic popup), fixing "this sign-in was not started in this browser".
-
+- [x] Finding #191 2026-11-06 -- Claude CLI no longer inherits another provider's ANTHROPIC_* routing; `claude auth status` and the banner follow the CLI's own signed-in answer.
+- [x] Finding #192 2026-11-06 -- step budget: free roster lookups, namespaced tool names resolve, rate-limited tools are not retried, markets routing and multi-domain requests, scaled budget, sturdier last-chance summary, no invented plan steps.

@@ -80,6 +80,17 @@ def _cli_version(name: str) -> str | None:
     return text.splitlines()[0][:80] if text else None
 
 
+def _claude_cli_signed_out() -> bool:
+    """True only when `claude auth status` itself says the CLI has no login (finding #191). Anything else,
+    including a probe that cannot run, is False: this never invents a verdict."""
+    try:
+        from dourmouse import code_backends
+
+        return code_backends.claude_cli_signed_in() is False
+    except Exception:  # noqa: BLE001 - a broken probe never kills the report
+        return False
+
+
 def _claude_signin() -> str:
     """'yes' | 'unknown' — never a confident 'no'.
 
@@ -194,8 +205,15 @@ def check_connections() -> dict[str, dict[str, Any]]:
 
     claude = _cli_version("claude")
     signin = _claude_signin() if claude else "unknown"
+    # Finding #191: the Keychain entry above only proves a session was once stored. An expired one still
+    # counted as signed in here, so the banner stayed silent while every Claude turn failed. `claude auth
+    # status` is the CLI's own answer; when it says signed out, that wins.
+    if claude and _claude_cli_signed_out():
+        signin = "no"
     if claude and signin == "yes":
         claude_detail = f"Claude Code CLI {claude} · signed in"
+    elif claude and signin == "no":
+        claude_detail = f"Claude Code CLI {claude} · signed out"
     elif claude:
         claude_detail = f"Claude Code CLI {claude} · sign-in not verified"
     else:
@@ -217,7 +235,10 @@ def check_connections() -> dict[str, dict[str, Any]]:
         "ok": bool(claude) and signin == "yes",
         "detail": claude_detail,
         "hint": (
-            f"installed; sign-in could not be confirmed ({_no_signal_reason}). "
+            "the CLI reports no login (it expired or was never made). Run 'claude auth login' and finish it "
+            "in the browser. Until then chats use the configured cloud model instead."
+            if claude and signin == "no"
+            else f"installed; sign-in could not be confirmed ({_no_signal_reason}). "
             "Run 'claude' once on the host and complete "
             "/login — it will work here once signed in."
             if claude

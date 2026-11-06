@@ -687,8 +687,11 @@ def claude_cli_signed_in(*, ttl: float = 60.0) -> bool | None:
 
         cli = _find_claude_cli()
         if cli:
+            # The same environment `claude -p` gets (finding #191): a leaked ANTHROPIC_API_KEY made this say
+            # loggedIn true for a CLI that has no login of its own.
             proc = subprocess.run(  # noqa: S603 - the owner's own CLI, fixed argv
                 [cli, "auth", "status"], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=8, check=False, stdin=subprocess.DEVNULL,
+                env=_cli_env(cli),
             )
             data = json.loads(proc.stdout or "{}")
             if isinstance(data, dict) and isinstance(data.get("loggedIn"), bool):
@@ -697,6 +700,31 @@ def claude_cli_signed_in(*, ttl: float = 60.0) -> bool | None:
         result = None
     _SIGNIN_CACHE["at"], _SIGNIN_CACHE["value"] = now, (result,)
     return result
+
+
+#: The variables that decide WHICH account and WHICH model a `claude` process talks to. Finding #191 (owner test,
+#: live): Dourmouse started from a shell whose Claude Code is pointed at another provider (ANTHROPIC_BASE_URL
+#: at an Ollama or DeepSeek gateway, a placeholder ANTHROPIC_API_KEY, ANTHROPIC_DEFAULT_*_MODEL set to
+#: "deepseek-r1:14b[1m]") passed all of it to every `claude` it ran. The CLI then ignored the owner's own
+#: sign-in and each Claude-front turn answered "claude exited 1: [claude-code:unrecognized_model] ... Invalid
+#: API key". The same variables made `claude auth status` say loggedIn true (authMethod api_key), which
+#: defeated the signed-out fallback of finding #183. Dourmouse's Claude CLI backend is the owner's own Claude
+#: sign-in and nothing else, so none of these reach the child. CLAUDE_CODE_OAUTH_TOKEN is not listed on
+#: purpose: it is a way of signing in, not of routing somewhere else.
+_CLAUDE_ROUTING_ENV = (
+    "ANTHROPIC_BASE_URL",
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_MODEL",
+    "ANTHROPIC_SMALL_FAST_MODEL",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+    "CLAUDE_CODE_SUBAGENT_MODEL",
+    "CLAUDE_CODE_USE_BEDROCK",
+    "CLAUDE_CODE_USE_VERTEX",
+    "CLAUDE_CODE_USE_FOUNDRY",
+)
 
 
 def _cli_env(cli: str | None = None) -> dict[str, str]:
@@ -709,6 +737,10 @@ def _cli_env(cli: str | None = None) -> dict[str, str]:
     or from ~/.claude/.credentials.json on Linux and Windows. Nothing here
     reads, injects, copies or logs a token; stripping the environment (or
     passing a hand-built one) is what would break that lookup, so we don't.
+
+    The one thing taken out is _CLAUDE_ROUTING_ENV: those variables do not
+    support the sign-in, they replace it (finding #191). Only the copy
+    loses them; this process's own environment is left as it was.
 
     What IS added is PATH. A macOS app launched from the Dock or via `open`
     does not inherit the user's shell PATH: the dourmouse2.app server
@@ -724,6 +756,8 @@ def _cli_env(cli: str | None = None) -> dict[str, str]:
     siblings are the most likely place its own helpers live.
     """
     env = dict(os.environ)
+    for name in _CLAUDE_ROUTING_ENV:
+        env.pop(name, None)
 
     extra: list[str] = []
     if cli:
