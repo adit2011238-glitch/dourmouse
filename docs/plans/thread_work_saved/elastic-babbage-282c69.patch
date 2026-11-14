@@ -1,0 +1,482 @@
+diff --git a/dourmouse/goal_runtime.py b/dourmouse/goal_runtime.py
+index dbbec70..fb59d34 100644
+--- a/dourmouse/goal_runtime.py
++++ b/dourmouse/goal_runtime.py
+@@ -40,8 +40,10 @@ Phase 2, not silently assumed done):
+ 
+ from __future__ import annotations
+ 
++import importlib
+ import os
+ import threading
++from collections.abc import Callable
+ from typing import Any
+ 
+ from dourmouse.config import auto_approve_enabled, workspace_dir
+@@ -54,6 +56,28 @@ _DEFAULT_TICK_SECONDS = 5.0
+ #: unlimited, even though this loop is single-threaded per tick today.
+ _MAX_TASKS_PER_TICK = 3
+ 
++#: PL-10 shared foundation 1 (jobs): a task whose ``assigned_agent`` is
++#: "job:<kind>" runs a Python handler instead of a chat turn, so a long job
++#: (a research run) is a series of goal tasks rather than one chat turn that
++#: runs out of steps. The handler is called as ``handler(store, goal, task,
++#: approved)`` and returns {"verified": bool, "final_text": str, "evidence":
++#: str} or {"park": "what the owner must do"}. Its own checks are
++#: deterministic, so no model grades the work. A handler module registers
++#: itself on import; ``_JOB_MODULES`` says which module to import for a kind.
++JobHandler = Callable[[GoalStore, dict[str, Any], dict[str, Any], bool], dict[str, Any]]
++JOB_HANDLERS: dict[str, JobHandler] = {}
++_JOB_MODULES = {"research": "dourmouse.research_pipeline.research_job"}
++
++
++def register_job_handler(kind: str, handler: JobHandler) -> None:
++    JOB_HANDLERS[kind] = handler
++
++
++def job_handler(kind: str) -> JobHandler | None:
++    if kind not in JOB_HANDLERS and kind in _JOB_MODULES:
++        importlib.import_module(_JOB_MODULES[kind])
++    return JOB_HANDLERS.get(kind)
++
+ 
+ def goal_runtime_enabled() -> bool:
+     """Default ON since 2026-09-18 (opt-OUT, not opt-in) — a real, live
+@@ -276,6 +300,10 @@ class GoalRuntime:
+             result={} if approved_this_run else None,
+         )
+         self._store.set_current_task(goal_id, task_id)
++        agent = str(task.get("assigned_agent") or "")
++        if agent.startswith("job:"):
++            self._run_job_step(goal, task, agent[len("job:"):], approved_this_run)
++            return
+         try:
+             report = self._execute_via_dispatch(goal, task, approved_prompts)
+         except Exception as exc:
+@@ -339,6 +367,42 @@ class GoalRuntime:
+             result={"final_text": final_text, "verified": True, "note": "independently verified"},
+         )
+ 
++    def _run_job_step(self, goal: dict[str, Any], task: dict[str, Any], kind: str, approved: bool) -> None:
++        """One step of a native job (see JOB_HANDLERS). Same failure, retry,
++        approval and cancel rules as a chat task; the verification is the
++        handler's own deterministic check, logged as such."""
++        goal_id, task_id = goal["id"], task["id"]
++        handler = job_handler(kind)
++        if handler is None:
++            self._handle_task_failure(goal, task, f"no job handler is registered for {kind!r}")
++            return
++        try:
++            out = handler(self._store, goal, task, approved)
++        except Exception as exc:  # noqa: BLE001 - routed through the normal retry path, never swallowed
++            self._handle_task_failure(goal, task, f"{type(exc).__name__}: {exc}")
++            return
++        current_task = self._store.get_task(task_id)
++        if current_task is None or current_task["status"] in TASK_TERMINAL_STATES:
++            return  # cancelled while the step ran
++        if out.get("park"):
++            reason = str(out["park"])
++            self._store.update_task_status(task_id, "WAITING_FOR_APPROVAL", error=reason,
++                                           result={"pending_prompts": [reason]})
++            if self._store.update_goal_status(goal_id, "WAITING_FOR_APPROVAL", blocked_reason=reason):
++                self._notify(goal_id, f"Needs you: {goal['objective']}", reason)
++            return
++        verified = bool(out.get("verified"))
++        final_text = str(out.get("final_text") or "")
++        self._store.log_event(goal_id, "verification", {
++            "verified": verified, "method": "deterministic (job handler)",
++            "reasoning": str(out.get("evidence") or final_text)[:2000], "error": None,
++        }, task_id=task_id)
++        if not verified:
++            self._handle_task_failure(goal, task, final_text or "the job step reported that it did not succeed")
++            return
++        self._store.update_task_status(task_id, "COMPLETED", result={
++            "final_text": final_text, "verified": True, "note": "checked by the job's own deterministic checks"})
++
+     def _execute_via_dispatch(
+         self, goal: dict[str, Any], task: dict[str, Any], approved_prompts: Any = (),
+     ) -> dict[str, Any]:
+diff --git a/dourmouse/os_api/research.py b/dourmouse/os_api/research.py
+index ebb98ec..eed5a4a 100644
+--- a/dourmouse/os_api/research.py
++++ b/dourmouse/os_api/research.py
+@@ -17,6 +17,16 @@ All routes are read-only over what the research pipeline already stored:
+   and every stored claim with its passage and source URL, returned as text. The
+   browser turns it into a download; the server writes no file.
+ 
++Research jobs (PL-10 T1, research_pipeline/research_job.py), the background
++runs with the owner's two decisions:
++
++* ``GET  /api/os/research/jobs`` and ``GET /api/os/research/job?id=``
++* ``POST /api/os/research/jobs/start {topic, style, pause_after_brief}``
++* ``POST /api/os/research/job/brief {id, owner_notes}``, then ``/job/continue {id}``
++* ``POST /api/os/research/job/questions {id, question, goals, sub_questions}``,
++  then ``/job/approve {id}``
++* ``GET  /api/os/research/job/export?id=&format=markdown|json&style=apa|mla``
++
+ A claim's ``status`` is ACTIVE or REJECTED. "Contested" means it has a
+ ``contradicted_by`` edge. There is no stored "verified" flag: every stored claim
+ passed the verbatim substring check on the fetched page when it was extracted.
+@@ -40,13 +50,13 @@ _STAGES: tuple[tuple[str, str, tuple[str, ...], str], ...] = (
+     ("decomposition", "Decomposition", ("research_plan",), "research_plan splits it into sub-questions"),
+     ("plan", "Research plan", ("research_plan",), "research_plan stores the plan"),
+     ("discover", "Source discovery", ("research_discover_sources",), "research_discover_sources searches and fetches"),
+-    ("validate", "Source validation", (), "no tool judges a source's credibility; only the verbatim passage check exists, inside extraction"),
++    ("validate", "Source validation", ("research_start_job",), "research_start_job grades every paper it reads: venue, citations per year, age, full text or abstract, agreement with the other papers"),
+     ("extract", "Evidence extraction", ("research_extract_evidence",), "research_extract_evidence keeps a claim only if its quote is a verbatim substring of the page"),
+     ("hypothesis", "Hypothesis gen", ("research_hypothesize",), "research_hypothesize"),
+     ("critique", "Criticism", ("research_critique",), "research_critique"),
+     ("design", "Experiment design", ("research_design_experiment",), "research_design_experiment"),
+     ("run", "Experiment run", ("research_experiment",), "research_experiment"),
+-    ("stats", "Statistics", (), "describe_samples exists in code but no registered tool calls it"),
++    ("stats", "Statistics", ("research_statistics",), "research_statistics (describe_samples); a research job also summarizes numbers several papers report"),
+     ("replicate", "Replication", ("research_replicate",), "research_replicate"),
+     ("contradict", "Contradiction", ("research_detect_contradictions",), "research_detect_contradictions"),
+     ("revise", "Revision", ("research_follow_up",), "research_follow_up runs the backward edge"),
+@@ -259,3 +269,108 @@ def export(req: Request) -> tuple[int, dict[str, Any]]:
+     if fmt == "json":
+         return 200, {"ok": True, "filename": f"{stem}.json", "mime": "application/json", "content": json.dumps(d, indent=2, ensure_ascii=False)}
+     return 200, {"ok": True, "filename": f"{stem}.md", "mime": "text/markdown", "content": _markdown(d)}
++
++
++# ---------------------------------------------------------------- research jobs (PL-10 T1)
++
++_JOB_ID = re.compile(r"^goal_[0-9a-f]{16}$")
++
++
++def _job_id(value: str) -> str:
++    value = (value or "").strip()
++    if not _JOB_ID.match(value):
++        raise ApiError(400, "bad research job id")
++    return value
++
++
++def _rj():  # type: ignore[no-untyped-def]
++    from dourmouse.research_pipeline import research_job
++
++    return research_job
++
++
++@route("GET", "/api/os/research/jobs")
++def jobs_list(req: Request) -> tuple[int, dict[str, Any]]:
++    rj = _rj()
++    out = []
++    for j in rj.jobs().list(50):
++        view = rj.job_view(j["id"])
++        if view is None:
++            continue
++        out.append({"id": j["id"], "topic": view["topic"], "status": view["status"], "waiting_for": view["waiting_for"],
++                    "cards": len(view["cards"]), "answered": bool(view["report"]), "created_at": j["created_at"]})
++    return 200, {"ok": True, "jobs": out}
++
++
++@route("GET", "/api/os/research/job")
++def job_detail(req: Request) -> tuple[int, dict[str, Any]]:
++    view = _rj().job_view(_job_id(req.arg("id")))
++    if view is None:
++        raise ApiError(404, "no such research job")
++    return 200, {"ok": True, **view}
++
++
++@route("POST", "/api/os/research/jobs/start")
++def job_start(req: Request) -> tuple[int, dict[str, Any]]:
++    try:
++        job_id = _rj().start_job(str(req.body.get("topic") or ""), style=str(req.body.get("style") or "apa"),
++                                 pause_after_brief=bool(req.body.get("pause_after_brief", True)))
++    except ValueError as exc:
++        raise ApiError(400, str(exc)) from None
++    return 200, {"ok": True, "id": job_id}
++
++
++@route("POST", "/api/os/research/job/brief")
++def job_brief(req: Request) -> tuple[int, dict[str, Any]]:
++    job_id = _job_id(str(req.body.get("id") or ""))
++    try:
++        _rj().correct_brief(job_id, str(req.body.get("owner_notes") or ""))
++    except KeyError:
++        raise ApiError(404, "no such research job") from None
++    except ValueError as exc:
++        raise ApiError(409, str(exc)) from None
++    return 200, {"ok": True}
++
++
++@route("POST", "/api/os/research/job/continue")
++def job_continue(req: Request) -> tuple[int, dict[str, Any]]:
++    if not _rj().continue_after_brief(_job_id(str(req.body.get("id") or ""))):
++        raise ApiError(409, "this job is not waiting for the brief to be checked")
++    return 200, {"ok": True}
++
++
++@route("POST", "/api/os/research/job/questions")
++def job_questions(req: Request) -> tuple[int, dict[str, Any]]:
++    job_id = _job_id(str(req.body.get("id") or ""))
++    payload = {k: req.body.get(k) for k in ("question", "goals", "sub_questions")}
++    try:
++        body = _rj().edit_questions(job_id, payload)
++    except KeyError:
++        raise ApiError(404, "no such research job") from None
++    except ValueError as exc:
++        raise ApiError(400, str(exc)) from None
++    return 200, {"ok": True, "questions": body["questions"]}
++
++
++@route("POST", "/api/os/research/job/approve")
++def job_approve(req: Request) -> tuple[int, dict[str, Any]]:
++    try:
++        ok = _rj().approve_questions(_job_id(str(req.body.get("id") or "")))
++    except ValueError as exc:
++        raise ApiError(400, str(exc)) from None
++    if not ok:
++        raise ApiError(409, "this job is not waiting for its questions to be approved")
++    return 200, {"ok": True}
++
++
++@route("GET", "/api/os/research/job/export")
++def job_export(req: Request) -> tuple[int, dict[str, Any]]:
++    job_id = _job_id(req.arg("id"))
++    try:
++        name, mime, content = _rj().export(job_id, (req.arg("format", "markdown") or "markdown").lower(),
++                                           (req.arg("style") or "").lower() or None)
++    except KeyError:
++        raise ApiError(404, "no such research job") from None
++    except ValueError as exc:
++        raise ApiError(409, str(exc)) from None
++    return 200, {"ok": True, "filename": name, "mime": mime, "content": content}
+diff --git a/dourmouse/research_pipeline_tools.py b/dourmouse/research_pipeline_tools.py
+index 175b32c..a95b3d0 100644
+--- a/dourmouse/research_pipeline_tools.py
++++ b/dourmouse/research_pipeline_tools.py
+@@ -462,6 +462,69 @@ def _research_design_experiment_tool(arguments: dict[str, Any]) -> str:
+     return out
+ 
+ 
++def _research_start_job_tool(arguments: dict[str, Any]) -> str:
++    """PL-10 T1: a full research run is a background job, not a chat turn."""
++    from dourmouse.research_pipeline import research_job
++
++    try:
++        job_id = research_job.start_job(
++            str(arguments.get("topic") or ""), style=str(arguments.get("style") or "apa"),
++            pause_after_brief=bool(arguments.get("pause_after_brief", True)),
++        )
++    except ValueError as exc:
++        return f"ERROR: {exc}"
++    return (f"Started research job {job_id} in the background. It writes a context brief, then waits for the "
++            "owner to check it on the RESEARCH screen; it reads papers from OpenAlex, Semantic Scholar and arXiv, "
++            "proposes research questions and waits for the owner's approval, then answers them with citations. "
++            "Nothing has been answered yet: tell the owner to follow it on the RESEARCH screen.")
++
++
++def _research_job_status_tool(arguments: dict[str, Any]) -> str:
++    from dourmouse.research_pipeline import research_job
++
++    job_id = str(arguments.get("job_id") or "").strip()
++    view = research_job.job_view(job_id) if job_id else None
++    if view is None:
++        recent = research_job.jobs().list(5)
++        if not recent:
++            return "No research jobs exist yet."
++        return "Recent research jobs:\n" + "\n".join(f"- {j['id']}: {j['topic']}" for j in recent)
++    lines = [f"job {view['id']}: {view['topic']}", f"status: {view['status']}"]
++    if view["waiting_for"]:
++        lines.append(f"waiting for the owner: {view['blocked_reason']}")
++    lines.append(f"papers read: {(view['spend'] or {}).get('papers_read', 0)}, cards: {len(view['cards'])}")
++    report = view.get("report")
++    if report:
++        lines.append(f"stopped: {report['stop_reason']}")
++        for a in report["answers"]:
++            text = " ".join(f"{s['text']} {s['citation']}".strip() for s in a["sentences"]) or "not answered"
++            lines.append(f"- {a['sub_question']}: {text} [confidence {a['confidence']}]")
++    lines += [f"log: {line}" for line in view["log"][-5:]]
++    return "\n".join(lines)
++
++
++def _research_statistics_tool(arguments: dict[str, Any]) -> str:
++    """The statistics stage: describe_samples over numbers the caller gives."""
++    from dourmouse.research_pipeline.hypotheses import describe_samples
++
++    raw = arguments.get("values")
++    if not isinstance(raw, list):
++        return "ERROR: values must be a list of numbers."
++    values = [v for v in raw if isinstance(v, (int, float)) and not isinstance(v, bool)]
++    if len(values) != len(raw):
++        return "ERROR: every value must be a number."
++    null = arguments.get("null_mean")
++    stats = describe_samples(values, float(null)) if isinstance(null, (int, float)) and not isinstance(null, bool) \
++        else describe_samples(values)
++    if "error" in stats:
++        return f"Not computed: {stats['error']} (n={stats['n']})."
++    out = (f"n={stats['n']}, mean={stats['mean']:.6g}, sd={stats['sd']:.6g}, "
++           f"95% CI [{stats['ci95'][0]:.6g}, {stats['ci95'][1]:.6g}]")
++    if isinstance(null, (int, float)) and not isinstance(null, bool):
++        out += f", t={stats['t']:.4g}, p={stats['p_two_sided']:.4g} against {null:g} ({stats['method']})"
++    return out
++
++
+ def build_research_pipeline_subagent(registry: DispatchRegistry) -> Subagent:
+     return Subagent(
+         name="evidence_pipeline",
+@@ -474,6 +537,47 @@ def build_research_pipeline_subagent(registry: DispatchRegistry) -> Subagent:
+             "these tools in sequence to drive a full research pass."
+         ),
+         tools=(
++            ToolSpec(
++                name="research_start_job",
++                description=(
++                    "Start a full research run on a topic as a BACKGROUND JOB (use this for any real research "
++                    "question): context brief, academic paper search (OpenAlex, Semantic Scholar, arXiv), one "
++                    "graded card per paper with verified quotes, research questions the owner approves, then "
++                    "answers with claim-level citations and an APA or MLA reference list. It does not answer in "
++                    "this turn; the owner follows it on the RESEARCH screen."
++                ),
++                parameters={
++                    "type": "object",
++                    "properties": {
++                        "topic": {"type": "string"},
++                        "style": {"type": "string", "enum": ["apa", "mla"], "default": "apa"},
++                        "pause_after_brief": {"type": "boolean", "default": True},
++                    },
++                    "required": ["topic"],
++                },
++                handler=_research_start_job_tool,
++            ),
++            ToolSpec(
++                name="research_job_status",
++                description="Status of a background research job (or the recent jobs when no id is given), "
++                            "with its answers once written.",
++                parameters={"type": "object", "properties": {"job_id": {"type": "string"}}},
++                handler=_research_job_status_tool,
++                permission=Permission.REGULAR,
++            ),
++            ToolSpec(
++                name="research_statistics",
++                description=("Statistics over numbers, computed without a model: n, mean, standard deviation, "
++                             "95% confidence interval, and a one-sample t-test when a null value is given."),
++                parameters={
++                    "type": "object",
++                    "properties": {"values": {"type": "array", "items": {"type": "number"}},
++                                   "null_mean": {"type": "number"}},
++                    "required": ["values"],
++                },
++                handler=_research_statistics_tool,
++                permission=Permission.REGULAR,
++            ),
+             ToolSpec(
+                 name="research_plan",
+                 description=(
+diff --git a/dourmouse/tests/test_os_api_research.py b/dourmouse/tests/test_os_api_research.py
+index c80ac0f..2e11e43 100644
+--- a/dourmouse/tests/test_os_api_research.py
++++ b/dourmouse/tests/test_os_api_research.py
+@@ -77,7 +77,9 @@ class TestLoop:
+         assert status == 200 and d["total"] == 15
+         by = {s["key"]: s for s in d["stages"]}
+         assert by["extract"]["built"] is True and by["hypothesis"]["built"] is True
+-        assert by["validate"]["built"] is False and by["stats"]["built"] is False, "no tool backs these"
++        # PL-10 T1: research jobs grade sources and research_statistics runs describe_samples.
++        assert by["validate"]["built"] is True and by["stats"]["built"] is True
++        assert by["validate"]["tools"] == ["research_start_job"] and by["stats"]["tools"] == ["research_statistics"]
+         assert d["built"] == sum(1 for s in d["stages"] if s["built"])
+         assert d["back"]["built"] is True and d["back"]["max_follow_ups"] == 3
+ 
+@@ -155,3 +157,15 @@ class TestExport:
+         assert json.loads(d["content"])["id"] == "q1"
+         assert call(seeded, "/api/os/research/export?question=q1&format=pdf")[0] == 400
+         assert call(seeded, "/api/os/research/export?question=nope")[0] == 404
++
++
++class TestResearchJobs:
++    """PL-10 T1: the job routes are reachable through the real server."""
++
++    def test_jobs_list_and_detail_through_the_server(self, server):
++        status, d = call(server, "/api/os/research/jobs")
++        assert status == 200 and d == {"ok": True, "jobs": []}
++        status, d = call(server, "/api/os/research/job?id=goal_0000000000000000")
++        assert status == 404
++        status, d = call(server, "/api/os/research/job?id=../../etc")
++        assert status == 400
+diff --git a/dourmouse/tests/test_research_pipeline_tools.py b/dourmouse/tests/test_research_pipeline_tools.py
+index 7a802b0..5e84fad 100644
+--- a/dourmouse/tests/test_research_pipeline_tools.py
++++ b/dourmouse/tests/test_research_pipeline_tools.py
+@@ -254,6 +254,7 @@ class TestBuildResearchPipelineSubagent:
+             "research_experiment", "research_replicate", "research_experiment_status",  # finding #127
+             "research_hypothesize", "research_critique", "research_design_experiment",  # finding #131
+             "research_critique_answer",  # R9
++            "research_start_job", "research_job_status", "research_statistics",  # PL-10 T1
+         }
+ 
+ 
+diff --git a/ui/assets/os/screens/research/index.js b/ui/assets/os/screens/research/index.js
+index f87045a..b9fb6be 100644
+--- a/ui/assets/os/screens/research/index.js
++++ b/ui/assets/os/screens/research/index.js
+@@ -20,6 +20,7 @@ import { isAbort } from '../../core/api.js';
+ import { loopBoxes, stagesSub, countsLine, claimTag, safeFilename, shorten } from './helpers.js';
+ import { SourceWidget } from './source-widget.js';
+ import { graphSvg } from './graph-svg.js';
++import { mountJobsPanel } from './jobs-panel.js';
+ 
+ const CLAIM_SHOW = 60;
+ 
+@@ -44,6 +45,7 @@ export default {
+     root.dataset.state = 'populated';
+     setHtml(root, html`
+       <div id="rsConfirm"></div>
++      <div class="card rs-jobs"><div class="lbl">Research jobs</div><div id="rsJobs" data-region></div><div id="rsJob"></div></div>
+       <div class="card"><div class="lbl">Research questions</div><div id="rsQs" data-region></div></div>
+       <div class="grid2 rs-mid">
+         <div class="card"><div class="lbl">Claims</div><div id="rsClaims" data-region></div></div>
+@@ -60,11 +62,17 @@ export default {
+     const graphEl = $('rsGraph');
+     const claimsEl = $('rsClaims');
+     const guard = () => ctx.signal.aborted;
++    const jobs = mountJobsPanel($('rsJobs'), $('rsJob'), confirmEl, ctx);
+ 
+     /* ---------------- stage bar ---------------- */
+     const actions = () => [
+       {
+-        id: 'new-question', label: 'NEW QUESTION', kind: 'primary', disabled: ctx.chat.busy(),
++        id: 'new-job', label: 'NEW RESEARCH JOB', kind: 'primary',
++        spec: 'Starts a background research job after a confirm: a context brief, papers from OpenAlex, Semantic Scholar and arXiv, one graded card per paper, research questions you approve, then cited answers and references. It stops for you twice and never in this thread.',
++        onClick: () => jobs.startForm(),
++      },
++      {
++        id: 'new-question', label: 'NEW QUESTION', disabled: ctx.chat.busy(),
+         title: ctx.chat.busy() ? 'Stop the run first' : '',
+         spec: 'Asks the research agent to plan a new question. It opens a small form, asks you to confirm, then sends ONE message to the model in this thread: the agent decomposes the question and may fetch web pages.',
+         onClick: () => newQuestion(),
+@@ -353,7 +361,7 @@ export default {
+ 
+     /* ---------------- refresh and live ---------------- */
+     async function refreshAll() {
+-      await Promise.all([loadLoop(), loadQs()]);
++      await Promise.all([loadLoop(), loadQs(), jobs.load()]);
+     }
+ 
+     /* Reads the graph event log from the cursor onward; returns how many events were new.
+diff --git a/ui/assets/os/screens/research/research.css b/ui/assets/os/screens/research/research.css
+index 765be9b..4c8f01b 100644
+--- a/ui/assets/os/screens/research/research.css
++++ b/ui/assets/os/screens/research/research.css
+@@ -26,3 +26,20 @@
+ [data-screen="RESEARCH"] .rs-loop > summary { cursor: pointer; margin-bottom: 0; }
+ [data-screen="RESEARCH"] .rs-loop[open] > summary { margin-bottom: 8px; }
+ [data-screen="RESEARCH"] .rs-loop > summary:focus-visible { outline: 2px solid var(--dm-active); outline-offset: 2px; }
++
++/* PL-10 T1: research jobs */
++[data-screen="RESEARCH"] .rs-jobs { margin-bottom: 12px; }
++[data-screen="RESEARCH"] .rs-job { margin-top: 10px; display: grid; gap: 10px; }
++[data-screen="RESEARCH"] .rs-jobhead { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
++[data-screen="RESEARCH"] .rs-jobsec { display: grid; gap: 6px; }
++[data-screen="RESEARCH"] .rs-jobpause { display: block; margin-top: 6px; }
++[data-screen="RESEARCH"] .rs-brief { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflow: auto; margin: 0; font: inherit; }
++[data-screen="RESEARCH"] .rs-notes { width: 100%; box-sizing: border-box; font: inherit; }
++[data-screen="RESEARCH"] .rs-job input[type="text"] { width: 100%; box-sizing: border-box; }
++[data-screen="RESEARCH"] .rs-subq { margin: 0; padding-left: 18px; }
++[data-screen="RESEARCH"] .rs-steps { margin: 0; padding-left: 18px; }
++[data-screen="RESEARCH"] .rs-card summary { cursor: pointer; overflow-wrap: anywhere; }
++[data-screen="RESEARCH"] .rs-card { display: grid; gap: 4px; }
++[data-screen="RESEARCH"] .rs-finding blockquote { margin: 2px 0 0 12px; overflow-wrap: anywhere; }
++[data-screen="RESEARCH"] .rs-answer p { margin: 4px 0; }
++[data-screen="RESEARCH"] .rs-ref { margin: 2px 0; overflow-wrap: anywhere; }

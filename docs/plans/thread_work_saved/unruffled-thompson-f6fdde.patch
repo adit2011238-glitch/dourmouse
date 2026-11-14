@@ -1,0 +1,1079 @@
+diff --git a/dourmouse/code_backends.py b/dourmouse/code_backends.py
+index 2ba1ea6..ede3f43 100755
+--- a/dourmouse/code_backends.py
++++ b/dourmouse/code_backends.py
+@@ -264,6 +264,10 @@ def _claude_tool_args() -> tuple[list[str], bool]:
+     fixed = [
+         "--strict-mcp-config",
+         "--disallowedTools", _DISALLOWED_NATIVE_TOOLS,
++        # SEC2-2: never load project or local settings (.claude/settings.json and
++        # settings.local.json in the folder the CLI runs in), whose hooks would run
++        # shell commands with no approval. The owner's own user settings still apply.
++        "--setting-sources", "user",
+         *_SETTINGS_OVERRIDE_ARGS,
+     ]
+     try:
+diff --git a/dourmouse/dispatch.py b/dourmouse/dispatch.py
+index 53f3e35..a88b6a7 100755
+--- a/dourmouse/dispatch.py
++++ b/dourmouse/dispatch.py
+@@ -3222,6 +3222,14 @@ def _argument_gate(
+     ):
+         return ("confirm", "Type text with line breaks as real key presses? Each line break is an Enter key, "
+                 "which can send a message or submit a form on this page.")
++    if name in ("write_path", "apply_patch", "apply_search_replace"):
++        # SEC2-6 (owner decision 2026-11-13): these write without asking only inside the owner's own
++        # folders; system_access decides, and anywhere else asks first.
++        from dourmouse import system_access
++
++        decision = system_access.write_gate(name, arguments)
++        if decision is not None:
++            return decision
+     if name == "security_sentry_dismiss" and spec.permission is not Permission.REQUIRES_CONFIRMATION:
+         # The registered tool asks for itself, with the finding's title (security/tools.py); this is for a
+         # copy of it that lost that gate. Asking in both places stacked two questions in one card (W1R-10).
+@@ -6031,6 +6039,17 @@ def _run_dispatch_loop(
+                         result_text = (
+                             f"ERROR: unknown tool '{name}' — not in the registered roster."
+                         )
++            elif name not in offered_tool_names:
++                # SEC2-1: a run executes only the tools it was offered. The schema list
++                # used to be the only scope, and the name was looked up in the whole
++                # registry, so a mail or web turn steered by what it read could run any
++                # tool (run_command, write_path, gmail_send) just by naming it.
++                owner = tool_owner.get(name) or "another"
++                handoff = " or ask_agent" if "ask_agent" in offered_tool_names else ""
++                result_text = (
++                    f"ERROR: '{name}' is not available in this conversation: it belongs to the {owner} agent, "
++                    f"which this request was not routed to. Use one of the tools you were given{handoff}."
++                )
+             elif rbac is not None and not rbac.allows(name):
+                 # Deterministic RBAC refusal BEFORE anything executes (spec:
+                 # role-based access control).
+diff --git a/dourmouse/general_roster.py b/dourmouse/general_roster.py
+index 80936dc..a2ae2c0 100755
+--- a/dourmouse/general_roster.py
++++ b/dourmouse/general_roster.py
+@@ -71,6 +71,8 @@ from dourmouse.librarian import librarian_tools
+ from dourmouse.message_bus import BROADCAST, get_message_bus
+ from dourmouse.research_mesh_tools import build_research_mesh_subagent
+ from dourmouse.research_pipeline_tools import build_research_pipeline_subagent
++from dourmouse.sandbox import _PROTECTED_WORKSPACE_DIRS as _SANDBOX_PROTECTED_DIRS
++from dourmouse.sandbox import CLI_WORKSPACE_DIRS, is_agent_config_path
+ from dourmouse.security.tools import build_security_subagent
+ from dourmouse.system_access import build_system_subagent
+ 
+@@ -1344,10 +1346,9 @@ def _list_calendar_events_tool(arguments: dict[str, Any]) -> str:
+ # workspace. The file tools never write here (a model that had read a hostile
+ # page could otherwise plant code the server loads at its next start, or edit
+ # the auth database), and run_python never copies from here.
+-_PROTECTED_WORKSPACE_TOP = frozenset({
+-    "self_extensions", "auth", "state", "security", "memory", "sessions", "librarian", "office",
+-    "research_pipeline", "compute", "atlas_lab", "device_wiki", "neuro", "privacy",
+-})
++# SEC2-2: one list shared with write_path and the run_command sandbox, and it now
++# includes the Claude CLI's own folders (claude_scratch, claude_orchestrator).
++_PROTECTED_WORKSPACE_TOP = frozenset(_SANDBOX_PROTECTED_DIRS)
+ _PROTECTED_FILE_RE = re.compile(
+     r"(^\.env($|\.)|\.(db|sqlite|sqlite3|pem|key|p12)$|\.db-(wal|shm)$|^(schedules|world_history)\.jsonl$|^mcp_servers\.json$|^spotify_tokens\.json$|^order_guard(_state\.json|\.lock)$)", re.IGNORECASE
+ )
+@@ -1386,26 +1387,37 @@ def _workspace_rel(target: Path) -> Path:
+     return target.relative_to(_workspace_root().resolve())
+ 
+ 
+-def _is_protected_parts(parts: tuple[str, ...]) -> bool:
+-    """True for a workspace-relative path inside one of Dourmouse's own folders
+-    or naming a secret file. Names are compared with the shared folding rule
+-    (case and Unicode normalisation), because the default macOS volume treats
++def _protected_reason(parts: tuple[str, ...]) -> str | None:
++    """Why a workspace-relative path is off limits to the model's file tools,
++    or None. Names are compared with the shared folding rule (case and Unicode
++    normalisation), because the default macOS volume treats
+     ``Self_Extensions`` and ``self_extensions`` as the same folder (P2-13)."""
+     if not parts:
+-        return False
+-    return path_identity.name_in(parts[0], _PROTECTED_WORKSPACE_TOP) or bool(
+-        _PROTECTED_FILE_RE.search(path_identity.fold(parts[-1]))
+-    )
++        return None
++    if is_agent_config_path(parts) or path_identity.name_in(parts[0], CLI_WORKSPACE_DIRS):
++        # SEC2-2, SEC2-4: Claude Code settings and hooks, CLAUDE.md, AGENTS.md,
++        # .mcp.json, DOURMOUSE.md and the Claude CLI's own folders take effect
++        # later with no approval.
++        return ("another program reads it as settings or standing instructions (Claude Code, Codex, "
++                "MCP, or DOURMOUSE.md in every Dourmouse prompt), so only the owner changes it")
++    if path_identity.name_in(parts[0], _PROTECTED_WORKSPACE_TOP) or _PROTECTED_FILE_RE.search(
++        path_identity.fold(parts[-1])
++    ):
++        return "it is where Dourmouse keeps its own state or secrets"
++    return None
++
++
++def _is_protected_parts(parts: tuple[str, ...]) -> bool:
++    return _protected_reason(parts) is not None
+ 
+ 
+ def _refuse_protected(base: Path, target: Path, action: str) -> None:
+-    """Raise ValueError when ``target`` is one of Dourmouse's own state or secret files."""
++    """Raise ValueError when ``target`` is one of Dourmouse's own state or secret
++    files, or a file another program reads as settings or instructions."""
+     parts = target.relative_to(base.resolve()).parts
+-    if _is_protected_parts(parts):
+-        raise ValueError(
+-            f"{action} of {'/'.join(parts)!r} is refused: it is where Dourmouse keeps its own state or "
+-            "secrets. Use another path in the workspace."
+-        )
++    reason = _protected_reason(parts)
++    if reason is not None:
++        raise ValueError(f"{action} of {'/'.join(parts)!r} is refused: {reason}. Use another path in the workspace.")
+ 
+ 
+ _RUN_INPUT_LIMITS = (20, 20 * 1024 * 1024)  # files, total bytes copied into a run's scratch folder
+diff --git a/dourmouse/sandbox.py b/dourmouse/sandbox.py
+index ff3e1fa..36c2a5e 100755
+--- a/dourmouse/sandbox.py
++++ b/dourmouse/sandbox.py
+@@ -37,6 +37,7 @@ import signal
+ import subprocess
+ import sys
+ import tempfile
++from collections.abc import Iterable
+ from pathlib import Path
+ 
+ _OUTPUT_CAP = 20_000  # chars of command output returned to the model
+@@ -206,13 +207,65 @@ def _project_root() -> Path:
+     return Path(__file__).resolve().parents[1]
+ 
+ 
+-#: The workspace's own state and secret folders (the same list the confined
+-#: file tools refuse: general_roster._PROTECTED_WORKSPACE_TOP).
++#: Folders the Claude CLI runs in (code_backends._scratch_cwd) or keys its
++#: sessions by (dispatch._claude_orchestrator_cwd). The CLI loads .claude/
++#: settings, whose hooks run shell commands, and CLAUDE.md, read as standing
++#: instructions, from where it runs, so nothing the model drives writes there
++#: (SEC2-2).
++CLI_WORKSPACE_DIRS = ("claude_scratch", "claude_orchestrator")
++
++#: The workspace's own state and secret folders, and the CLI's folders. The one
++#: list every write guard uses: the confined file tools
++#: (general_roster._PROTECTED_WORKSPACE_TOP), write_path and the run_command
++#: sandbox below.
+ _PROTECTED_WORKSPACE_DIRS = (
+     "self_extensions", "auth", "state", "security", "memory", "sessions", "librarian", "office",
+-    "research_pipeline", "compute", "atlas_lab", "device_wiki", "neuro", "privacy",
++    "research_pipeline", "compute", "atlas_lab", "device_wiki", "neuro", "privacy", *CLI_WORKSPACE_DIRS,
+ )
+ 
++#: File names another program reads as settings or standing instructions
++#: wherever they sit (SEC2-2, SEC2-4): Claude Code's CLAUDE.md and
++#: CLAUDE.local.md, AGENTS.md (Codex and others), .mcp.json (MCP servers it
++#: starts), and DOURMOUSE.md, which Dourmouse splices into every system prompt.
++#: Folded (case- and Unicode-insensitive), like every name rule here.
++AGENT_CONFIG_FILES = ("claude.md", "claude.local.md", "agents.md", ".mcp.json", "dourmouse.md")
++
++
++def is_agent_config_path(parts: Iterable[str]) -> bool:
++    """True when a path component is a Claude Code (``.claude*``) or Codex
++    (``.codex``) settings folder, or its last component is one of
++    AGENT_CONFIG_FILES."""
++    from dourmouse.path_identity import fold
++
++    folded = [fold(p) for p in parts]
++    if any(p.startswith(".claude") or p == ".codex" for p in folded):
++        return True
++    return bool(folded) and folded[-1] in AGENT_CONFIG_FILES
++
++
++def _any_case(text: str) -> str:
++    """A Seatbelt regex fragment for ``text`` in any letter case: the default
++    macOS volume ignores case, so .CLAUDE is the folder .claude."""
++    out = []
++    for ch in text:
++        if ch.isalpha():
++            out.append(f"[{ch.lower()}{ch.upper()}]")
++        elif ch in ".^$*+?()[]{}|\\":
++            out.append("\\" + ch)
++        else:
++            out.append(ch)
++    return "".join(out)
++
++
++def _agent_config_write_rules() -> list[str]:
++    """Seatbelt denies for is_agent_config_path, anywhere a shell could write."""
++    names = "|".join(_any_case(n) for n in AGENT_CONFIG_FILES)
++    return [
++        f'(deny file-write* (regex #"/{_any_case(".claude")}[^/]*(/|$)"))',
++        f'(deny file-write* (regex #"/{_any_case(".codex")}(/|$)"))',
++        f'(deny file-write* (regex #"/({names})$"))',
++    ]
++
+ 
+ def _protected_write_rules(ws: Path) -> list[str]:
+     """Seatbelt deny rules for what a run_command shell must never write, even
+@@ -225,6 +278,8 @@ def _protected_write_rules(ws: Path) -> list[str]:
+     rules: list[str] = []
+     subpaths = [ws / d for d in _PROTECTED_WORKSPACE_DIRS]
+     subpaths += [root / d for d in ("dourmouse", "ui", "electron", "scripts", "extension", ".venv", ".git")]
++    # dispatch keys Claude sessions by this folder even when the workspace lives elsewhere.
++    subpaths.append(root / "workspace" / "claude_orchestrator")
+     literals = [ws / "mcp_servers.json", ws / "spotify_tokens.json", root / ".env"]
+     try:
+         from dourmouse.config import user_config_dir
+@@ -236,6 +291,7 @@ def _protected_write_rules(ws: Path) -> list[str]:
+         rules.append(f"(deny file-write* (subpath {_quote(str(p))}))")
+     for p in literals:
+         rules.append(f"(deny file-write* (literal {_quote(str(p))}))")
++    rules.extend(_agent_config_write_rules())
+     return rules
+ 
+ 
+diff --git a/dourmouse/security/baseline.py b/dourmouse/security/baseline.py
+index 846b310..e95228d 100644
+--- a/dourmouse/security/baseline.py
++++ b/dourmouse/security/baseline.py
+@@ -26,6 +26,8 @@ from dataclasses import dataclass
+ from typing import Any
+ 
+ HOST = "host"
++#: Key of the telemetry observation that marks a baseline built from every user's sockets (SEC3-7).
++ALL_USERS_SOCKETS = "all_users_sockets"
+ LEARNING_MIN_SCANS = 3
+ LEARNING_MIN_SECONDS = 30 * 60
+ 
+@@ -54,6 +56,11 @@ def observations(state: dict[str, Any], network_id: str) -> list[Observation]:
+         for p in lp.get("listening_ports", []):
+             obs.append(Observation(HOST, "listening_port",
+                                    f"{p['command']}|{p['protocol']}|{p['port']}", p.get("exposure", "")))
++        if lp.get("complete"):
++            # SEC3-7: remembers that this baseline has seen every user's sockets,
++            # so the scan that first sees the system's own listeners learns them
++            # instead of calling them new (see sentry.run_scan).
++            obs.append(Observation(HOST, "telemetry", ALL_USERS_SOCKETS, "1"))
+ 
+     est = state.get("established_connections") or {}
+     if est.get("available"):
+diff --git a/dourmouse/security/mac_detectors.py b/dourmouse/security/mac_detectors.py
+index 696e2eb..988f081 100644
+--- a/dourmouse/security/mac_detectors.py
++++ b/dourmouse/security/mac_detectors.py
+@@ -95,6 +95,19 @@ def _posture(state: dict[str, Any]) -> list[SentryFinding]:
+                 "Disconnect from this network, then check the router's client list for the extra device.", gw_mac,
+             ))
+ 
++    # SEC3-9: a startup file that cannot be read is reported, not skipped. launchd
++    # will not load it either, but a broken or tampered file in these folders is
++    # worth a look, and it used to stop every scan.
++    for item in (state.get("persistence") or {}).get("items") or []:
++        if "error" in item and "path" in item:
++            name = item["path"].rsplit("/", 1)[-1]
++            out.append(_finding(
++                "persistence_unreadable", "med", f"A startup file could not be read: {name}",
++                f"{item['path']} is in a folder macOS starts programs from, but it is not a valid launch job "
++                f"({item['error']}). The rest of the scan went ahead.",
++                "If you did not put it there, move it aside after checking what installed it.", item["path"],
++            ))
++
+     for proc in state.get("network_processes") or []:
+         loc = proc.get("location")
+         if loc in ("downloads", "temporary"):
+diff --git a/dourmouse/security/mac_telemetry.py b/dourmouse/security/mac_telemetry.py
+index b8b1215..dc3cbd2 100644
+--- a/dourmouse/security/mac_telemetry.py
++++ b/dourmouse/security/mac_telemetry.py
+@@ -326,12 +326,32 @@ def persistence_dirs() -> list[Path]:
+     return [home / "Library/LaunchAgents", Path("/Library/LaunchAgents"), Path("/Library/LaunchDaemons")]
+ 
+ 
++#: launchd job files are a few kilobytes; anything bigger is not read into memory.
++MAX_LAUNCHD_PLIST_BYTES = 1024 * 1024
++
++
+ def parse_launchd_plist(data: bytes) -> dict[str, Any]:
++    """The fields of one launchd job that the persistence check needs.
++
++    Raises ValueError for a file launchd itself would refuse to load (SEC3-9):
++    a top level that is not a dictionary, or a Label, Program or
++    ProgramArguments of the wrong type. Before, such files raised
++    AttributeError or TypeError here."""
+     plist = plistlib.loads(data)
+-    program = plist.get("Program") or (plist.get("ProgramArguments") or [None])[0]
++    if not isinstance(plist, dict):
++        raise ValueError(f"the top level is a {type(plist).__name__}, not a dictionary")
++    label = plist.get("Label")
++    program = plist.get("Program")
++    args = plist.get("ProgramArguments")
++    if label is not None and not isinstance(label, str):
++        raise ValueError(f"Label is a {type(label).__name__}, not a string")
++    if program is not None and not isinstance(program, str):
++        raise ValueError(f"Program is a {type(program).__name__}, not a string")
++    if args is not None and not (isinstance(args, list) and all(isinstance(a, str) for a in args)):
++        raise ValueError("ProgramArguments is not a list of strings")
+     return {
+-        "label": plist.get("Label"),
+-        "program": program,
++        "label": label,
++        "program": program or (args[0] if args else None),
+         "run_at_load": bool(plist.get("RunAtLoad")),
+         "keep_alive": bool(plist.get("KeepAlive")),
+     }
+@@ -346,15 +366,24 @@ def get_persistence_items() -> dict[str, Any]:
+         if not d.is_dir():
+             continue
+         for f in sorted(d.glob("*.plist")):
++            # Every file here is untrusted input that anything running as the
++            # owner can write. Whatever reading or parsing one file raises
++            # becomes an error item for that file (reported by mac_detectors
++            # as persistence_unreadable), never an exception that stops the
++            # scan: SEC3-9, where one array-rooted or truncated plist raised
++            # AttributeError or ExpatError and silently stopped every scan.
+             try:
++                info = f.stat()
++                if info.st_size > MAX_LAUNCHD_PLIST_BYTES:
++                    raise ValueError(f"too large to be a launch job ({info.st_size} bytes)")
+                 data = f.read_bytes()
+                 parsed = parse_launchd_plist(data)
+-            except (OSError, plistlib.InvalidFileException, ValueError) as exc:
+-                items.append({"path": str(f), "error": f"unreadable: {exc}"})
++            except Exception as exc:  # noqa: BLE001 -- one bad file must not stop the scan, see above
++                items.append({"path": str(f), "error": f"unreadable: {type(exc).__name__}: {exc}"[:300]})
+                 continue
+             items.append({
+                 "path": str(f), "scope": "user" if str(f).startswith(str(Path.home())) else "system",
+-                "sha256": hashlib.sha256(data).hexdigest(), "modified_at": f.stat().st_mtime, **parsed,
++                "sha256": hashlib.sha256(data).hexdigest(), "modified_at": info.st_mtime, **parsed,
+             })
+     return {"available": True, "items": items,
+             "gaps": ["Login items in the Background Task Management database need root to read (sfltool dumpbtm)."]}
+diff --git a/dourmouse/security/platform_adapter.py b/dourmouse/security/platform_adapter.py
+index 7aa5e76..8f773d9 100644
+--- a/dourmouse/security/platform_adapter.py
++++ b/dourmouse/security/platform_adapter.py
+@@ -21,6 +21,7 @@ docs/GODSPEED_ROADMAP.md Phase 4).
+ from __future__ import annotations
+ 
+ import ipaddress
++import os
+ import re
+ import subprocess
+ from typing import Any
+@@ -253,17 +254,119 @@ _LSOF_LISTEN_RE = re.compile(
+ )
+ 
+ 
+-def get_listening_ports() -> dict[str, Any]:
+-    ok, out = _run(["lsof", "-iTCP", "-sTCP:LISTEN", "-n", "-P"], timeout=10.0)
++# --------------------------------------------------------------------------- #
++# Every user's sockets (SEC3-7). lsof run as the owner lists only the owner's
++# own processes, so root daemons, socket-activated sharing services and root
++# malware were invisible. macOS netstat -anv names the owning process of every
++# socket without root ("process:pid" column), so its sockets are merged in.
++# --------------------------------------------------------------------------- #
++
++_NETSTAT = "/usr/sbin/netstat"
++_PS = "/bin/ps"
++
++#: Columns after "process:pid" in macOS netstat -anv: state options gencnt
++#: flags flags1 usecnt rtncnt fltrs. The process name before them may contain
++#: spaces and is cut to 16 characters.
++_NETSTAT_FAMILY = {"tcp4": "IPv4", "tcp6": "IPv6", "tcp46": "IPv6"}
++
++#: macOS services that launchd or a system daemon listens for. A listener on
++#: one of these ports owned by one of these processes is named for the owner,
++#: because "launchd listens on port 445" says nothing useful.
++_SHARING = "System Settings > General > Sharing"
++MAC_SERVICE_PORTS: dict[int, tuple[str, str]] = {
++    22: ("Remote Login (SSH)", f"{_SHARING} > Remote Login"),
++    88: ("Kerberos sign-in for Mac sharing (kdc)",
++         f"{_SHARING} (it stops when File Sharing, Screen Sharing and Remote Management are all off)"),
++    445: ("File Sharing (SMB)", f"{_SHARING} > File Sharing"),
++    548: ("File Sharing (AFP)", f"{_SHARING} > File Sharing"),
++    3031: ("Remote Application Scripting", f"{_SHARING} > Remote Application Scripting"),
++    3283: ("Remote Management", f"{_SHARING} > Remote Management"),
++    5900: ("Screen Sharing (VNC)", f"{_SHARING} > Screen Sharing"),
++}
++_SERVICE_OWNERS = frozenset({"launchd", "kdc", "sshd", "smbd", "screensharingd", "ARDAgent", "AppleFileServer"})
++
++_PARTIAL_NOTE = ("Only this user's own programs could be read (netstat did not run: {reason}); "
++                 "listeners and connections owned by the system or root are not shown.")
++
++
++def _split_netstat_address(text: str) -> tuple[str, int | None]:
++    """"192.168.1.226.51881" -> ("192.168.1.226", 51881); "*.88" -> ("*", 88);
++    "::1.18789" -> ("::1", 18789); "*.*" -> ("*", None)."""
++    addr, _, port = text.rpartition(".")
++    return addr, (int(port) if port.isdigit() else None)
++
++
++def parse_netstat_anv(text: str) -> list[dict[str, Any]] | None:
++    """Every TCP socket in macOS `netstat -anv -p tcp` output, with the
++    owning process for every user. None when the layout is not the one this
++    parser knows (no "process:pid" column), so it is never guessed."""
++    lines = text.splitlines()
++    header = next((ln.split() for ln in lines if ln.startswith("Proto")), None)
++    if not header or "process:pid" not in header:
++        return None
++    # "Local Address" and "Foreign Address" are two words in the header, one in a row.
++    proc_col = header.index("process:pid") - 2
++    trailing = len(header) - header.index("process:pid") - 1
++    rows: list[dict[str, Any]] = []
++    for line in lines:
++        parts = line.split()
++        if not parts or parts[0] not in _NETSTAT_FAMILY or len(parts) < proc_col + trailing:
++            continue
++        owner = " ".join(parts[proc_col:len(parts) - trailing])
++        name, _, pid = owner.rpartition(":")
++        local_addr, local_port = _split_netstat_address(parts[3])
++        remote_addr, remote_port = _split_netstat_address(parts[4])
++        rows.append({
++            "family": _NETSTAT_FAMILY[parts[0]],
++            "local_address": local_addr, "local_port": local_port,
++            "remote_address": remote_addr, "remote_port": remote_port,
++            "state": parts[5],
++            "command": name if pid.isdigit() else None,
++            "pid": int(pid) if pid.isdigit() else None,
++        })
++    return rows
++
++
++def _current_user() -> str:
++    import pwd
++
++    return pwd.getpwuid(os.getuid()).pw_name
++
++
++def _process_owners() -> dict[int, str]:
++    ok, out = _run([_PS, "-axo", "pid=,user="], timeout=10.0)
++    owners: dict[int, str] = {}
++    if ok:
++        for line in out.splitlines():
++            pid, _, user = line.strip().partition(" ")
++            if pid.isdigit() and user.strip():
++                owners[int(pid)] = user.strip()
++    return owners
++
++
++def _all_users_sockets() -> tuple[list[dict[str, Any]] | None, str | None]:
++    """(sockets, None) or (None, why the full view is missing)."""
++    ok, out = _run([_NETSTAT, "-anv", "-p", "tcp"], timeout=10.0)
+     if not ok:
+-        return _unavailable(out)
++        return None, _PARTIAL_NOTE.format(reason=out.strip()[:160] or "no output")
++    rows = parse_netstat_anv(out)
++    if rows is None:
++        return None, _PARTIAL_NOTE.format(reason="its output layout was not recognised")
++    return rows, None
++
++
++def _bind_key(addr: str) -> str:
++    return addr.strip("[]").split("%", 1)[0]
++
++
++def _parse_lsof_listening(out: str) -> list[dict[str, Any]]:
+     ports = []
+     for line in out.splitlines()[1:]:  # skip the header row
+         m = _LSOF_LISTEN_RE.match(line.strip())
+         if not m:
+             continue
+         command, pid, user, family, proto, bind_addr, port = m.groups()
+-        ports.append({
++        entry: dict[str, Any] = {
+             "command": command,
+             "pid": int(pid),
+             "user": user,
+@@ -272,8 +375,54 @@ def get_listening_ports() -> dict[str, Any]:
+             "bind_address": bind_addr,
+             "port": None if port == "*" else int(port),
+             "exposure": _classify_exposure(bind_addr),
+-        })
+-    return {"available": True, "listening_ports": ports}
++        }
++        _name_service(entry)
++        ports.append(entry)
++    return ports
++
++
++def _name_service(entry: dict[str, Any]) -> None:
++    """Adds the macOS sharing service a system listener belongs to, when it is one."""
++    if entry["port"] in MAC_SERVICE_PORTS and entry["command"] in _SERVICE_OWNERS:
++        entry["service"], entry["service_setting"] = MAC_SERVICE_PORTS[entry["port"]]
++
++
++def get_listening_ports() -> dict[str, Any]:
++    ok, out = _run(["lsof", "-iTCP", "-sTCP:LISTEN", "-n", "-P"], timeout=10.0)
++    ports = _parse_lsof_listening(out) if ok else []
++    sockets, gap = _all_users_sockets()
++    if not ok and sockets is None:
++        return _unavailable(out)
++    if sockets is not None:
++        # What lsof already reported stays exactly as it was (same names, so
++        # existing baselines keep matching); netstat adds only what lsof missed.
++        lsof_seen = {(p["pid"], p["port"]) for p in ports} | {(_bind_key(p["bind_address"]), p["port"]) for p in ports}
++        added: set[tuple[Any, ...]] = set()
++        owners, me = _process_owners(), _current_user()
++        for s in sockets:
++            if s["state"] != "LISTEN" or s["pid"] is None or s["local_port"] is None:
++                continue
++            if owners.get(s["pid"]) == me:  # lsof already lists the owner's own programs
++                continue
++            bind = _bind_key(s["local_address"])
++            key = (s["pid"], s["local_port"], s["family"], bind)
++            if (s["pid"], s["local_port"]) in lsof_seen or (bind, s["local_port"]) in lsof_seen or key in added:
++                continue
++            added.add(key)
++            entry: dict[str, Any] = {
++                "command": s["command"], "pid": s["pid"], "user": owners.get(s["pid"], "unknown"),
++                "family": s["family"], "protocol": "TCP", "bind_address": s["local_address"],
++                "port": s["local_port"], "exposure": _classify_exposure(s["local_address"]),
++                "source": "netstat",
++            }
++            _name_service(entry)
++            ports.append(entry)
++    result: dict[str, Any] = {"available": True, "listening_ports": ports, "complete": sockets is not None}
++    if not ok:
++        result["gaps"] = [f"lsof did not run ({out.strip()[:160]}); netstat alone was used."]
++    if gap:
++        result["gaps"] = [gap]
++    return result
+ 
+ 
+ # --------------------------------------------------------------------------- #
+@@ -292,10 +441,8 @@ _LSOF_ESTABLISHED_RE = re.compile(
+ 
+ def get_established_connections() -> dict[str, Any]:
+     ok, out = _run(["lsof", "-iTCP", "-sTCP:ESTABLISHED", "-n", "-P"], timeout=10.0)
+-    if not ok:
+-        return _unavailable(out)
+     connections = []
+-    for line in out.splitlines()[1:]:  # skip the header row
++    for line in (out.splitlines()[1:] if ok else []):  # skip the header row
+         m = _LSOF_ESTABLISHED_RE.match(line.strip())
+         if not m:
+             continue
+@@ -311,7 +458,39 @@ def get_established_connections() -> dict[str, Any]:
+             "remote_address": remote_addr.strip("[]"),
+             "remote_port": int(remote_port),
+         })
+-    return {"available": True, "connections": connections}
++    sockets, gap = _all_users_sockets()
++    if not ok and sockets is None:
++        return _unavailable(out)
++    if sockets is not None:
++        # SEC3-7: connections of system and root processes, which lsof as the
++        # owner cannot see; lsof's own rows keep their names unchanged.
++        lsof_seen = {(c["pid"], c["local_port"], c["remote_port"]) for c in connections}
++        owners, me = _process_owners(), _current_user()
++        for s in sockets:
++            if s["state"] != "ESTABLISHED" or s["pid"] is None or s["local_port"] is None or s["remote_port"] is None:
++                continue
++            # The owner's own programs come from lsof only, so a connection opened
++            # between the two commands never appears under a second spelling of
++            # the same program's name (lsof cuts names to 9 characters, netstat to 16).
++            if owners.get(s["pid"]) == me:
++                continue
++            key = (s["pid"], s["local_port"], s["remote_port"])
++            if key in lsof_seen:
++                continue
++            lsof_seen.add(key)
++            connections.append({
++                "command": s["command"], "pid": s["pid"], "user": owners.get(s["pid"], "unknown"),
++                "family": s["family"], "protocol": "TCP",
++                "local_address": s["local_address"], "local_port": s["local_port"],
++                "remote_address": s["remote_address"], "remote_port": s["remote_port"],
++                "source": "netstat",
++            })
++    result: dict[str, Any] = {"available": True, "connections": connections, "complete": sockets is not None}
++    if not ok:
++        result["gaps"] = [f"lsof did not run ({out.strip()[:160]}); netstat alone was used."]
++    if gap:
++        result["gaps"] = [gap]
++    return result
+ 
+ 
+ # --------------------------------------------------------------------------- #
+diff --git a/dourmouse/security/sentry.py b/dourmouse/security/sentry.py
+index c86621c..f14f1af 100644
+--- a/dourmouse/security/sentry.py
++++ b/dourmouse/security/sentry.py
+@@ -67,6 +67,7 @@ from __future__ import annotations
+ import contextlib
+ import hashlib
+ import json
++import logging
+ import os
+ import sqlite3
+ import threading
+@@ -80,6 +81,15 @@ from dourmouse.security import platform_adapter as pa
+ 
+ _DEFAULT_SCAN_INTERVAL_SECONDS = 300.0
+ 
++#: SEC3-9: scans in a row that may fail before the owner gets a HIGH alert.
++FAILED_SCANS_BEFORE_ALERT = 3
++
++#: Ports whose exposure mac_detectors already reports as "<service> is on and
++#: accepting connections" (host_protections check name), so it is not said twice.
++_POSTURE_COVERED_PORTS = {22: "remote_login", 5900: "screen_sharing"}
++
++_log = logging.getLogger(__name__)
++
+ def default_db() -> Path:
+     """Resolved on every call, never at import time (finding #084): an
+     import-time constant froze whatever DOURMOUSE_WORKSPACE was when the
+@@ -241,6 +251,7 @@ def _detect_findings(
+         # port; that is one exposure, not two (finding #110, seen live as
+         # "rapportd listens on all interfaces" twice).
+         seen_ports: set[tuple[str, int, str]] = set()
++        checks = (state.get("host_protections") or {}).get("checks") or {}
+         for port in lp["listening_ports"]:
+             if port["exposure"] != "ALL_INTERFACES":
+                 continue
+@@ -248,6 +259,28 @@ def _detect_findings(
+             if port_key in seen_ports:
+                 continue
+             seen_ports.add(port_key)
++            covered_by = _POSTURE_COVERED_PORTS.get(port["port"])
++            if covered_by and (checks.get(covered_by) or {}).get("on") and (checks.get(covered_by) or {}).get("accepting"):
++                continue  # mac_detectors already reports "<service> is on and accepting connections"
++            if port.get("service"):
++                # SEC3-7: a system listener only netstat can see, named for the owner.
++                findings.append(SentryFinding(
++                    fingerprint=_fingerprint("exposed_port", port["command"], str(port["port"]), port["protocol"]),
++                    kind="exposed_port",
++                    severity="med",
++                    title=f"{port['service']} accepts connections from any network (port {port['port']})",
++                    detail=(
++                        f"{port['command']} (pid {port['pid']}, run by {port.get('user', 'the system')}) listens "
++                        f"for {port['service']} on {port['protocol']} port {port['port']} on every network this Mac "
++                        "joins, not just this machine. It belongs to the system, so only netstat shows it."
++                    ),
++                    recommended_action=(
++                        f"If you do not use {port['service']}, turn it off in "
++                        f"{port.get('service_setting') or 'System Settings > General > Sharing'}. "
++                        "Never applied automatically; this is a suggestion only."
++                    ),
++                ))
++                continue
+             findings.append(SentryFinding(
+                 fingerprint=_fingerprint(
+                     "exposed_port", port["command"], str(port["port"]), port["protocol"]
+@@ -790,6 +823,20 @@ def run_scan(
+     raw = [a for a in bl.compare(observations, known, observed_categories=observed)
+            if not (a.kind == "gone" and a.observation.key in unreadable)]
+     anomalies = [a for a in raw if a.observation.scope not in learning]
++    if (bl.HOST, "telemetry", bl.ALL_USERS_SOCKETS) not in known:
++        # SEC3-7: the first scan that can see every user's sockets learns the
++        # system and root listeners and connections lsof could never show,
++        # instead of reporting them as "started listening": they were there
++        # all along. The exposure rule above still reports the reachable ones.
++        hidden_before = {
++            ("listening_port", f"{p['command']}|{p['protocol']}|{p['port']}")
++            for p in (state.get("listening_ports") or {}).get("listening_ports", []) if p.get("source") == "netstat"
++        } | {
++            ("network_process", str(c.get("command", "")))
++            for c in (state.get("established_connections") or {}).get("connections", []) if c.get("source") == "netstat"
++        }
++        anomalies = [a for a in anomalies
++                     if not (a.kind == "new" and (a.observation.category, a.observation.key) in hidden_before)]
+     for finding in detect_mac_findings(state, anomalies):
+         present.add(finding.fingerprint)
+         status = store.record_and_classify(finding, ts)
+@@ -817,8 +864,11 @@ def run_scan(
+     }
+     # Findings this scan no longer detects are cleared, so their return counts as new
+     # (P4-57). Only after a scan that could read everything: a scan that could not
+-    # read the firewall does not show the firewall finding is gone.
+-    if telemetry_available and all(telemetry_available.values()):
++    # read the firewall does not show the firewall finding is gone, and one that saw
++    # only the owner's own sockets (SEC3-7) does not show a root listener is gone.
++    partial = [k for k in ("listening_ports", "established_connections")
++               if (state.get(k) or {}).get("complete") is False]
++    if telemetry_available and all(telemetry_available.values()) and not partial:
+         store.mark_absent(present)
+     return SentryScanResult(
+         all_findings=all_findings,
+@@ -865,6 +915,10 @@ class SentryRuntime:
+         self.last_result: SentryScanResult | None = None
+         self.last_scan_at: float | None = None
+         self.tick_count = 0
++        # SEC3-9: failed scans are counted and shown, never swallowed.
++        self.consecutive_failed_scans = 0
++        self.last_scan_error: str | None = None
++        self._failure_alerted = False
+ 
+     def start(self) -> None:
+         if self._thread is not None:
+@@ -887,7 +941,12 @@ class SentryRuntime:
+         tests that want a real tick without a real threading.Event.wait
+         delay."""
+         with self._scan_lock:
+-            result = run_scan(state_fn=self._state_fn or collect_state, store=self._store)
++            try:
++                result = run_scan(state_fn=self._state_fn or collect_state, store=self._store)
++            except Exception as exc:
++                self.record_scan_failure(exc)
++                raise
++            self.record_scan_success()
+             self.last_result = result
+             self.last_scan_at = time.time()
+             self.tick_count += 1
+@@ -896,10 +955,35 @@ class SentryRuntime:
+                 fn(result, reason)
+         return result
+ 
++    def record_scan_success(self) -> None:
++        self.consecutive_failed_scans = 0
++        self.last_scan_error = None
++        self._failure_alerted = False
++
++    def record_scan_failure(self, exc: BaseException) -> None:
++        """SEC3-9: count a failed scan and, once FAILED_SCANS_BEFORE_ALERT
++        scans in a row have failed, tell the owner with one HIGH alert per
++        run of failures. Before this the loop dropped every error, so a
++        sentry that could no longer scan looked exactly like a quiet Mac."""
++        self.consecutive_failed_scans += 1
++        self.last_scan_error = f"{type(exc).__name__}: {exc}"[:300]
++        _log.warning("security sentry scan failed (%d in a row): %s",
++                     self.consecutive_failed_scans, self.last_scan_error)
++        if self.consecutive_failed_scans >= FAILED_SCANS_BEFORE_ALERT and not self._failure_alerted:
++            self._failure_alerted = _write_alert(SentryFinding(
++                fingerprint=_fingerprint("sentry_scan_failing"),
++                kind="sentry_scan_failing",
++                severity="high",
++                title="The security sentry cannot scan",
++                detail=(f"The last {self.consecutive_failed_scans} scans failed with {self.last_scan_error}. "
++                        "Until a scan succeeds, nothing on this Mac is being checked."),
++                recommended_action="Open SECURITY and run a scan to see the error, or restart Dourmouse.",
++            ))
++
+     def _loop(self) -> None:
+         while not self._stop.is_set():
+-            try:
++            # A failed tick is already counted and alerted by run_one_tick_now;
++            # the loop itself keeps going so the next tick can recover.
++            with contextlib.suppress(Exception):
+                 self.run_one_tick_now()
+-            except Exception:  # noqa: BLE001 -- a bug in one tick must never kill the runtime
+-                pass
+             self._stop.wait(self._interval)
+diff --git a/dourmouse/system_access.py b/dourmouse/system_access.py
+index 9a3c558..babc2e0 100755
+--- a/dourmouse/system_access.py
++++ b/dourmouse/system_access.py
+@@ -438,12 +438,32 @@ def _protected_target_reason(target: Path) -> str | None:
+     root = _PROJECT_ROOT.resolve()
+     if any(_under_dir(path, root / d) for d in ("dourmouse", "ui", "electron", "scripts", "extension", ".venv")) or _under_dir(path, root / ".env"):
+         return "is part of Dourmouse's own code or its secrets"
++    # SEC2-6: tools started in Dourmouse's folder load files there (sitecustomize.py,
++    # conftest.py, pyproject.toml, Makefile) and hidden folders (.github, .claude).
++    path_parts, root_parts, home_parts = folded_parts(path), folded_parts(root), folded_parts(home)
++    if path_parts[: len(root_parts)] == root_parts and len(path_parts) > len(root_parts):
++        below = path_parts[len(root_parts):]
++        if len(below) == 1:
++            return "is a file in Dourmouse's own folder (tools started there load files like sitecustomize.py and conftest.py)"
++        if below[0].startswith("."):
++            return "is in a hidden folder of Dourmouse's own folder (.github, .claude and the like run or configure tools)"
+     if _is_order_guard_file(path):
+         return "is the trading guardrails' kill-switch state"
+     if name_in(".git", path.parts):
+         return "is inside a .git folder (hooks and config run when git runs)"
++    from dourmouse.sandbox import is_agent_config_path
++
++    if is_agent_config_path(path.parts):
++        # SEC2-2, SEC2-4: Claude Code and Codex settings folders, CLAUDE.md, AGENTS.md,
++        # .mcp.json and DOURMOUSE.md take effect later with no approval.
++        return "is a file another program reads as settings or standing instructions (Claude Code, Codex, MCP, DOURMOUSE.md)"
+     if folded_parts(path.parent) == folded_parts(home) and name_in(path.name, _STARTUP_FILES):
+         return "is a shell or tool start-up file (it runs whenever a terminal or git starts)"
++    if (path_parts[: len(home_parts)] == home_parts and len(path_parts) > len(home_parts)
++            and path_parts[len(home_parts)].startswith(".") and not _in_workspace(path)):
++        # SEC2-6: ~/.config/git/config, ~/.claude, ~/.codex, ~/.cursor/mcp.json, ~/.vimrc,
++        # ~/.tmux.conf, ~/.oh-my-zsh: hidden settings other programs load or run.
++        return "is a hidden settings file or folder in the home folder (other programs load or run it)"
+     if any(_under_dir(path, home / d) for d in _STARTUP_DIRS) or any(_under_dir(path, Path(d)) for d in _SYSTEM_DIRS):
+         return "is a start-up, application or system location"
+     try:
+@@ -460,6 +480,15 @@ def _protected_target_reason(target: Path) -> str | None:
+     return None
+ 
+ 
++def _in_workspace(path: Path) -> bool:
++    try:
++        from dourmouse.config import workspace_dir
++
++        return _under_dir(path, Path(workspace_dir()))
++    except Exception:  # noqa: BLE001 -- no workspace resolvable: not inside it
++        return False
++
++
+ def _refused_target(tool: str, target: Path) -> str | None:
+     reason = _protected_target_reason(target)
+     if reason is None:
+@@ -576,17 +605,59 @@ def _allowed_cwd_roots() -> list[Path]:
+         roots.append(Path(workspace_dir()).resolve())
+     except Exception as exc:  # noqa: BLE001
+         logging.getLogger(__name__).debug("workspace not added to the run_command roots: %s", exc)
++    roots.extend(_bookshelf_roots())
++    return roots
++
++
++def _bookshelf_roots() -> list[Path]:
++    """The project folders on the owner's bookshelf."""
+     try:
+         from dourmouse.project_bookkeeper import _load_store, _public_view, _store_path
+ 
+-        for rec in _public_view(_load_store(_store_path())).get("projects") or []:
+-            if rec.get("path"):
+-                roots.append(Path(str(rec["path"])).expanduser().resolve())
++        return [Path(str(rec["path"])).expanduser().resolve()
++                for rec in _public_view(_load_store(_store_path())).get("projects") or [] if rec.get("path")]
+     except Exception as exc:  # noqa: BLE001 -- an unreadable bookshelf means no extra roots
+-        logging.getLogger(__name__).debug("bookshelf not read for the run_command roots: %s", exc)
++        logging.getLogger(__name__).debug("bookshelf not read: %s", exc)
++        return []
++
++
++def _ungated_write_roots() -> list[Path]:
++    """SEC2-6 (owner decision 2026-11-13): the folders write_path, apply_patch
++    and apply_search_replace change without asking: the workspace (uploads
++    included), the projects on the bookshelf, ~/Documents, ~/Downloads and
++    ~/Desktop. Uploads live in <workspace>/uploads. Anywhere else asks the
++    owner first (write_gate), and the refusals of _protected_target_reason
++    apply inside these folders too."""
++    home = Path.home()
++    roots = [home / "Documents", home / "Downloads", home / "Desktop", *_bookshelf_roots()]
++    try:
++        from dourmouse.config import workspace_dir
++
++        roots.append(Path(workspace_dir()))
++    except Exception as exc:  # noqa: BLE001 -- the other folders still apply
++        logging.getLogger(__name__).debug("workspace not added to the write roots: %s", exc)
+     return roots
+ 
+ 
++#: The tools whose writes write_gate judges (dispatch._argument_gate calls it).
++UNGATED_WRITE_TOOLS = frozenset({"write_path", "apply_patch", "apply_search_replace"})
++
++
++def write_gate(tool: str, arguments: dict[str, Any]) -> tuple[str, str] | None:
++    """The hook for dispatch._argument_gate (SEC2-6): None when ``tool`` may
++    write ``arguments["path"]`` without asking, ("confirm", prompt) when the
++    path is outside the owner's own folders. A path the tool refuses outright
++    (credentials, start-up files, Dourmouse's own folder, hidden settings) is
++    left to the tool, which says why."""
++    target = _resolve_abs(str(arguments.get("path") or ""))
++    if target is None or _is_sensitive(target) or _protected_target_reason(target) is not None:
++        return None
++    if any(_under_dir(target, root) for root in _ungated_write_roots()):
++        return None
++    return ("confirm", f"Let {tool} change {target}? It is outside the folders Dourmouse changes without asking "
++            "(the workspace, projects on your bookshelf, Documents, Downloads and Desktop).")
++
++
+ def _validated_cwd(raw: str) -> tuple[str | None, str]:
+     """(cwd, "") when a model-chosen working folder is acceptable, else (None,
+     reason). Finding #157: the sandbox lets the shell write in its working
+diff --git a/dourmouse/tests/test_chat.py b/dourmouse/tests/test_chat.py
+index 900e761..6241c3a 100755
+--- a/dourmouse/tests/test_chat.py
++++ b/dourmouse/tests/test_chat.py
+@@ -572,7 +572,7 @@ class TestGatedToolThroughChat:
+         )
+         # No gate attached => tool must NOT execute.
+         session = ChatSession(r, client=client, session_file=tmp_path / "g1.jsonl", confirmation_gate=None)
+-        report = session.ask("do it")
++        report = session.ask("gated_echo: do it")
+         result = next(t for t in report["transcript"] if t["type"] == "tool_result")
+         assert "CONFIRMATION REQUIRED" in result["text"]
+         assert "ECHOED" not in result["text"]
+@@ -586,7 +586,7 @@ class TestGatedToolThroughChat:
+             ]
+         )
+         session2 = ChatSession(r, client=client2, session_file=tmp_path / "g2.jsonl", confirmation_gate=lambda t: True)
+-        report2 = session2.ask("do it")
++        report2 = session2.ask("gated_echo: do it")
+         result2 = next(t for t in report2["transcript"] if t["type"] == "tool_result")
+         assert result2["text"] == "ECHOED: y"
+ 
+diff --git a/dourmouse/tests/test_dispatch.py b/dourmouse/tests/test_dispatch.py
+index 579805e..3870b5a 100755
+--- a/dourmouse/tests/test_dispatch.py
++++ b/dourmouse/tests/test_dispatch.py
+@@ -717,7 +717,7 @@ class TestLoop:
+         second = _FakeResponse(_FakeMessage(content="ok"))
+         client = FakeClient([first, second])
+ 
+-        report = run_dispatch("x", _test_registry(), client=client)
++        report = run_dispatch("echo x", _test_registry(), client=client)
+ 
+         result = next(t for t in report["transcript"] if t["type"] == "tool_result")
+         assert "invalid JSON" in result["text"]
+@@ -738,7 +738,7 @@ class TestLoop:
+         second = _FakeResponse(_FakeMessage(content="ok"))
+         client = FakeClient([first, second])
+ 
+-        report = run_dispatch("x", r, client=client)
++        report = run_dispatch("boom", r, client=client)
+ 
+         result = next(t for t in report["transcript"] if t["type"] == "tool_result")
+         assert "failed" in result["text"]
+@@ -840,7 +840,7 @@ class TestShouldStop:
+             return seen["n"] >= 3
+ 
+         report = run_dispatch(
+-            "do two things", _test_registry(), client=client, should_stop=should_stop,
++            "echo two things", _test_registry(), client=client, should_stop=should_stop,
+         )
+         assert client.chat.completions.calls.__len__() == 1  # never asked the model again
+         tool_results = [t for t in report["transcript"] if t["type"] == "tool_result"]
+@@ -875,7 +875,7 @@ class TestPermissions:
+         second = _FakeResponse(_FakeMessage(content="Cannot do that."))
+         client = FakeClient([first, second])
+ 
+-        report = run_dispatch("do it", r, client=client, confirmation_gate=None)
++        report = run_dispatch("gated_echo: do it", r, client=client, confirmation_gate=None)
+ 
+         result = next(t for t in report["transcript"] if t["type"] == "tool_result")
+         assert "CONFIRMATION REQUIRED" in result["text"]
+@@ -899,7 +899,7 @@ class TestPermissions:
+ 
+         gate_prompts: list[str] = []
+         report = run_dispatch(
+-            "do it", r, client=client,
++            "gated_echo: do it", r, client=client,
+             confirmation_gate=lambda text: gate_prompts.append(text) or True,
+         )
+ 
+@@ -922,7 +922,7 @@ class TestPermissions:
+         second = _FakeResponse(_FakeMessage(content="Skipped."))
+         client = FakeClient([first, second])
+ 
+-        report = run_dispatch("do it", r, client=client, confirmation_gate=lambda text: False)
++        report = run_dispatch("gated_echo: do it", r, client=client, confirmation_gate=lambda text: False)
+ 
+         result = next(t for t in report["transcript"] if t["type"] == "tool_result")
+         assert "DECLINED BY USER" in result["text"]
+@@ -943,7 +943,7 @@ class TestPermissions:
+         second = _FakeResponse(_FakeMessage(content="ok"))
+         client = FakeClient([first, second])
+ 
+-        report = run_dispatch("x", r, client=client, confirmation_gate=lambda t: True)
++        report = run_dispatch("forbidden x", r, client=client, confirmation_gate=lambda t: True)
+ 
+         result = next(t for t in report["transcript"] if t["type"] == "tool_result")
+         assert "REFUSED" in result["text"]
+@@ -2034,7 +2034,7 @@ class TestEndToEndThroughGeneralRoster:
+         second = _FakeResponse(_FakeMessage(content="No positions."))
+         client = FakeClient([first, second])
+ 
+-        report = run_dispatch("check positions", registry, client=client)
++        report = run_dispatch("monitoring: poll positions", registry, client=client)
+ 
+         result = next(t for t in report["transcript"] if t["type"] == "tool_result")
+         assert "POSITIONS" in result["text"]
+@@ -2054,7 +2054,7 @@ class TestEndToEndThroughGeneralRoster:
+         second = _FakeResponse(_FakeMessage(content="I will not send that."))
+         client = FakeClient([first, second])
+ 
+-        report = run_dispatch("send it", registry, client=client, confirmation_gate=None)
++        report = run_dispatch("send the draft", registry, client=client, confirmation_gate=None)
+ 
+         result = next(t for t in report["transcript"] if t["type"] == "tool_result")
+         assert "CONFIRMATION REQUIRED" in result["text"]
+@@ -2783,7 +2783,7 @@ class TestRepeatToolCallGuard:
+                 _FakeResponse(_FakeMessage(content="OK-CLAUDE")),
+             ]
+         )
+-        report = run_dispatch("say ok", registry, client=client, max_turns=5)
++        report = run_dispatch("claude_code: say ok", registry, client=client, max_turns=5)
+         # The real handler ran exactly once, not twice.
+         assert len(calls) == 1
+         # The second (duplicate) call's tool result told the model it was
+@@ -2820,7 +2820,7 @@ class TestRepeatToolCallGuard:
+                 _FakeResponse(_FakeMessage(content="done")),
+             ]
+         )
+-        run_dispatch("do two things", registry, client=client, max_turns=5)
++        run_dispatch("codex_code: do two things", registry, client=client, max_turns=5)
+         # Different arguments -> both real calls run, guard never fires.
+         assert len(calls) == 2
+ 
+diff --git a/dourmouse/tests/test_governance.py b/dourmouse/tests/test_governance.py
+index 6910b54..a2a3da1 100755
+--- a/dourmouse/tests/test_governance.py
++++ b/dourmouse/tests/test_governance.py
+@@ -682,7 +682,7 @@ class TestEngineWiring:
+         second = _FakeResponse(_FakeMessage(content="ok"))
+         client = FakeClient([first, second])
+         report = run_dispatch_messages(
+-            [{"role": "user", "content": "go"}],
++            [{"role": "user", "content": "typed: go"}],
+             r,
+             client=client,
+         )
+@@ -726,7 +726,7 @@ class TestEngineWiring:
+         second = _FakeResponse(_FakeMessage(content="ok"))
+         client = FakeClient([first, second])
+         report = run_dispatch_messages(
+-            [{"role": "user", "content": "go"}],
++            [{"role": "user", "content": "json_tool: go"}],
+             r,
+             client=client,
+         )
+@@ -755,7 +755,7 @@ class TestEngineWiring:
+         second = _FakeResponse(_FakeMessage(content="ok"))
+         client = FakeClient([first, second])
+         report = run_dispatch_messages(
+-            [{"role": "user", "content": "go"}],
++            [{"role": "user", "content": "bad_json_tool: go"}],
+             r,
+             client=client,
+         )
+@@ -778,7 +778,7 @@ class TestEngineWiring:
+         second = _FakeResponse(_FakeMessage(content="ok"))
+         client = FakeClient([first, second])
+         report = run_dispatch_messages(
+-            [{"role": "user", "content": "go"}],
++            [{"role": "user", "content": "text_tool: go"}],
+             r,
+             client=client,
+         )
+@@ -807,7 +807,7 @@ class TestEngineWiring:
+             [
+                 {"role": "user", "content": "remember: budget number is 42"},
+                 {"role": "assistant", "content": "Noted."},
+-                {"role": "user", "content": "delegate this"},
++                {"role": "user", "content": "echo agent: delegate this"},
+             ],
+             registry,
+             client=client,
+@@ -875,7 +875,7 @@ class TestInterventionLedger:
+         client = FakeClient([first, second])
+         decisions = []
+         report = run_dispatch_messages(
+-            [{"role": "user", "content": "go"}],
++            [{"role": "user", "content": "gated_echo: go"}],
+             r,
+             client=client,
+             confirmation_gate=lambda t: decisions.append(t) or True,
+@@ -988,7 +988,7 @@ class TestAuditLedger:
+             client=FakeClient([first, second]),
+             confirmation_gate=lambda t: True,
+         )
+-        session.ask("go")
++        session.ask("gated_echo: go")
+         rec = json.loads(session.session_file.read_text(encoding="utf-8").splitlines()[0])
+         assert len(rec["interventions"]) == 2
+         assert rec["interventions"][0]["type"] == "confirmation_requested"
+diff --git a/dourmouse/webui.py b/dourmouse/webui.py
+index 4d6e230..816eed9 100755
+--- a/dourmouse/webui.py
++++ b/dourmouse/webui.py
+@@ -3756,6 +3756,9 @@ class _Handler(BaseHTTPRequestHandler):
+                 "scanned": result is not None,
+                 "last_scan_at": runtime.last_scan_at if runtime else None,
+                 "tick_count": runtime.tick_count if runtime else 0,
++                # SEC3-9: a sentry that cannot scan says so instead of looking quiet.
++                "consecutive_failed_scans": runtime.consecutive_failed_scans if runtime else 0,
++                "last_scan_error": runtime.last_scan_error if runtime else None,
+                 "risk_score": result.risk_score if result else 0.0,
+                 "findings_by_severity": by_severity,
+                 "findings": findings_payload,

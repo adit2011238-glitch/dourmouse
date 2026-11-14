@@ -1,0 +1,584 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Dourmouse T6 mockup</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+/* T6 design proposal, 2026-11-13. A static mockup, not app code.
+   Open with ?v=chats|approval|agents|room|research|security|components and &t=light|dark.
+   Every value below is a proposed token. In the app the neutrals and the accent are read
+   from macOS at run time (Electron systemPreferences); these are stand-ins for a browser. */
+:root {
+  --font: system-ui, -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --bg-content: #ffffff;
+  --bg-sidebar: #e9e9eb;
+  --bg-inspector: #f5f5f7;
+  --text: rgba(0, 0, 0, .85);
+  --text-2: rgba(0, 0, 0, .6);
+  --text-3: rgba(0, 0, 0, .55);
+  --sep: rgba(0, 0, 0, .1);
+  --fill: rgba(0, 0, 0, .05);
+  --fill-2: rgba(0, 0, 0, .09);
+  --accent: #007aff;
+  --accent-fill: #0066d6;
+  --on-accent: #ffffff;
+  --link: #0068da;
+  --good: #28cd41;
+  --warn: #ff9500;
+  --crit: #ff3b30;
+  --crit-text: #d70015;
+  --dim: rgba(0, 0, 0, .18);
+  --field-bg: #ffffff;
+  --field-line: rgba(0, 0, 0, .16);
+  --shadow-float: 0 12px 32px rgba(0, 0, 0, .18), 0 0 0 .5px rgba(0, 0, 0, .14);
+  --r-control: 6px;
+  --r-row: 6px;
+  --r-float: 12px;
+  color-scheme: light;
+}
+:root[data-t="dark"] {
+  --bg-content: #1e1e1e;
+  --bg-sidebar: #2b2b2d;
+  --bg-inspector: #262628;
+  --text: rgba(255, 255, 255, .85);
+  --text-2: rgba(255, 255, 255, .6);
+  --text-3: rgba(255, 255, 255, .55);
+  --sep: rgba(255, 255, 255, .1);
+  --fill: rgba(255, 255, 255, .06);
+  --fill-2: rgba(255, 255, 255, .11);
+  --accent: #0a84ff;
+  --accent-fill: #0066d6;
+  --link: #409cff;
+  --good: #32d74b;
+  --warn: #ff9f0a;
+  --crit: #ff453a;
+  --crit-text: #ff453a;
+  --dim: rgba(0, 0, 0, .35);
+  --field-bg: rgba(255, 255, 255, .05);
+  --field-line: rgba(255, 255, 255, .16);
+  --shadow-float: 0 12px 32px rgba(0, 0, 0, .5), 0 0 0 .5px rgba(255, 255, 255, .16);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  font: 13px/18px var(--font);
+  color: var(--text);
+  background: var(--bg-content);
+  -webkit-font-smoothing: antialiased;
+  font-variant-numeric: tabular-nums;
+}
+.view { display: none; }
+body[data-v="chats"] #chats, body[data-v="approval"] #chats, body[data-v="agents"] #agents,
+body[data-v="room"] #room, body[data-v="research"] #research, body[data-v="security"] #security,
+body[data-v="components"] #components { display: grid; }
+body[data-v="approval"] #sheetlayer { display: block; }
+
+/* window */
+.win { position: fixed; inset: 0; grid-template-columns: 220px 1fr; }
+.sb { background: var(--bg-sidebar); border-right: 1px solid var(--sep); display: flex; flex-direction: column; min-height: 0; }
+.sb-top { height: 52px; display: flex; align-items: center; padding: 0 10px 0 20px; flex: none; }
+.lights { display: flex; gap: 8px; }
+.lights i { width: 12px; height: 12px; border-radius: 50%; display: block; }
+.lights i:nth-child(1) { background: #ff5f57; }
+.lights i:nth-child(2) { background: #febc2e; }
+.lights i:nth-child(3) { background: #28c840; }
+.sb-top .ib { margin-left: auto; }
+.places, .recents { list-style: none; margin: 0; padding: 0 10px; }
+.row { display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px; border-radius: var(--r-row); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row svg { width: 16px; height: 16px; flex: none; color: var(--accent); }
+.row .n { margin-left: auto; color: var(--text-2); font-size: 12px; }
+.row.sel { background: var(--fill-2); }
+.sb-h { font-size: 11px; line-height: 14px; font-weight: 600; color: var(--text-2); padding: 14px 18px 6px; }
+.recents .row { color: var(--text); }
+.recents .row span { overflow: hidden; text-overflow: ellipsis; }
+
+.main { display: grid; grid-template-rows: 52px 1fr; min-width: 0; min-height: 0; background: var(--bg-content); }
+.tb { display: flex; align-items: center; gap: 8px; padding: 0 12px 0 16px; border-bottom: 1px solid var(--sep); min-width: 0; }
+.tb h1 { font-size: 15px; line-height: 20px; font-weight: 600; margin: 0; white-space: nowrap; }
+.tb .grow { flex: 1; }
+.body { display: grid; min-height: 0; }
+.with-insp { grid-template-columns: 1fr 280px; }
+.with-list { grid-template-columns: 264px 1fr; }
+.with-list.with-insp { grid-template-columns: 264px 1fr 280px; }
+.insp { background: var(--bg-inspector); border-left: 1px solid var(--sep); overflow: hidden; padding: 16px; }
+.list { border-right: 1px solid var(--sep); overflow: hidden; padding: 8px; }
+.scroll { overflow: hidden; min-height: 0; }
+
+/* icons and buttons */
+svg { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.ib { width: 28px; height: 28px; border: 0; background: transparent; border-radius: var(--r-control); display: inline-grid; place-items: center; color: var(--text-2); padding: 0; }
+.ib svg { width: 17px; height: 17px; }
+.ib.on { background: var(--fill-2); color: var(--text); }
+.btn { display: inline-flex; align-items: center; justify-content: center; font: 500 13px/16px var(--font); height: 28px; padding: 0 12px; border-radius: var(--r-control); border: 1px solid var(--field-line); background: var(--field-bg); color: var(--text); white-space: nowrap; }
+.btn.primary { background: var(--accent-fill); border-color: transparent; color: var(--on-accent); }
+.btn.danger { color: var(--crit-text); }
+.btn.small { height: 24px; padding: 0 10px; font-size: 12px; }
+.seg { display: inline-flex; background: var(--fill); border-radius: var(--r-control); padding: 2px; gap: 2px; }
+.seg span { padding: 0 12px; height: 24px; line-height: 24px; border-radius: 5px; font-weight: 500; color: var(--text); }
+.seg span.on { background: var(--bg-content); box-shadow: 0 0 0 .5px var(--field-line), 0 1px 2px rgba(0, 0, 0, .12); }
+:root[data-t="dark"] .seg span.on { background: rgba(255, 255, 255, .16); box-shadow: none; }
+.search { display: flex; align-items: center; gap: 6px; width: 190px; height: 28px; padding: 0 8px; border-radius: var(--r-control); background: var(--fill); color: var(--text-3); }
+.search svg { width: 14px; height: 14px; }
+
+/* status */
+.st { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.st::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--text-3); flex: none; }
+.st.good::before { background: var(--good); }
+.st.warn::before { background: var(--warn); }
+.st.crit::before { background: var(--crit); }
+
+/* type */
+.title2 { font-size: 17px; line-height: 22px; font-weight: 600; margin: 0; }
+.title3 { font-size: 15px; line-height: 20px; font-weight: 600; margin: 0; }
+.head { font-weight: 600; }
+.sec { color: var(--text-2); }
+.small { font-size: 11px; line-height: 14px; }
+.mono { font-family: var(--mono); font-size: 12px; }
+.h-sec { font-size: 11px; line-height: 14px; font-weight: 600; color: var(--text-2); margin: 20px 0 6px; }
+.h-sec:first-child { margin-top: 0; }
+
+/* key-value rows (receipts, profiles) */
+.kv { display: grid; grid-template-columns: 76px 1fr; gap: 6px 12px; margin: 0; }
+.kv dt { color: var(--text-2); }
+.kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.lines { list-style: none; margin: 0; padding: 0; }
+.lines li { display: flex; gap: 8px; padding: 6px 0; border-top: 1px solid var(--sep); }
+.lines li:first-child { border-top: 0; }
+.lines .r { margin-left: auto; color: var(--text-2); white-space: nowrap; }
+
+/* tables */
+table { border-collapse: collapse; width: 100%; table-layout: fixed; }
+th { text-align: left; font-weight: 500; color: var(--text-2); font-size: 12px; padding: 0 10px 6px; border-bottom: 1px solid var(--sep); white-space: nowrap; }
+td { padding: 0 10px; height: 30px; border-bottom: 1px solid var(--sep); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 0; }
+tr.sel td { background: var(--accent-fill); color: var(--on-accent); border-bottom-color: transparent; }
+tr.sel td .sec, tr.sel td.sec { color: rgba(255, 255, 255, .85); }
+tr.sel td:first-child { border-radius: var(--r-row) 0 0 var(--r-row); }
+tr.sel td:last-child { border-radius: 0 var(--r-row) var(--r-row) 0; }
+tr.sel .st::before { box-shadow: 0 0 0 1.5px rgba(255, 255, 255, .9); }
+
+/* chat */
+.conv { max-width: 680px; margin: 0 auto; padding: 24px 24px 0; display: flex; flex-direction: column; gap: 16px; }
+.msg-user { align-self: flex-end; max-width: 78%; background: var(--fill); padding: 8px 12px; border-radius: 12px; line-height: 20px; }
+.msg-ai { line-height: 20px; }
+.msg-ai .who { font-size: 11px; line-height: 14px; font-weight: 600; color: var(--text-2); margin-bottom: 4px; }
+.msg-ai p { margin: 0 0 8px; }
+.activity { display: flex; align-items: center; gap: 6px; color: var(--text-2); }
+.activity svg { width: 12px; height: 12px; }
+.draft { border: 1px solid var(--sep); border-radius: 8px; padding: 10px 12px; line-height: 20px; margin: 4px 0 8px; }
+.draft .sub { color: var(--text-2); margin-bottom: 6px; }
+.waiting { display: flex; align-items: center; gap: 10px; border: 1px solid var(--sep); border-radius: 8px; padding: 8px 8px 8px 12px; }
+.waiting .st { flex: 1; }
+.composer-wrap { padding: 12px 24px 20px; }
+.composer { max-width: 680px; margin: 0 auto; border: 1px solid var(--field-line); border-radius: 12px; background: var(--field-bg); padding: 10px 10px 8px 14px; }
+.composer .ph { color: var(--text-3); height: 22px; }
+.composer .bar { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+.pop { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px; border-radius: var(--r-control); color: var(--text-2); font-weight: 500; }
+.pop svg { width: 10px; height: 10px; }
+.send { margin-left: auto; width: 28px; height: 28px; border-radius: 50%; background: var(--accent-fill); color: #fff; display: grid; place-items: center; }
+.send svg { width: 14px; height: 14px; stroke-width: 2; }
+.chatcol { display: grid; grid-template-rows: 1fr auto; min-height: 0; }
+
+/* lists in the middle column */
+.item { padding: 8px 10px; border-radius: var(--r-row); }
+.item + .item { margin-top: 2px; }
+.item .t { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.item .m { display: flex; justify-content: space-between; color: var(--text-2); font-size: 12px; margin-top: 2px; }
+.item.sel { background: var(--accent-fill); color: var(--on-accent); }
+.item.sel .m { color: rgba(255, 255, 255, .85); }
+.item.sel .st::before { box-shadow: 0 0 0 1.5px rgba(255, 255, 255, .9); }
+
+/* room thread */
+.thread { padding: 20px 24px; display: flex; flex-direction: column; gap: 14px; max-width: 760px; }
+.tm .line { display: flex; gap: 6px; align-items: baseline; }
+.tm .kind { color: var(--text-2); }
+.tm .when { margin-left: auto; color: var(--text-2); font-size: 12px; white-space: nowrap; }
+.tm .txt { margin-top: 2px; line-height: 20px; }
+.tm.alert .txt { padding-left: 10px; border-left: 2px solid var(--warn); }
+
+/* research */
+.pad { padding: 20px 24px; }
+.steps { list-style: none; margin: 14px 0 22px; padding: 0; }
+.steps li { display: grid; grid-template-columns: 22px 120px 1fr auto; align-items: center; height: 32px; border-bottom: 1px solid var(--sep); }
+.steps svg { width: 14px; height: 14px; }
+.steps .done { color: var(--good); }
+.steps .now { color: var(--accent); }
+.steps .later { color: var(--text-3); }
+
+/* security */
+.sum { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
+
+/* sheet */
+#sheetlayer { display: none; position: fixed; inset: 0; z-index: 10; }
+#sheetlayer .dim { position: absolute; inset: 0; background: var(--dim); }
+.sheet { position: absolute; top: 52px; left: calc(220px + (100vw - 220px - 460px) / 2); width: 460px; background: var(--bg-content); border-radius: var(--r-float); box-shadow: var(--shadow-float); padding: 20px; }
+:root[data-t="dark"] .sheet { background: #2c2c2e; }
+.sheet h2 { font-size: 13px; line-height: 16px; font-weight: 700; margin: 0 0 6px; }
+.sheet p { margin: 0 0 14px; color: var(--text-2); }
+.sheet .kv { grid-template-columns: 64px 1fr; margin-bottom: 12px; }
+.sheet .preview { border: 1px solid var(--sep); border-radius: 8px; padding: 10px 12px; line-height: 20px; margin-bottom: 16px; }
+.sheet .acts { display: flex; justify-content: flex-end; gap: 8px; }
+
+/* components page */
+#components { position: fixed; inset: 0; grid-template-columns: repeat(3, 1fr); gap: 0; background: var(--bg-content); }
+.cell { padding: 20px 24px; border-right: 1px solid var(--sep); border-bottom: 1px solid var(--sep); min-width: 0; }
+.cell h3 { font-size: 11px; line-height: 14px; font-weight: 600; color: var(--text-2); margin: 0 0 12px; }
+.cell .stack { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.field { height: 28px; border: 1px solid var(--field-line); background: var(--field-bg); border-radius: var(--r-control); padding: 0 8px; display: flex; align-items: center; color: var(--text-3); width: 100%; }
+.check { display: inline-flex; align-items: center; gap: 6px; }
+.box { width: 14px; height: 14px; border-radius: 4px; background: var(--accent-fill); display: grid; place-items: center; color: #fff; }
+.box svg { width: 10px; height: 10px; stroke-width: 2.2; }
+.switch { width: 32px; height: 18px; border-radius: 9px; background: var(--accent-fill); position: relative; }
+.switch::after { content: ""; position: absolute; right: 2px; top: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, .25); }
+.switch.off { background: var(--fill-2); }
+.switch.off::after { right: auto; left: 2px; }
+.empty { color: var(--text-2); text-align: center; padding: 18px 0; }
+.mini { background: var(--bg-sidebar); border-radius: 8px; padding: 6px; width: 200px; }
+</style>
+</head>
+<body data-v="chats">
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-chats" viewBox="0 0 20 20"><path d="M3.5 6A2.5 2.5 0 0 1 6 3.5h8A2.5 2.5 0 0 1 16.5 6v5a2.5 2.5 0 0 1-2.5 2.5H9.5L6 16.5v-3A2.5 2.5 0 0 1 3.5 11z"/></symbol>
+  <symbol id="i-agents" viewBox="0 0 20 20"><circle cx="7.5" cy="7" r="2.6"/><path d="M2.8 16a4.7 4.7 0 0 1 9.4 0"/><circle cx="13.6" cy="7.6" r="2.1"/><path d="M13.2 11.6a4 4 0 0 1 4.3 4.4"/></symbol>
+  <symbol id="i-research" viewBox="0 0 20 20"><circle cx="8.5" cy="8.5" r="5"/><path d="M12.2 12.2 16.5 16.5"/></symbol>
+  <symbol id="i-library" viewBox="0 0 20 20"><path d="M4 3.5h3v13H4zM8.5 3.5h3v13h-3zM13 4.2l2.8-.7 2.6 12.4-2.8.6z"/></symbol>
+  <symbol id="i-browser" viewBox="0 0 20 20"><circle cx="10" cy="10" r="6.5"/><path d="M3.5 10h13M10 3.5c2 2 2.8 4.2 2.8 6.5s-.8 4.5-2.8 6.5c-2-2-2.8-4.2-2.8-6.5S8 5.5 10 3.5"/></symbol>
+  <symbol id="i-security" viewBox="0 0 20 20"><path d="M10 2.8 15.8 5v4.6c0 3.6-2.4 6.3-5.8 7.6-3.4-1.3-5.8-4-5.8-7.6V5z"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 20 20"><circle cx="10" cy="10" r="2.5"/><path d="M10 2.8v2M10 15.2v2M2.8 10h2M15.2 10h2M4.9 4.9l1.4 1.4M13.7 13.7l1.4 1.4M4.9 15.1l1.4-1.4M13.7 6.3l1.4-1.4"/></symbol>
+  <symbol id="i-sidebar" viewBox="0 0 20 20"><rect x="2.8" y="4" width="14.4" height="12" rx="2.2"/><path d="M8 4v12"/></symbol>
+  <symbol id="i-inspector" viewBox="0 0 20 20"><rect x="2.8" y="4" width="14.4" height="12" rx="2.2"/><path d="M12 4v12"/></symbol>
+  <symbol id="i-compose" viewBox="0 0 20 20"><path d="M10 3.5H5.5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V10"/><path d="M15 3.2l1.8 1.8-7 7-2.4.6.6-2.4z"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 20 20"><path d="M10 4v12M4 10h12"/></symbol>
+  <symbol id="i-up" viewBox="0 0 20 20"><path d="M10 16V4M5 9l5-5 5 5"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 20 20"><path d="M7.5 4.5 13 10l-5.5 5.5"/></symbol>
+  <symbol id="i-down" viewBox="0 0 20 20"><path d="M4.5 7.5 10 13l5.5-5.5"/></symbol>
+  <symbol id="i-check" viewBox="0 0 20 20"><path d="M4.5 10.5 8.3 14 15.5 6"/></symbol>
+  <symbol id="i-dot" viewBox="0 0 20 20"><circle cx="10" cy="10" r="5"/></symbol>
+  <symbol id="i-ring" viewBox="0 0 20 20"><circle cx="10" cy="10" r="6"/></symbol>
+  <symbol id="i-clip" viewBox="0 0 20 20"><path d="M14.5 9.5 9.8 14.2a3 3 0 0 1-4.2-4.2l5.3-5.3a2 2 0 0 1 2.8 2.8l-5.2 5.2a1 1 0 0 1-1.4-1.4l4.6-4.6"/></symbol>
+  <symbol id="i-mic" viewBox="0 0 20 20"><rect x="7.5" y="3" width="5" height="9" rx="2.5"/><path d="M5 9.5a5 5 0 0 0 10 0M10 14.5V17"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 20 20"><path d="M7.5 5v10M12.5 5v10"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 20 20"><path d="M15.5 10a5.5 5.5 0 1 1-1.6-3.9M15.5 4v3.2h-3.2"/></symbol>
+</svg>
+
+<!-- Chats -->
+<div class="view win" id="chats">
+  <aside class="sb" data-sel="chats" data-recent="Friday trip email"></aside>
+  <section class="main">
+    <div class="tb">
+      <h1>Friday trip email</h1><span class="grow"></span>
+      <div class="search"><svg><use href="#i-research"/></svg>Search</div>
+      <button class="ib" title="New chat"><svg><use href="#i-compose"/></svg></button>
+      <button class="ib on" title="Hide inspector"><svg><use href="#i-inspector"/></svg></button>
+    </div>
+    <div class="body with-insp">
+      <div class="chatcol">
+        <div class="scroll">
+          <div class="conv">
+            <div class="msg-user">Write a short email to Ms Carter saying I can join Friday's field trip, and ask what time the bus leaves.</div>
+            <div class="msg-ai">
+              <div class="who">Mail and Calendar</div>
+              <div class="activity"><svg><use href="#i-chev"/></svg>Checked your calendar for Friday</div>
+              <p style="margin-top:8px">Friday is free in your calendar, so the draft says yes.</p>
+              <div class="draft">
+                <div class="sub">Subject: Friday's field trip</div>
+                Hi Ms Carter,<br><br>I can join the field trip on Friday. What time does the bus leave?<br><br>Thank you
+              </div>
+              <div class="waiting"><span class="st warn">Waiting for you to approve sending</span><span class="btn small">Review</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="composer-wrap">
+          <div class="composer">
+            <div class="ph">Message</div>
+            <div class="bar">
+              <button class="ib" title="Attach"><svg><use href="#i-clip"/></svg></button>
+              <span class="pop">Orchestrator <svg><use href="#i-down"/></svg></span>
+              <button class="ib" title="Voice" style="margin-left:auto"><svg><use href="#i-mic"/></svg></button>
+              <span class="send" style="margin-left:0"><svg><use href="#i-up"/></svg></span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <aside class="insp">
+        <div class="h-sec">Receipt</div>
+        <dl class="kv">
+          <dt>Agent</dt><dd>Mail and Calendar</dd>
+          <dt>Model</dt><dd>Claude Sonnet</dd>
+          <dt>Steps</dt><dd>2 of 8</dd>
+          <dt>Time</dt><dd>6 s</dd>
+          <dt>Cost</dt><dd>$0.002</dd>
+        </dl>
+        <div class="h-sec">Tools used</div>
+        <ul class="lines">
+          <li>Read calendar<span class="r">1.2 s</span></li>
+          <li>Draft email<span class="r">3.9 s</span></li>
+        </ul>
+        <div class="h-sec">Waiting for approval</div>
+        <ul class="lines">
+          <li><span>Send email to Ms Carter</span><span class="r"><span class="btn small">Review</span></span></li>
+        </ul>
+      </aside>
+    </div>
+  </section>
+</div>
+
+<div id="sheetlayer">
+  <div class="dim"></div>
+  <div class="sheet" role="dialog">
+    <h2>Send this email?</h2>
+    <p>Mail and Calendar wants to send this from your account.</p>
+    <dl class="kv">
+      <dt>To</dt><dd>ms.carter@school.example</dd>
+      <dt>Subject</dt><dd>Friday's field trip</dd>
+    </dl>
+    <div class="preview">Hi Ms Carter,<br><br>I can join the field trip on Friday. What time does the bus leave?<br><br>Thank you</div>
+    <div class="acts"><span class="btn">Don't send</span><span class="btn primary">Send email</span></div>
+  </div>
+</div>
+
+<!-- Agents: team -->
+<div class="view win" id="agents">
+  <aside class="sb" data-sel="agents"></aside>
+  <section class="main">
+    <div class="tb">
+      <h1>Agents</h1><span class="grow"></span>
+      <div class="seg"><span class="on">Team</span><span>Room</span><span>Activity</span><span>Jobs</span></div>
+      <span class="grow"></span>
+      <div class="search"><svg><use href="#i-research"/></svg>Search</div>
+      <button class="ib on" title="Hide inspector"><svg><use href="#i-inspector"/></svg></button>
+    </div>
+    <div class="body with-insp">
+      <div class="scroll" style="padding:12px 14px">
+        <table>
+          <thead><tr><th style="width:22%">Name</th><th>Job</th><th style="width:12%">Tests</th><th style="width:19%">Status</th></tr></thead>
+          <tbody>
+            <tr><td>Orchestrator</td><td class="sec">Plans the work and hands it to the right agent</td><td>9 of 10</td><td><span class="st good">Available</span></td></tr>
+            <tr class="sel"><td>Researcher</td><td class="sec">Finds papers and writes cited answers</td><td>8 of 10</td><td><span class="st good">Available</span></td></tr>
+            <tr><td>Librarian</td><td class="sec">Keeps your files and notes searchable</td><td>10 of 10</td><td><span class="st good">Available</span></td></tr>
+            <tr><td>Mail and Calendar</td><td class="sec">Reads and drafts email, manages your calendar</td><td>7 of 8</td><td><span class="st good">Available</span></td></tr>
+            <tr><td>Docs</td><td class="sec">Writes and edits Google Docs and Drive files</td><td>Not run</td><td><span class="st">Not tested</span></td></tr>
+            <tr><td>Browser</td><td class="sec">Reads and acts on pages in your Chrome profile</td><td>6 of 8</td><td><span class="st good">Available</span></td></tr>
+            <tr><td>Mac Operator</td><td class="sec">Runs apps and system tasks on this Mac</td><td>Not run</td><td><span class="st">Not tested</span></td></tr>
+            <tr><td>Coder</td><td class="sec">Writes, reviews and runs code</td><td>9 of 10</td><td><span class="st good">Available</span></td></tr>
+            <tr><td>Security</td><td class="sec">Watches downloads, links and background activity</td><td>5 of 8</td><td><span class="st warn">Partly working</span></td></tr>
+            <tr><td>Markets</td><td class="sec">Tracks prices and your broker accounts</td><td>Not run</td><td><span class="st">Not tested</span></td></tr>
+            <tr><td>News and World</td><td class="sec">Follows news and world events</td><td>Not run</td><td><span class="st">Not tested</span></td></tr>
+            <tr><td>Media</td><td class="sec">Plays and finds music, video and images</td><td>Not run</td><td><span class="st">Not tested</span></td></tr>
+            <tr><td>Planner</td><td class="sec">Turns goals into tasks and schedules</td><td>Not run</td><td><span class="st">Not tested</span></td></tr>
+            <tr><td>Agent Smith</td><td class="sec">Builds new tools, only with your approval</td><td>Not run</td><td><span class="st">Owner only</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <aside class="insp">
+        <h2 class="title3">Researcher</h2>
+        <div class="sec" style="margin:4px 0 14px">Finds papers and writes cited answers</div>
+        <dl class="kv">
+          <dt>Model</dt><dd>Claude Sonnet</dd>
+          <dt>Step budget</dt><dd>60 per job</dd>
+          <dt>Memory</dt><dd>Library, researcher</dd>
+          <dt>Workspace</dt><dd>Agents/Researcher</dd>
+          <dt>Can</dt><dd>Read the web, read and write the library</dd>
+          <dt>Cannot</dt><dd>Send email, run apps</dd>
+        </dl>
+        <div class="h-sec">Capability test, 12 Nov</div>
+        <ul class="lines">
+          <li>Find three reviews on a topic<span class="r">Passed</span></li>
+          <li>Quote a passage word for word<span class="r">Passed</span></li>
+          <li>Grade a preprint<span class="r">Passed</span></li>
+          <li>Follow citations backwards<span class="r">Failed</span></li>
+          <li>Six more<span class="r">Passed</span></li>
+        </ul>
+        <div style="margin-top:14px"><span class="btn small">Run test again</span></div>
+      </aside>
+    </div>
+  </section>
+</div>
+
+<!-- Agents: room -->
+<div class="view win" id="room">
+  <aside class="sb" data-sel="agents"></aside>
+  <section class="main">
+    <div class="tb">
+      <h1>Agents</h1><span class="grow"></span>
+      <div class="seg"><span>Team</span><span class="on">Room</span><span>Activity</span><span>Jobs</span></div>
+      <span class="grow"></span>
+      <span class="btn"><span style="display:inline-flex;align-items:center;gap:4px"><svg style="width:12px;height:12px"><use href="#i-pause"/></svg>Pause job</span></span>
+      <button class="ib on" title="Hide inspector"><svg><use href="#i-inspector"/></svg></button>
+    </div>
+    <div class="body with-list with-insp">
+      <div class="list">
+        <div class="item sel"><div class="t">Markets brief for Monday</div><div class="m"><span class="st good">Running</span><span>10:06</span></div></div>
+        <div class="item"><div class="t">Check a new launch agent</div><div class="m"><span class="st warn">Waiting for you</span><span>09:15</span></div></div>
+        <div class="item"><div class="t">Sleep and memory papers</div><div class="m"><span class="st">Done</span><span>Yesterday</span></div></div>
+        <div class="item"><div class="t">Clean up Downloads</div><div class="m"><span class="st">Done</span><span>Tuesday</span></div></div>
+      </div>
+      <div class="chatcol"><div class="scroll">
+        <div class="thread">
+          <div class="tm"><div class="line"><span class="head">Orchestrator</span><span class="kind">handed off to News and World</span><span class="when">10:02</span></div><div class="txt">Collect this week's market moving headlines for the brief.</div></div>
+          <div class="tm"><div class="line"><span class="head">News and World</span><span class="kind">answered</span><span class="when">10:04, $0.003</span></div><div class="txt">Found 6 headlines. Saved to the board as headlines.md.</div></div>
+          <div class="tm"><div class="line"><span class="head">Orchestrator</span><span class="kind">asked Markets</span><span class="when">10:04</span></div><div class="txt">Pull Friday's closes for the watchlist and the change over the week.</div></div>
+          <div class="tm"><div class="line"><span class="head">Markets</span><span class="kind">answered</span><span class="when">10:05, $0.002</span></div><div class="txt">12 tickers. Table saved to the board as closes.csv.</div></div>
+          <div class="tm"><div class="line"><span class="head">Orchestrator</span><span class="kind">handed off to Mac Operator</span><span class="when">10:05</span></div><div class="txt">Put the brief in Pages and export a PDF to the Desktop.</div></div>
+          <div class="tm alert"><div class="line"><span class="head">Mac Operator</span><span class="kind">alert</span><span class="when">10:06</span></div><div class="txt">Pages asks where to save. Using Desktop as asked.</div></div>
+        </div>
+        </div>
+        <div class="composer-wrap" style="padding:12px 24px 20px"><div class="composer" style="max-width:none"><div class="ph">Post to this job</div><div class="bar"><span class="pop">To everyone <svg><use href="#i-down"/></svg></span><span class="send"><svg><use href="#i-up"/></svg></span></div></div></div>
+      </div>
+      <aside class="insp">
+        <div class="h-sec">Board</div>
+        <ul class="lines">
+          <li>headlines.md<span class="r">News and World</span></li>
+          <li>closes.csv<span class="r">Markets</span></li>
+          <li>brief.pages<span class="r">Mac Operator</span></li>
+        </ul>
+        <div class="h-sec">Budget</div>
+        <dl class="kv">
+          <dt>Steps</dt><dd>14 of 60</dd>
+          <dt>Cost</dt><dd>$0.011</dd>
+          <dt>Started</dt><dd>10:02</dd>
+        </dl>
+        <div class="h-sec">Agents in this job</div>
+        <ul class="lines">
+          <li>Orchestrator</li><li>News and World</li><li>Markets</li><li>Mac Operator</li>
+        </ul>
+      </aside>
+    </div>
+  </section>
+</div>
+
+<!-- Research -->
+<div class="view win" id="research">
+  <aside class="sb" data-sel="research"></aside>
+  <section class="main">
+    <div class="tb">
+      <h1>Research</h1><span class="grow"></span>
+      <div class="search"><svg><use href="#i-research"/></svg>Search</div>
+      <button class="ib" title="New research"><svg><use href="#i-plus"/></svg></button>
+      <button class="ib on" title="Hide inspector"><svg><use href="#i-inspector"/></svg></button>
+    </div>
+    <div class="body with-list with-insp">
+      <div class="list">
+        <div class="item sel"><div class="t">How does sleep affect memory?</div><div class="m"><span class="st warn">Questions to approve</span><span>Today</span></div></div>
+        <div class="item"><div class="t">Tidal energy cost per kWh</div><div class="m"><span class="st good">Reading papers</span><span>Today</span></div></div>
+        <div class="item"><div class="t">Screen time and teenagers' sleep</div><div class="m"><span class="st">Done</span><span>Monday</span></div></div>
+      </div>
+      <div class="scroll pad">
+        <h2 class="title2">How does sleep affect memory?</h2>
+        <ul class="steps">
+          <li><svg class="done"><use href="#i-check"/></svg><span>Context brief</span><span class="sec">Approved by you</span><span></span></li>
+          <li><svg class="done"><use href="#i-check"/></svg><span>Papers</span><span class="sec">12 found, 9 read, 3 abstract only</span><span></span></li>
+          <li><svg class="now"><use href="#i-dot"/></svg><span class="head">Questions</span><span class="sec">4 sub-questions</span><span class="btn small">Review</span></li>
+          <li><svg class="later"><use href="#i-ring"/></svg><span class="sec">Answers</span><span class="sec">Starts after you approve the questions</span><span></span></li>
+        </ul>
+        <table>
+          <thead><tr><th>Paper</th><th style="width:60px">Year</th><th style="width:150px">Source</th><th style="width:116px">Read</th></tr></thead>
+          <tbody>
+            <tr><td>Sleep-dependent memory consolidation</td><td>2005</td><td class="sec">Nature</td><td>Full text</td></tr>
+            <tr class="sel"><td>The memory function of sleep</td><td>2010</td><td class="sec">Nat Rev Neurosci</td><td>Full text</td></tr>
+            <tr><td>About sleep's role in memory</td><td>2013</td><td class="sec">Physiol Rev</td><td>Full text</td></tr>
+            <tr><td>Mechanisms of systems memory consolidation during sleep</td><td>2019</td><td class="sec">Nat Neurosci</td><td>Abstract only</td></tr>
+            <tr><td>Sleep-dependent learning and memory consolidation</td><td>2004</td><td class="sec">Neuron</td><td>Full text</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <aside class="insp">
+        <div class="h-sec">Paper card</div>
+        <h2 class="title3">The memory function of sleep</h2>
+        <div class="sec" style="margin:4px 0 14px">Diekelmann and Born, 2010</div>
+        <dl class="kv">
+          <dt>Kind</dt><dd>Review, peer reviewed</dd>
+          <dt>Question</dt><dd>What does sleep do for memory?</dd>
+          <dt>Finding</dt><dd>Sleep, slow-wave sleep above all, helps turn new memories into lasting ones.</dd>
+          <dt>Quotes</dt><dd>2, each checked word for word against the PDF</dd>
+          <dt>Limits</dt><dd>Mostly lab studies of young adults</dd>
+        </dl>
+        <div style="margin-top:14px;display:flex;gap:8px"><span class="btn small">Open PDF</span><span class="btn small">Show quotes</span></div>
+      </aside>
+    </div>
+  </section>
+</div>
+
+<!-- Security -->
+<div class="view win" id="security">
+  <aside class="sb" data-sel="security"></aside>
+  <section class="main">
+    <div class="tb">
+      <h1>Security</h1><span class="grow"></span>
+      <span class="btn"><span style="display:inline-flex;align-items:center;gap:4px"><svg style="width:12px;height:12px"><use href="#i-refresh"/></svg>Check now</span></span>
+      <button class="ib on" title="Hide inspector"><svg><use href="#i-inspector"/></svg></button>
+    </div>
+    <div class="body with-insp">
+      <div class="scroll pad">
+        <div class="sum"><span class="st crit head">1 area at risk, 3 need attention</span><span class="sec">Checked 10:42</span></div>
+        <table>
+          <thead><tr><th style="width:26%">Area</th><th style="width:22%">State</th><th>Finding</th></tr></thead>
+          <tbody>
+            <tr class="sel"><td>Firewall</td><td><span class="st crit">At risk</span></td><td class="sec">Off</td></tr>
+            <tr><td>FileVault</td><td><span class="st good">Protected</span></td><td class="sec">Disk is encrypted</td></tr>
+            <tr><td>Downloads</td><td><span class="st good">Protected</span></td><td class="sec">2 new files today, both safe</td></tr>
+            <tr><td>Links</td><td><span class="st warn">Needs attention</span></td><td class="sec">No Safe Browsing key yet</td></tr>
+            <tr><td>Background items</td><td><span class="st warn">Needs attention</span></td><td class="sec">1 new launch agent</td></tr>
+            <tr><td>School account</td><td><span class="st good">Protected</span></td><td class="sec">No school profile on this Mac</td></tr>
+            <tr><td>Wi-Fi privacy</td><td><span class="st warn">Needs attention</span></td><td class="sec">DNS is not encrypted</td></tr>
+            <tr><td>Quarantine</td><td><span class="st">Empty</span></td><td class="sec">No files held</td></tr>
+          </tbody>
+        </table>
+        <div class="h-sec" style="margin-top:24px">Recent events</div>
+        <ul class="lines">
+          <li><span class="sec" style="width:72px">10:42</span>Checked 2 new downloads. Both safe.</li>
+          <li><span class="sec" style="width:72px">09:15</span>New launch agent found: com.example.updater</li>
+          <li><span class="sec" style="width:72px">Yesterday</span>Firewall found off</li>
+        </ul>
+      </div>
+      <aside class="insp">
+        <h2 class="title3">Firewall</h2>
+        <div style="margin:6px 0 14px"><span class="st crit">At risk</span></div>
+        <p style="margin:0 0 14px">The application firewall is off. Turning it on blocks incoming connections to apps you have not allowed.</p>
+        <span class="btn primary">Turn on firewall</span>
+        <div class="sec small" style="margin-top:8px">macOS asks for your password.</div>
+        <div class="h-sec">Evidence</div>
+        <div class="mono">socketfilterfw --getglobalstate<br>Firewall is disabled. (State = 0)</div>
+      </aside>
+    </div>
+  </section>
+</div>
+
+<!-- Components -->
+<div class="view" id="components">
+  <div class="cell"><h3>Buttons</h3><div class="stack"><span class="btn primary">Send email</span><span class="btn">Cancel</span><span class="btn danger">Delete</span><span class="btn small">Review</span><button class="ib"><svg><use href="#i-compose"/></svg></button><button class="ib on"><svg><use href="#i-inspector"/></svg></button></div></div>
+  <div class="cell"><h3>Fields</h3><div class="field">Name</div><div class="search" style="margin-top:8px;width:100%"><svg><use href="#i-research"/></svg>Search</div></div>
+  <div class="cell"><h3>Segmented control and pop-up</h3><div class="stack"><div class="seg"><span class="on">Team</span><span>Room</span><span>Activity</span></div><span class="pop" style="border:1px solid var(--field-line);background:var(--field-bg);color:var(--text)">Orchestrator <svg><use href="#i-down"/></svg></span></div></div>
+  <div class="cell"><h3>Sidebar rows</h3><div class="mini"><div class="row sel"><svg><use href="#i-chats"/></svg>Chats</div><div class="row"><svg><use href="#i-agents"/></svg>Agents<span class="n">2</span></div><div class="row"><svg><use href="#i-security"/></svg>Security</div></div></div>
+  <div class="cell"><h3>Checkbox and switch</h3><div class="stack" style="gap:18px"><span class="check"><span class="box"><svg><use href="#i-check"/></svg></span>Remember this choice</span><span class="switch"></span><span class="switch off"></span></div></div>
+  <div class="cell"><h3>Status</h3><div class="stack" style="gap:16px"><span class="st good">Protected</span><span class="st warn">Needs attention</span><span class="st crit">At risk</span><span class="st">Not tested</span></div></div>
+  <div class="cell"><h3>Table</h3><table><thead><tr><th>Name</th><th style="width:30%">Tests</th></tr></thead><tbody><tr><td>Researcher</td><td>8 of 10</td></tr><tr class="sel"><td>Coder</td><td>9 of 10</td></tr><tr><td>Docs</td><td>Not run</td></tr></tbody></table></div>
+  <div class="cell"><h3>Receipt</h3><dl class="kv"><dt>Agent</dt><dd>Mail and Calendar</dd><dt>Steps</dt><dd>2 of 8</dd><dt>Time</dt><dd>6 s</dd><dt>Cost</dt><dd>$0.002</dd></dl></div>
+  <div class="cell"><h3>Empty state</h3><div class="empty">No research yet. Ask a question to start one.</div></div>
+  <div class="cell"><h3>Chat messages</h3><div class="msg-user" style="max-width:100%;display:inline-block">What time does the bus leave?</div><div class="msg-ai" style="margin-top:10px"><div class="who">Mail and Calendar</div>The email says 8:15 from the main gate.</div></div>
+  <div class="cell"><h3>Waiting for approval</h3><div class="waiting"><span class="st warn">Send email to Ms Carter</span><span class="btn small">Review</span></div></div>
+  <div class="cell"><h3>Activity line</h3><div class="activity"><svg><use href="#i-chev"/></svg>Checked your calendar for Friday</div><div class="activity" style="margin-top:8px"><svg><use href="#i-chev"/></svg>Read 3 files</div></div>
+</div>
+
+<script>
+const PLACES = [
+  ['chats', 'Chats'], ['agents', 'Agents'], ['research', 'Research'], ['library', 'Library'],
+  ['browser', 'Browser'], ['security', 'Security'], ['settings', 'Settings'],
+];
+const RECENTS = ['Friday trip email', 'Compare two laptops', 'Fix the build error', 'Plan for this week', 'Biology notes summary', 'Reply to the club'];
+for (const sb of document.querySelectorAll('.sb')) {
+  const sel = sb.dataset.sel, recent = sb.dataset.recent || '';
+  const places = PLACES.map(([id, label]) =>
+    `<li class="row${id === sel && !recent ? ' sel' : ''}"><svg><use href="#i-${id}"/></svg>${label}${id === 'agents' ? '<span class="n">1</span>' : ''}</li>`).join('');
+  const recents = RECENTS.map((t) => `<li class="row${t === recent ? ' sel' : ''}"><span>${t}</span></li>`).join('');
+  sb.innerHTML = `<div class="sb-top"><span class="lights"><i></i><i></i><i></i></span><button class="ib" title="Hide sidebar"><svg><use href="#i-sidebar"/></svg></button></div>
+    <ul class="places">${places}</ul><div class="sb-h">Recent chats</div><ul class="recents">${recents}</ul>`;
+}
+const q = new URLSearchParams(location.search);
+document.body.dataset.v = q.get('v') || 'chats';
+document.documentElement.dataset.t = q.get('t') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+</script>
+</body>
+</html>

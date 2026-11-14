@@ -1170,3 +1170,4 @@ and a real build sequence, not just a requirement statement:
 - [x] Finding #190 2026-10-31 -- Google sign-in from the app window runs the claim bridge (banner and classic popup), fixing "this sign-in was not started in this browser".
 - [x] Finding #191 2026-11-06 -- Claude CLI no longer inherits another provider's ANTHROPIC_* routing; `claude auth status` and the banner follow the CLI's own signed-in answer.
 - [x] Finding #192 2026-11-06 -- step budget: free roster lookups, namespaced tool names resolve, rate-limited tools are not retried, markets routing and multi-domain requests, scaled budget, sturdier last-chance summary, no invented plan steps.
+- [ ] 2026-11-14 Plans PL-01 to PL-08 written (docs/plans/2026-11-14_plans/); PL-09 onward and four cut-off reviews (first-run, architecture, performance, data lifecycle) still to do. Work moves into one Claude Project (docs/plans/PROJECT_PROMPT_2026-11-14.md).
