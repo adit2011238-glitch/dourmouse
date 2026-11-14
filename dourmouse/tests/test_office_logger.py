@@ -209,7 +209,7 @@ def test_delegate_parallel_branches_announce_the_id_their_run_uses(monkeypatch):
     events = []
     registry = build_general_registry()
     run_dispatch_messages([{"role": "system", "content": system_message(registry)},
-                           {"role": "user", "content": "split this across agents in parallel"}],
+                           {"role": "user", "content": "disk space free? split this across agents in parallel"}],
                           registry, client=client, event_sink=events.append)
     branch = [e for e in events if e.get("type") == "delegate_parallel_branch" and e.get("phase") == "start"]
     assert branch, "no branch ran"

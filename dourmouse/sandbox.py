@@ -37,6 +37,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+from collections.abc import Iterable
 from pathlib import Path
 
 _OUTPUT_CAP = 20_000  # chars of command output returned to the model
@@ -206,12 +207,64 @@ def _project_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
-#: The workspace's own state and secret folders (the same list the confined
-#: file tools refuse: general_roster._PROTECTED_WORKSPACE_TOP).
+#: Folders the Claude CLI runs in (code_backends._scratch_cwd) or keys its
+#: sessions by (dispatch._claude_orchestrator_cwd). The CLI loads .claude/
+#: settings, whose hooks run shell commands, and CLAUDE.md, read as standing
+#: instructions, from where it runs, so nothing the model drives writes there
+#: (SEC2-2).
+CLI_WORKSPACE_DIRS = ("claude_scratch", "claude_orchestrator")
+
+#: The workspace's own state and secret folders, and the CLI's folders. The one
+#: list every write guard uses: the confined file tools
+#: (general_roster._PROTECTED_WORKSPACE_TOP), write_path and the run_command
+#: sandbox below.
 _PROTECTED_WORKSPACE_DIRS = (
     "self_extensions", "auth", "state", "security", "memory", "sessions", "librarian", "office",
-    "research_pipeline", "compute", "atlas_lab", "device_wiki", "neuro", "privacy",
+    "research_pipeline", "compute", "atlas_lab", "device_wiki", "neuro", "privacy", *CLI_WORKSPACE_DIRS,
 )
+
+#: File names another program reads as settings or standing instructions
+#: wherever they sit (SEC2-2, SEC2-4): Claude Code's CLAUDE.md and
+#: CLAUDE.local.md, AGENTS.md (Codex and others), .mcp.json (MCP servers it
+#: starts), and DOURMOUSE.md, which Dourmouse splices into every system prompt.
+#: Folded (case- and Unicode-insensitive), like every name rule here.
+AGENT_CONFIG_FILES = ("claude.md", "claude.local.md", "agents.md", ".mcp.json", "dourmouse.md")
+
+
+def is_agent_config_path(parts: Iterable[str]) -> bool:
+    """True when a path component is a Claude Code (``.claude*``) or Codex
+    (``.codex``) settings folder, or its last component is one of
+    AGENT_CONFIG_FILES."""
+    from dourmouse.path_identity import fold
+
+    folded = [fold(p) for p in parts]
+    if any(p.startswith(".claude") or p == ".codex" for p in folded):
+        return True
+    return bool(folded) and folded[-1] in AGENT_CONFIG_FILES
+
+
+def _any_case(text: str) -> str:
+    """A Seatbelt regex fragment for ``text`` in any letter case: the default
+    macOS volume ignores case, so .CLAUDE is the folder .claude."""
+    out = []
+    for ch in text:
+        if ch.isalpha():
+            out.append(f"[{ch.lower()}{ch.upper()}]")
+        elif ch in ".^$*+?()[]{}|\\":
+            out.append("\\" + ch)
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
+def _agent_config_write_rules() -> list[str]:
+    """Seatbelt denies for is_agent_config_path, anywhere a shell could write."""
+    names = "|".join(_any_case(n) for n in AGENT_CONFIG_FILES)
+    return [
+        f'(deny file-write* (regex #"/{_any_case(".claude")}[^/]*(/|$)"))',
+        f'(deny file-write* (regex #"/{_any_case(".codex")}(/|$)"))',
+        f'(deny file-write* (regex #"/({names})$"))',
+    ]
 
 
 def _protected_write_rules(ws: Path) -> list[str]:
@@ -225,6 +278,8 @@ def _protected_write_rules(ws: Path) -> list[str]:
     rules: list[str] = []
     subpaths = [ws / d for d in _PROTECTED_WORKSPACE_DIRS]
     subpaths += [root / d for d in ("dourmouse", "ui", "electron", "scripts", "extension", ".venv", ".git")]
+    # dispatch keys Claude sessions by this folder even when the workspace lives elsewhere.
+    subpaths.append(root / "workspace" / "claude_orchestrator")
     literals = [ws / "mcp_servers.json", ws / "spotify_tokens.json", root / ".env"]
     try:
         from dourmouse.config import user_config_dir
@@ -236,6 +291,7 @@ def _protected_write_rules(ws: Path) -> list[str]:
         rules.append(f"(deny file-write* (subpath {_quote(str(p))}))")
     for p in literals:
         rules.append(f"(deny file-write* (literal {_quote(str(p))}))")
+    rules.extend(_agent_config_write_rules())
     return rules
 
 

@@ -71,6 +71,8 @@ from dourmouse.librarian import librarian_tools
 from dourmouse.message_bus import BROADCAST, get_message_bus
 from dourmouse.research_mesh_tools import build_research_mesh_subagent
 from dourmouse.research_pipeline_tools import build_research_pipeline_subagent
+from dourmouse.sandbox import _PROTECTED_WORKSPACE_DIRS as _SANDBOX_PROTECTED_DIRS
+from dourmouse.sandbox import CLI_WORKSPACE_DIRS, is_agent_config_path
 from dourmouse.security.tools import build_security_subagent
 from dourmouse.system_access import build_system_subagent
 
@@ -1344,10 +1346,9 @@ def _list_calendar_events_tool(arguments: dict[str, Any]) -> str:
 # workspace. The file tools never write here (a model that had read a hostile
 # page could otherwise plant code the server loads at its next start, or edit
 # the auth database), and run_python never copies from here.
-_PROTECTED_WORKSPACE_TOP = frozenset({
-    "self_extensions", "auth", "state", "security", "memory", "sessions", "librarian", "office",
-    "research_pipeline", "compute", "atlas_lab", "device_wiki", "neuro", "privacy",
-})
+# SEC2-2: one list shared with write_path and the run_command sandbox, and it now
+# includes the Claude CLI's own folders (claude_scratch, claude_orchestrator).
+_PROTECTED_WORKSPACE_TOP = frozenset(_SANDBOX_PROTECTED_DIRS)
 _PROTECTED_FILE_RE = re.compile(
     r"(^\.env($|\.)|\.(db|sqlite|sqlite3|pem|key|p12)$|\.db-(wal|shm)$|^(schedules|world_history)\.jsonl$|^mcp_servers\.json$|^spotify_tokens\.json$|^order_guard(_state\.json|\.lock)$)", re.IGNORECASE
 )
@@ -1386,26 +1387,37 @@ def _workspace_rel(target: Path) -> Path:
     return target.relative_to(_workspace_root().resolve())
 
 
-def _is_protected_parts(parts: tuple[str, ...]) -> bool:
-    """True for a workspace-relative path inside one of Dourmouse's own folders
-    or naming a secret file. Names are compared with the shared folding rule
-    (case and Unicode normalisation), because the default macOS volume treats
+def _protected_reason(parts: tuple[str, ...]) -> str | None:
+    """Why a workspace-relative path is off limits to the model's file tools,
+    or None. Names are compared with the shared folding rule (case and Unicode
+    normalisation), because the default macOS volume treats
     ``Self_Extensions`` and ``self_extensions`` as the same folder (P2-13)."""
     if not parts:
-        return False
-    return path_identity.name_in(parts[0], _PROTECTED_WORKSPACE_TOP) or bool(
-        _PROTECTED_FILE_RE.search(path_identity.fold(parts[-1]))
-    )
+        return None
+    if is_agent_config_path(parts) or path_identity.name_in(parts[0], CLI_WORKSPACE_DIRS):
+        # SEC2-2, SEC2-4: Claude Code settings and hooks, CLAUDE.md, AGENTS.md,
+        # .mcp.json, DOURMOUSE.md and the Claude CLI's own folders take effect
+        # later with no approval.
+        return ("another program reads it as settings or standing instructions (Claude Code, Codex, "
+                "MCP, or DOURMOUSE.md in every Dourmouse prompt), so only the owner changes it")
+    if path_identity.name_in(parts[0], _PROTECTED_WORKSPACE_TOP) or _PROTECTED_FILE_RE.search(
+        path_identity.fold(parts[-1])
+    ):
+        return "it is where Dourmouse keeps its own state or secrets"
+    return None
+
+
+def _is_protected_parts(parts: tuple[str, ...]) -> bool:
+    return _protected_reason(parts) is not None
 
 
 def _refuse_protected(base: Path, target: Path, action: str) -> None:
-    """Raise ValueError when ``target`` is one of Dourmouse's own state or secret files."""
+    """Raise ValueError when ``target`` is one of Dourmouse's own state or secret
+    files, or a file another program reads as settings or instructions."""
     parts = target.relative_to(base.resolve()).parts
-    if _is_protected_parts(parts):
-        raise ValueError(
-            f"{action} of {'/'.join(parts)!r} is refused: it is where Dourmouse keeps its own state or "
-            "secrets. Use another path in the workspace."
-        )
+    reason = _protected_reason(parts)
+    if reason is not None:
+        raise ValueError(f"{action} of {'/'.join(parts)!r} is refused: {reason}. Use another path in the workspace.")
 
 
 _RUN_INPUT_LIMITS = (20, 20 * 1024 * 1024)  # files, total bytes copied into a run's scratch folder

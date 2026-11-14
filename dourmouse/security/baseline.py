@@ -26,6 +26,8 @@ from dataclasses import dataclass
 from typing import Any
 
 HOST = "host"
+#: Key of the telemetry observation that marks a baseline built from every user's sockets (SEC3-7).
+ALL_USERS_SOCKETS = "all_users_sockets"
 LEARNING_MIN_SCANS = 3
 LEARNING_MIN_SECONDS = 30 * 60
 
@@ -54,6 +56,11 @@ def observations(state: dict[str, Any], network_id: str) -> list[Observation]:
         for p in lp.get("listening_ports", []):
             obs.append(Observation(HOST, "listening_port",
                                    f"{p['command']}|{p['protocol']}|{p['port']}", p.get("exposure", "")))
+        if lp.get("complete"):
+            # SEC3-7: remembers that this baseline has seen every user's sockets,
+            # so the scan that first sees the system's own listeners learns them
+            # instead of calling them new (see sentry.run_scan).
+            obs.append(Observation(HOST, "telemetry", ALL_USERS_SOCKETS, "1"))
 
     est = state.get("established_connections") or {}
     if est.get("available"):

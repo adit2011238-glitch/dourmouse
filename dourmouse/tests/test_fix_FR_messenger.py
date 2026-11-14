@@ -68,7 +68,9 @@ def test_the_top_level_orchestrator_turn_is_still_refused(bus):
         _Resp(tool_calls=[_Tc("c1", "send_message", args)]), _Resp(content="done"),
     )
     results = [e["text"] for e in report["transcript"] if e["type"] == "tool_result"]
-    assert results and (results[0].startswith("REFUSED") or "unknown tool" in results[0])
+    # SEC2-1: a tool the turn was not offered is refused by the scope check before anything else.
+    assert results and (results[0].startswith("REFUSED") or "unknown tool" in results[0]
+                        or "is not available in this conversation" in results[0]), results
     assert bus.snapshot() == []
 
 

@@ -495,7 +495,7 @@ class TestPrivilegedGate:
             ]
         )
         report = run_dispatch(
-            "do it",
+            "run the command",
             build_general_registry(),
             client=client,
             confirmation_gate=lambda prompt: False,  # human declined
@@ -514,7 +514,7 @@ class TestPrivilegedGate:
                 _FakeResponse(_FakeMessage(content="ok")),
             ]
         )
-        report = run_dispatch("go", build_general_registry(), client=client, confirmation_gate=None)
+        report = run_dispatch("run the command", build_general_registry(), client=client, confirmation_gate=None)
         assert not marker.exists()
         result = next(t for t in report["transcript"] if t["type"] == "tool_result")
         assert "CONFIRMATION REQUIRED" in result["text"]

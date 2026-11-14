@@ -259,7 +259,7 @@ class TestDelegateTool:
         second = _FakeResponse(_FakeMessage(content="ok"))
         client = FakeClient([first, second])
         report = run_dispatch_messages(
-            [{"role": "user", "content": "delegate something"}],
+            [{"role": "user", "content": "disk space free? delegate something"}],
             registry,
             client=client,
             job_tracker=jobs,
@@ -274,7 +274,7 @@ class TestDelegateTool:
         second = _FakeResponse(_FakeMessage(content="ok"))
         client = FakeClient([first, second])
         report = run_dispatch_messages(
-            [{"role": "user", "content": "delegate"}],
+            [{"role": "user", "content": "disk space free? delegate"}],
             registry,
             client=client,
             job_tracker=jobs,
@@ -292,7 +292,7 @@ class TestDelegateTool:
         second = _FakeResponse(_FakeMessage(content="ok"))
         client = FakeClient([first, second])
         report = run_dispatch_messages(
-            [{"role": "user", "content": "delegate"}],
+            [{"role": "user", "content": "disk space free? delegate"}],
             registry,
             client=client,
             job_tracker=jobs,
@@ -309,7 +309,7 @@ class TestDelegateTool:
         second = _FakeResponse(_FakeMessage(content="fine"))
         client = FakeClient([first, second])
         report = run_dispatch_messages(
-            [{"role": "user", "content": "delegate"}],
+            [{"role": "user", "content": "disk space free? delegate"}],
             registry,
             client=client,
             job_tracker=jobs,
@@ -327,7 +327,7 @@ class TestDelegateTool:
         second = _FakeResponse(_FakeMessage(content="fine"))
         client = FakeClient([first, second])
         report = run_dispatch_messages(
-            [{"role": "user", "content": "delegate"}],
+            [{"role": "user", "content": "disk space free? delegate"}],
             registry,
             client=client,
             job_tracker=jobs,
@@ -377,7 +377,7 @@ class TestRecursiveDispatch:
         client = FakeClient(responses)
         sink_events: list[dict] = []
         report = run_dispatch_messages(
-            [{"role": "user", "content": "handle this"}],
+            [{"role": "user", "content": "disk space free? handle this"}],
             registry,
             client=client,
             job_tracker=jobs,
@@ -423,7 +423,7 @@ class TestRecursiveDispatch:
         ]
         client = FakeClient(responses)
         report = run_dispatch_messages(
-            [{"role": "user", "content": "go"}],
+            [{"role": "user", "content": "disk space free? go"}],
             registry,
             client=client,
             job_tracker=jobs,
@@ -477,7 +477,7 @@ class TestRecursiveDispatch:
         calls: list[str] = []
         sink_events: list[dict] = []
         report = run_dispatch_messages(
-            [{"role": "user", "content": "go"}],
+            [{"role": "user", "content": "disk space free? go"}],
             registry,
             client=client,
             job_tracker=jobs,
@@ -532,7 +532,7 @@ class TestRecursiveDispatch:
         ]
         client = FakeClient(responses)
         report = run_dispatch_messages(
-            [{"role": "user", "content": "go"}],
+            [{"role": "user", "content": "disk space free? go"}],
             registry,
             client=client,
             config=config,
@@ -580,7 +580,7 @@ class TestRecursiveDispatch:
         client = FakeClient(responses)
         client.chat.completions = _ExplodingCompletions(responses)
         report = run_dispatch_messages(
-            [{"role": "user", "content": "go"}],
+            [{"role": "user", "content": "disk space free? go"}],
             registry,
             client=client,
             job_tracker=jobs,
@@ -603,7 +603,7 @@ class TestRecursiveDispatch:
         ]
         client = FakeClient(responses)
         report = run_dispatch_messages(
-            [{"role": "user", "content": "go"}],
+            [{"role": "user", "content": "disk space free? go"}],
             registry,
             client=client,
             job_tracker=jobs,
@@ -640,7 +640,7 @@ class TestRecursiveDispatch:
         ]
         client = FakeClient(responses)
         report = run_dispatch_messages(
-            [{"role": "user", "content": "go"}],
+            [{"role": "user", "content": "disk space free? go"}],
             registry,
             client=client,
             job_tracker=jobs,
@@ -670,7 +670,7 @@ class TestRecursiveDispatch:
         ]
         client = FakeClient(responses)
         report = run_dispatch_messages(
-            [{"role": "user", "content": "go"}],
+            [{"role": "user", "content": "disk space free? go"}],
             registry,
             client=client,
             job_tracker=None,  # explicit: no audit log attached
@@ -773,7 +773,7 @@ class TestDelegateParallelTool:
             _FakeResponse(_FakeMessage(content="ok")),
         ])
         report = run_dispatch_messages(
-            [{"role": "user", "content": "fan out"}], registry, client=client, job_tracker=jobs,
+            [{"role": "user", "content": "disk space free? fan out"}], registry, client=client, job_tracker=jobs,
         )
         result = next(t for t in report["transcript"] if t["type"] == "tool_result")
         assert "non-empty 'branches'" in result["text"]
@@ -786,7 +786,7 @@ class TestDelegateParallelTool:
             _FakeResponse(_FakeMessage(content="ok")),
         ])
         report = run_dispatch_messages(
-            [{"role": "user", "content": "fan out"}], registry, client=client, job_tracker=jobs,
+            [{"role": "user", "content": "disk space free? fan out"}], registry, client=client, job_tracker=jobs,
         )
         result = next(t for t in report["transcript"] if t["type"] == "tool_result")
         assert "non-empty 'instructions'" in result["text"]
@@ -799,7 +799,7 @@ class TestDelegateParallelTool:
             _FakeResponse(_FakeMessage(content="ok")),
         ])
         report = run_dispatch_messages(
-            [{"role": "user", "content": "fan out"}], registry, client=client, job_tracker=jobs,
+            [{"role": "user", "content": "disk space free? fan out"}], registry, client=client, job_tracker=jobs,
         )
         result = next(t for t in report["transcript"] if t["type"] == "tool_result")
         assert "unknown subagent 'nope'" in result["text"]
@@ -820,7 +820,7 @@ class TestDelegateParallelTool:
             _FakeResponse(_FakeMessage(content="ok")),
         ])
         report = run_dispatch_messages(
-            [{"role": "user", "content": "fan out"}], registry, client=client, job_tracker=jobs,
+            [{"role": "user", "content": "disk space free? fan out"}], registry, client=client, job_tracker=jobs,
             depth=2, max_depth=2,
         )
         result = next(t for t in report["transcript"] if t["type"] == "tool_result")
@@ -840,7 +840,7 @@ class TestDelegateParallelTool:
             _FakeResponse(_FakeMessage(content="ok")),
         ])
         report = run_dispatch_messages(
-            [{"role": "user", "content": "fan out"}], registry, client=client, job_tracker=jobs,
+            [{"role": "user", "content": "disk space free? fan out"}], registry, client=client, job_tracker=jobs,
             max_delegates=0,
         )
         result = next(t for t in report["transcript"] if t["type"] == "tool_result")
@@ -869,7 +869,7 @@ class TestDelegateParallelTool:
             _FakeResponse(_FakeMessage(content="parent done")),
         ])
         report = run_dispatch_messages(
-            [{"role": "user", "content": "fan out"}], registry, client=client, job_tracker=jobs,
+            [{"role": "user", "content": "disk space free? fan out"}], registry, client=client, job_tracker=jobs,
             max_delegates=1,
         )
         result = next(t for t in report["transcript"] if t["type"] == "tool_result")
@@ -905,7 +905,7 @@ class TestDelegateParallelTool:
         ])
 
         report = run_dispatch_messages(
-            [{"role": "user", "content": "fan out"}], registry, client=client, job_tracker=jobs,
+            [{"role": "user", "content": "disk space free? fan out"}], registry, client=client, job_tracker=jobs,
         )
 
         result = next(t for t in report["transcript"] if t["type"] == "tool_result")
@@ -933,7 +933,7 @@ class TestDelegateParallelNamedRoles:
             _FakeResponse(_FakeMessage(content="parent done")),
         ])
         run_dispatch_messages(
-            [{"role": "user", "content": "fan out"}], registry, client=client, job_tracker=jobs,
+            [{"role": "user", "content": "disk space free? fan out"}], registry, client=client, job_tracker=jobs,
         )
         job = jobs.snapshot()[0]
         assert job["subagent"] == "research_info"
@@ -953,7 +953,7 @@ class TestDelegateParallelNamedRoles:
             _FakeResponse(_FakeMessage(content="parent done")),
         ])
         run_dispatch_messages(
-            [{"role": "user", "content": "fan out"}], registry, client=client, job_tracker=jobs,
+            [{"role": "user", "content": "disk space free? fan out"}], registry, client=client, job_tracker=jobs,
         )
         job = jobs.snapshot()[0]
         assert job["subagent"] == "security"  # explicit agent, NOT the researcher preset's default
@@ -968,7 +968,7 @@ class TestDelegateParallelNamedRoles:
             _FakeResponse(_FakeMessage(content="ok")),
         ])
         report = run_dispatch_messages(
-            [{"role": "user", "content": "fan out"}], registry, client=client, job_tracker=jobs,
+            [{"role": "user", "content": "disk space free? fan out"}], registry, client=client, job_tracker=jobs,
         )
         result = next(t for t in report["transcript"] if t["type"] == "tool_result")
         assert "unknown role 'wizard'" in result["text"]
@@ -985,7 +985,7 @@ class TestDelegateParallelNamedRoles:
             _FakeResponse(_FakeMessage(content="parent done")),
         ])
         run_dispatch_messages(
-            [{"role": "user", "content": "fan out"}], registry, client=client, job_tracker=jobs,
+            [{"role": "user", "content": "disk space free? fan out"}], registry, client=client, job_tracker=jobs,
         )
         job = jobs.snapshot()[0]
         assert job["task"] == "just echo"  # byte-identical, no persona prefix leaked in
@@ -1026,7 +1026,7 @@ class TestDelegateParallelConcurrency:
         client.chat.completions.add("fan out", lambda: _FakeResponse(_FakeMessage(content="parent wrap-up")))
 
         report = run_dispatch_messages(
-            [{"role": "user", "content": "fan out"}], registry, client=client, config=config, job_tracker=jobs,
+            [{"role": "user", "content": "disk space free? fan out"}], registry, client=client, config=config, job_tracker=jobs,
         )
         result = next(t for t in report["transcript"] if t["type"] == "tool_result")
         assert "agent=echo_agent model=nvidia/echo-agent-70b" in result["text"]
@@ -1065,7 +1065,7 @@ class TestDelegateParallelConcurrency:
 
         events: list[dict[str, Any]] = []
         run_dispatch_messages(
-            [{"role": "user", "content": "fan out"}], registry, client=client, config=config,
+            [{"role": "user", "content": "disk space free? fan out"}], registry, client=client, config=config,
             job_tracker=jobs, event_sink=lambda e: events.append(e),
         )
         branch_events = [e for e in events if e.get("type") == "delegate_parallel_branch"]
@@ -1120,7 +1120,7 @@ class TestDelegateParallelConcurrency:
 
         started = time.perf_counter()
         report = run_dispatch_messages(
-            [{"role": "user", "content": "fan out"}], registry, client=client, job_tracker=jobs,
+            [{"role": "user", "content": "disk space free? fan out"}], registry, client=client, job_tracker=jobs,
         )
         elapsed = time.perf_counter() - started
         result = next(t for t in report["transcript"] if t["type"] == "tool_result")
@@ -1157,7 +1157,7 @@ class TestDelegateParallelConcurrency:
         client.chat.completions.add("fan out", lambda: _FakeResponse(_FakeMessage(content="parent wrap-up")))
 
         report = run_dispatch_messages(
-            [{"role": "user", "content": "fan out"}], registry, client=client, job_tracker=jobs,
+            [{"role": "user", "content": "disk space free? fan out"}], registry, client=client, job_tracker=jobs,
             max_delegates=n,
         )
         result = next(t for t in report["transcript"] if t["type"] == "tool_result")
@@ -1200,11 +1200,12 @@ class TestFanoutBranchGuard:
             _FakeResponse(_FakeMessage(content="ok")),
         ])
         report = run_dispatch_messages(
-            [{"role": "user", "content": "fan out"}], registry, client=client, job_tracker=jobs,
+            [{"role": "user", "content": "disk space free? fan out"}], registry, client=client, job_tracker=jobs,
             fanout_branch=True,
         )
         result = next(t for t in report["transcript"] if t["type"] == "tool_result")
-        assert "already one branch of a parallel fan-out" in result["text"]
+        # SEC2-1: the tool is hidden from a branch, so the scope check refuses it before the tool's own guard.
+        assert "is not available in this conversation" in result["text"]
         assert jobs.count() == 0
 
     def test_a_real_fan_out_runs_each_branch_with_the_flag(self, registry, jobs):
@@ -1220,7 +1221,7 @@ class TestFanoutBranchGuard:
             client.chat.completions.add(f"branch {i}", (lambda i=i: _FakeResponse(_FakeMessage(content=f"DONE {i}"))))
         client.chat.completions.add("fan out", lambda: _FakeResponse(_FakeMessage(content="wrap-up")))
         report = run_dispatch_messages(
-            [{"role": "user", "content": "fan out"}], registry, client=client, job_tracker=jobs, max_delegates=3,
+            [{"role": "user", "content": "disk space free? fan out"}], registry, client=client, job_tracker=jobs, max_delegates=3,
         )
         result = next(t for t in report["transcript"] if t["type"] == "tool_result")
         assert "3 succeeded" in result["text"]
@@ -1241,7 +1242,7 @@ class TestFanoutHonesty:
             client.chat.completions.add(f"branch {i}", (lambda i=i: _FakeResponse(_FakeMessage(content=f"DONE {i}"))))
         client.chat.completions.add("fan out", lambda: _FakeResponse(_FakeMessage(content="wrap-up")))
         run_dispatch_messages(
-            [{"role": "user", "content": "fan out"}], registry, client=client, job_tracker=jobs, max_delegates=2,
+            [{"role": "user", "content": "disk space free? fan out"}], registry, client=client, job_tracker=jobs, max_delegates=2,
         )
         prompts = [
             m["content"] for c in client.chat.completions.calls for m in c["messages"]
@@ -1264,7 +1265,7 @@ class TestFanoutHonesty:
         )
         client.chat.completions.add("fan out", lambda: _FakeResponse(_FakeMessage(content="wrap-up")))
         report = run_dispatch_messages(
-            [{"role": "user", "content": "fan out"}], registry, client=client, job_tracker=jobs, max_delegates=2,
+            [{"role": "user", "content": "disk space free? fan out"}], registry, client=client, job_tracker=jobs, max_delegates=2,
         )
         result = next(t for t in report["transcript"] if t["type"] == "tool_result")
         assert "1 succeeded" in result["text"] and "1 failed" in result["text"]
@@ -1281,7 +1282,7 @@ class TestFanoutHonesty:
         client.chat.completions.add("branch a", lambda: _FakeResponse(_FakeMessage(content="DONE a")))
         client.chat.completions.add("fan out", lambda: _FakeResponse(_FakeMessage(content="wrap-up")))
         report = run_dispatch_messages(
-            [{"role": "user", "content": "fan out"}], registry, client=client, job_tracker=jobs, max_delegates=3,
+            [{"role": "user", "content": "disk space free? fan out"}], registry, client=client, job_tracker=jobs, max_delegates=3,
         )
         result = next(t for t in report["transcript"] if t["type"] == "tool_result")
         assert "1 succeeded" in result["text"] and "DONE a" in result["text"]
@@ -1296,7 +1297,7 @@ class TestFanoutHonesty:
             client.chat.completions.add(f"branch {i}", (lambda i=i: _FakeResponse(_FakeMessage(content=f"DONE {i}"))))
         client.chat.completions.add("fan out", lambda: _FakeResponse(_FakeMessage(content="wrap-up")))
         report = run_dispatch_messages(
-            [{"role": "user", "content": "fan out"}], registry, client=client, job_tracker=jobs, max_delegates=2,
+            [{"role": "user", "content": "disk space free? fan out"}], registry, client=client, job_tracker=jobs, max_delegates=2,
         )
         result = next(t for t in report["transcript"] if t["type"] == "tool_result")
         assert "2 succeeded" in result["text"]
@@ -1347,7 +1348,7 @@ class TestCloudBurst:
         client.chat.completions.add("fan out", lambda: _FakeResponse(_FakeMessage(content="parent wrap-up")))
         events: list[dict[str, Any]] = []
         report = run_dispatch_messages(
-            [{"role": "user", "content": "fan out"}], registry, client=client, job_tracker=jobs,
+            [{"role": "user", "content": "disk space free? fan out"}], registry, client=client, job_tracker=jobs,
             max_delegates=n, event_sink=events.append,
         )
         result = next(t for t in report["transcript"] if t["type"] == "tool_result")

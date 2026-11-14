@@ -438,12 +438,32 @@ def _protected_target_reason(target: Path) -> str | None:
     root = _PROJECT_ROOT.resolve()
     if any(_under_dir(path, root / d) for d in ("dourmouse", "ui", "electron", "scripts", "extension", ".venv")) or _under_dir(path, root / ".env"):
         return "is part of Dourmouse's own code or its secrets"
+    # SEC2-6: tools started in Dourmouse's folder load files there (sitecustomize.py,
+    # conftest.py, pyproject.toml, Makefile) and hidden folders (.github, .claude).
+    path_parts, root_parts, home_parts = folded_parts(path), folded_parts(root), folded_parts(home)
+    if path_parts[: len(root_parts)] == root_parts and len(path_parts) > len(root_parts):
+        below = path_parts[len(root_parts):]
+        if len(below) == 1:
+            return "is a file in Dourmouse's own folder (tools started there load files like sitecustomize.py and conftest.py)"
+        if below[0].startswith("."):
+            return "is in a hidden folder of Dourmouse's own folder (.github, .claude and the like run or configure tools)"
     if _is_order_guard_file(path):
         return "is the trading guardrails' kill-switch state"
     if name_in(".git", path.parts):
         return "is inside a .git folder (hooks and config run when git runs)"
+    from dourmouse.sandbox import is_agent_config_path
+
+    if is_agent_config_path(path.parts):
+        # SEC2-2, SEC2-4: Claude Code and Codex settings folders, CLAUDE.md, AGENTS.md,
+        # .mcp.json and DOURMOUSE.md take effect later with no approval.
+        return "is a file another program reads as settings or standing instructions (Claude Code, Codex, MCP, DOURMOUSE.md)"
     if folded_parts(path.parent) == folded_parts(home) and name_in(path.name, _STARTUP_FILES):
         return "is a shell or tool start-up file (it runs whenever a terminal or git starts)"
+    if (path_parts[: len(home_parts)] == home_parts and len(path_parts) > len(home_parts)
+            and path_parts[len(home_parts)].startswith(".") and not _in_workspace(path)):
+        # SEC2-6: ~/.config/git/config, ~/.claude, ~/.codex, ~/.cursor/mcp.json, ~/.vimrc,
+        # ~/.tmux.conf, ~/.oh-my-zsh: hidden settings other programs load or run.
+        return "is a hidden settings file or folder in the home folder (other programs load or run it)"
     if any(_under_dir(path, home / d) for d in _STARTUP_DIRS) or any(_under_dir(path, Path(d)) for d in _SYSTEM_DIRS):
         return "is a start-up, application or system location"
     try:
@@ -458,6 +478,15 @@ def _protected_target_reason(target: Path) -> str | None:
     except Exception as exc:  # noqa: BLE001 -- the rest of the list still applies
         logging.getLogger(__name__).debug("workspace protections not evaluated: %s", exc)
     return None
+
+
+def _in_workspace(path: Path) -> bool:
+    try:
+        from dourmouse.config import workspace_dir
+
+        return _under_dir(path, Path(workspace_dir()))
+    except Exception:  # noqa: BLE001 -- no workspace resolvable: not inside it
+        return False
 
 
 def _refused_target(tool: str, target: Path) -> str | None:
@@ -576,15 +605,57 @@ def _allowed_cwd_roots() -> list[Path]:
         roots.append(Path(workspace_dir()).resolve())
     except Exception as exc:  # noqa: BLE001
         logging.getLogger(__name__).debug("workspace not added to the run_command roots: %s", exc)
+    roots.extend(_bookshelf_roots())
+    return roots
+
+
+def _bookshelf_roots() -> list[Path]:
+    """The project folders on the owner's bookshelf."""
     try:
         from dourmouse.project_bookkeeper import _load_store, _public_view, _store_path
 
-        for rec in _public_view(_load_store(_store_path())).get("projects") or []:
-            if rec.get("path"):
-                roots.append(Path(str(rec["path"])).expanduser().resolve())
+        return [Path(str(rec["path"])).expanduser().resolve()
+                for rec in _public_view(_load_store(_store_path())).get("projects") or [] if rec.get("path")]
     except Exception as exc:  # noqa: BLE001 -- an unreadable bookshelf means no extra roots
-        logging.getLogger(__name__).debug("bookshelf not read for the run_command roots: %s", exc)
+        logging.getLogger(__name__).debug("bookshelf not read: %s", exc)
+        return []
+
+
+def _ungated_write_roots() -> list[Path]:
+    """SEC2-6 (owner decision 2026-11-13): the folders write_path, apply_patch
+    and apply_search_replace change without asking: the workspace (uploads
+    included), the projects on the bookshelf, ~/Documents, ~/Downloads and
+    ~/Desktop. Uploads live in <workspace>/uploads. Anywhere else asks the
+    owner first (write_gate), and the refusals of _protected_target_reason
+    apply inside these folders too."""
+    home = Path.home()
+    roots = [home / "Documents", home / "Downloads", home / "Desktop", *_bookshelf_roots()]
+    try:
+        from dourmouse.config import workspace_dir
+
+        roots.append(Path(workspace_dir()))
+    except Exception as exc:  # noqa: BLE001 -- the other folders still apply
+        logging.getLogger(__name__).debug("workspace not added to the write roots: %s", exc)
     return roots
+
+
+#: The tools whose writes write_gate judges (dispatch._argument_gate calls it).
+UNGATED_WRITE_TOOLS = frozenset({"write_path", "apply_patch", "apply_search_replace"})
+
+
+def write_gate(tool: str, arguments: dict[str, Any]) -> tuple[str, str] | None:
+    """The hook for dispatch._argument_gate (SEC2-6): None when ``tool`` may
+    write ``arguments["path"]`` without asking, ("confirm", prompt) when the
+    path is outside the owner's own folders. A path the tool refuses outright
+    (credentials, start-up files, Dourmouse's own folder, hidden settings) is
+    left to the tool, which says why."""
+    target = _resolve_abs(str(arguments.get("path") or ""))
+    if target is None or _is_sensitive(target) or _protected_target_reason(target) is not None:
+        return None
+    if any(_under_dir(target, root) for root in _ungated_write_roots()):
+        return None
+    return ("confirm", f"Let {tool} change {target}? It is outside the folders Dourmouse changes without asking "
+            "(the workspace, projects on your bookshelf, Documents, Downloads and Desktop).")
 
 
 def _validated_cwd(raw: str) -> tuple[str | None, str]:

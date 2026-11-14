@@ -252,7 +252,9 @@ def test_e_private_mode_removes_t2_tools_and_refuses_a_stray_result(allow_mail):
     assert "gmail_send" in offered
     # The model called it anyway (a stale tool list): the result is refused.
     assert "merger" not in provider.sent_text()
-    assert _tool_messages(provider)[0].startswith("NOT SENT: Private mode is on")
+    # SEC2-1: a tool that was never offered is refused by the scope check before the privacy check runs.
+    first = _tool_messages(provider)[0]
+    assert first.startswith("NOT SENT: Private mode is on") or "is not available in this conversation" in first
 
 
 def test_e_private_mode_is_per_chat(allow_mail):

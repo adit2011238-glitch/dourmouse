@@ -21,6 +21,7 @@ docs/GODSPEED_ROADMAP.md Phase 4).
 from __future__ import annotations
 
 import ipaddress
+import os
 import re
 import subprocess
 from typing import Any
@@ -253,17 +254,119 @@ _LSOF_LISTEN_RE = re.compile(
 )
 
 
-def get_listening_ports() -> dict[str, Any]:
-    ok, out = _run(["lsof", "-iTCP", "-sTCP:LISTEN", "-n", "-P"], timeout=10.0)
+# --------------------------------------------------------------------------- #
+# Every user's sockets (SEC3-7). lsof run as the owner lists only the owner's
+# own processes, so root daemons, socket-activated sharing services and root
+# malware were invisible. macOS netstat -anv names the owning process of every
+# socket without root ("process:pid" column), so its sockets are merged in.
+# --------------------------------------------------------------------------- #
+
+_NETSTAT = "/usr/sbin/netstat"
+_PS = "/bin/ps"
+
+#: Columns after "process:pid" in macOS netstat -anv: state options gencnt
+#: flags flags1 usecnt rtncnt fltrs. The process name before them may contain
+#: spaces and is cut to 16 characters.
+_NETSTAT_FAMILY = {"tcp4": "IPv4", "tcp6": "IPv6", "tcp46": "IPv6"}
+
+#: macOS services that launchd or a system daemon listens for. A listener on
+#: one of these ports owned by one of these processes is named for the owner,
+#: because "launchd listens on port 445" says nothing useful.
+_SHARING = "System Settings > General > Sharing"
+MAC_SERVICE_PORTS: dict[int, tuple[str, str]] = {
+    22: ("Remote Login (SSH)", f"{_SHARING} > Remote Login"),
+    88: ("Kerberos sign-in for Mac sharing (kdc)",
+         f"{_SHARING} (it stops when File Sharing, Screen Sharing and Remote Management are all off)"),
+    445: ("File Sharing (SMB)", f"{_SHARING} > File Sharing"),
+    548: ("File Sharing (AFP)", f"{_SHARING} > File Sharing"),
+    3031: ("Remote Application Scripting", f"{_SHARING} > Remote Application Scripting"),
+    3283: ("Remote Management", f"{_SHARING} > Remote Management"),
+    5900: ("Screen Sharing (VNC)", f"{_SHARING} > Screen Sharing"),
+}
+_SERVICE_OWNERS = frozenset({"launchd", "kdc", "sshd", "smbd", "screensharingd", "ARDAgent", "AppleFileServer"})
+
+_PARTIAL_NOTE = ("Only this user's own programs could be read (netstat did not run: {reason}); "
+                 "listeners and connections owned by the system or root are not shown.")
+
+
+def _split_netstat_address(text: str) -> tuple[str, int | None]:
+    """"192.168.1.226.51881" -> ("192.168.1.226", 51881); "*.88" -> ("*", 88);
+    "::1.18789" -> ("::1", 18789); "*.*" -> ("*", None)."""
+    addr, _, port = text.rpartition(".")
+    return addr, (int(port) if port.isdigit() else None)
+
+
+def parse_netstat_anv(text: str) -> list[dict[str, Any]] | None:
+    """Every TCP socket in macOS `netstat -anv -p tcp` output, with the
+    owning process for every user. None when the layout is not the one this
+    parser knows (no "process:pid" column), so it is never guessed."""
+    lines = text.splitlines()
+    header = next((ln.split() for ln in lines if ln.startswith("Proto")), None)
+    if not header or "process:pid" not in header:
+        return None
+    # "Local Address" and "Foreign Address" are two words in the header, one in a row.
+    proc_col = header.index("process:pid") - 2
+    trailing = len(header) - header.index("process:pid") - 1
+    rows: list[dict[str, Any]] = []
+    for line in lines:
+        parts = line.split()
+        if not parts or parts[0] not in _NETSTAT_FAMILY or len(parts) < proc_col + trailing:
+            continue
+        owner = " ".join(parts[proc_col:len(parts) - trailing])
+        name, _, pid = owner.rpartition(":")
+        local_addr, local_port = _split_netstat_address(parts[3])
+        remote_addr, remote_port = _split_netstat_address(parts[4])
+        rows.append({
+            "family": _NETSTAT_FAMILY[parts[0]],
+            "local_address": local_addr, "local_port": local_port,
+            "remote_address": remote_addr, "remote_port": remote_port,
+            "state": parts[5],
+            "command": name if pid.isdigit() else None,
+            "pid": int(pid) if pid.isdigit() else None,
+        })
+    return rows
+
+
+def _current_user() -> str:
+    import pwd
+
+    return pwd.getpwuid(os.getuid()).pw_name
+
+
+def _process_owners() -> dict[int, str]:
+    ok, out = _run([_PS, "-axo", "pid=,user="], timeout=10.0)
+    owners: dict[int, str] = {}
+    if ok:
+        for line in out.splitlines():
+            pid, _, user = line.strip().partition(" ")
+            if pid.isdigit() and user.strip():
+                owners[int(pid)] = user.strip()
+    return owners
+
+
+def _all_users_sockets() -> tuple[list[dict[str, Any]] | None, str | None]:
+    """(sockets, None) or (None, why the full view is missing)."""
+    ok, out = _run([_NETSTAT, "-anv", "-p", "tcp"], timeout=10.0)
     if not ok:
-        return _unavailable(out)
+        return None, _PARTIAL_NOTE.format(reason=out.strip()[:160] or "no output")
+    rows = parse_netstat_anv(out)
+    if rows is None:
+        return None, _PARTIAL_NOTE.format(reason="its output layout was not recognised")
+    return rows, None
+
+
+def _bind_key(addr: str) -> str:
+    return addr.strip("[]").split("%", 1)[0]
+
+
+def _parse_lsof_listening(out: str) -> list[dict[str, Any]]:
     ports = []
     for line in out.splitlines()[1:]:  # skip the header row
         m = _LSOF_LISTEN_RE.match(line.strip())
         if not m:
             continue
         command, pid, user, family, proto, bind_addr, port = m.groups()
-        ports.append({
+        entry: dict[str, Any] = {
             "command": command,
             "pid": int(pid),
             "user": user,
@@ -272,8 +375,54 @@ def get_listening_ports() -> dict[str, Any]:
             "bind_address": bind_addr,
             "port": None if port == "*" else int(port),
             "exposure": _classify_exposure(bind_addr),
-        })
-    return {"available": True, "listening_ports": ports}
+        }
+        _name_service(entry)
+        ports.append(entry)
+    return ports
+
+
+def _name_service(entry: dict[str, Any]) -> None:
+    """Adds the macOS sharing service a system listener belongs to, when it is one."""
+    if entry["port"] in MAC_SERVICE_PORTS and entry["command"] in _SERVICE_OWNERS:
+        entry["service"], entry["service_setting"] = MAC_SERVICE_PORTS[entry["port"]]
+
+
+def get_listening_ports() -> dict[str, Any]:
+    ok, out = _run(["lsof", "-iTCP", "-sTCP:LISTEN", "-n", "-P"], timeout=10.0)
+    ports = _parse_lsof_listening(out) if ok else []
+    sockets, gap = _all_users_sockets()
+    if not ok and sockets is None:
+        return _unavailable(out)
+    if sockets is not None:
+        # What lsof already reported stays exactly as it was (same names, so
+        # existing baselines keep matching); netstat adds only what lsof missed.
+        lsof_seen = {(p["pid"], p["port"]) for p in ports} | {(_bind_key(p["bind_address"]), p["port"]) for p in ports}
+        added: set[tuple[Any, ...]] = set()
+        owners, me = _process_owners(), _current_user()
+        for s in sockets:
+            if s["state"] != "LISTEN" or s["pid"] is None or s["local_port"] is None:
+                continue
+            if owners.get(s["pid"]) == me:  # lsof already lists the owner's own programs
+                continue
+            bind = _bind_key(s["local_address"])
+            key = (s["pid"], s["local_port"], s["family"], bind)
+            if (s["pid"], s["local_port"]) in lsof_seen or (bind, s["local_port"]) in lsof_seen or key in added:
+                continue
+            added.add(key)
+            entry: dict[str, Any] = {
+                "command": s["command"], "pid": s["pid"], "user": owners.get(s["pid"], "unknown"),
+                "family": s["family"], "protocol": "TCP", "bind_address": s["local_address"],
+                "port": s["local_port"], "exposure": _classify_exposure(s["local_address"]),
+                "source": "netstat",
+            }
+            _name_service(entry)
+            ports.append(entry)
+    result: dict[str, Any] = {"available": True, "listening_ports": ports, "complete": sockets is not None}
+    if not ok:
+        result["gaps"] = [f"lsof did not run ({out.strip()[:160]}); netstat alone was used."]
+    if gap:
+        result["gaps"] = [gap]
+    return result
 
 
 # --------------------------------------------------------------------------- #
@@ -292,10 +441,8 @@ _LSOF_ESTABLISHED_RE = re.compile(
 
 def get_established_connections() -> dict[str, Any]:
     ok, out = _run(["lsof", "-iTCP", "-sTCP:ESTABLISHED", "-n", "-P"], timeout=10.0)
-    if not ok:
-        return _unavailable(out)
     connections = []
-    for line in out.splitlines()[1:]:  # skip the header row
+    for line in (out.splitlines()[1:] if ok else []):  # skip the header row
         m = _LSOF_ESTABLISHED_RE.match(line.strip())
         if not m:
             continue
@@ -311,7 +458,39 @@ def get_established_connections() -> dict[str, Any]:
             "remote_address": remote_addr.strip("[]"),
             "remote_port": int(remote_port),
         })
-    return {"available": True, "connections": connections}
+    sockets, gap = _all_users_sockets()
+    if not ok and sockets is None:
+        return _unavailable(out)
+    if sockets is not None:
+        # SEC3-7: connections of system and root processes, which lsof as the
+        # owner cannot see; lsof's own rows keep their names unchanged.
+        lsof_seen = {(c["pid"], c["local_port"], c["remote_port"]) for c in connections}
+        owners, me = _process_owners(), _current_user()
+        for s in sockets:
+            if s["state"] != "ESTABLISHED" or s["pid"] is None or s["local_port"] is None or s["remote_port"] is None:
+                continue
+            # The owner's own programs come from lsof only, so a connection opened
+            # between the two commands never appears under a second spelling of
+            # the same program's name (lsof cuts names to 9 characters, netstat to 16).
+            if owners.get(s["pid"]) == me:
+                continue
+            key = (s["pid"], s["local_port"], s["remote_port"])
+            if key in lsof_seen:
+                continue
+            lsof_seen.add(key)
+            connections.append({
+                "command": s["command"], "pid": s["pid"], "user": owners.get(s["pid"], "unknown"),
+                "family": s["family"], "protocol": "TCP",
+                "local_address": s["local_address"], "local_port": s["local_port"],
+                "remote_address": s["remote_address"], "remote_port": s["remote_port"],
+                "source": "netstat",
+            })
+    result: dict[str, Any] = {"available": True, "connections": connections, "complete": sockets is not None}
+    if not ok:
+        result["gaps"] = [f"lsof did not run ({out.strip()[:160]}); netstat alone was used."]
+    if gap:
+        result["gaps"] = [gap]
+    return result
 
 
 # --------------------------------------------------------------------------- #

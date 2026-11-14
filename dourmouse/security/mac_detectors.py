@@ -95,6 +95,19 @@ def _posture(state: dict[str, Any]) -> list[SentryFinding]:
                 "Disconnect from this network, then check the router's client list for the extra device.", gw_mac,
             ))
 
+    # SEC3-9: a startup file that cannot be read is reported, not skipped. launchd
+    # will not load it either, but a broken or tampered file in these folders is
+    # worth a look, and it used to stop every scan.
+    for item in (state.get("persistence") or {}).get("items") or []:
+        if "error" in item and "path" in item:
+            name = item["path"].rsplit("/", 1)[-1]
+            out.append(_finding(
+                "persistence_unreadable", "med", f"A startup file could not be read: {name}",
+                f"{item['path']} is in a folder macOS starts programs from, but it is not a valid launch job "
+                f"({item['error']}). The rest of the scan went ahead.",
+                "If you did not put it there, move it aside after checking what installed it.", item["path"],
+            ))
+
     for proc in state.get("network_processes") or []:
         loc = proc.get("location")
         if loc in ("downloads", "temporary"):

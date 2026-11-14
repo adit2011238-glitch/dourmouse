@@ -67,6 +67,7 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import json
+import logging
 import os
 import sqlite3
 import threading
@@ -79,6 +80,15 @@ from dourmouse.config import workspace_dir
 from dourmouse.security import platform_adapter as pa
 
 _DEFAULT_SCAN_INTERVAL_SECONDS = 300.0
+
+#: SEC3-9: scans in a row that may fail before the owner gets a HIGH alert.
+FAILED_SCANS_BEFORE_ALERT = 3
+
+#: Ports whose exposure mac_detectors already reports as "<service> is on and
+#: accepting connections" (host_protections check name), so it is not said twice.
+_POSTURE_COVERED_PORTS = {22: "remote_login", 5900: "screen_sharing"}
+
+_log = logging.getLogger(__name__)
 
 def default_db() -> Path:
     """Resolved on every call, never at import time (finding #084): an
@@ -241,6 +251,7 @@ def _detect_findings(
         # port; that is one exposure, not two (finding #110, seen live as
         # "rapportd listens on all interfaces" twice).
         seen_ports: set[tuple[str, int, str]] = set()
+        checks = (state.get("host_protections") or {}).get("checks") or {}
         for port in lp["listening_ports"]:
             if port["exposure"] != "ALL_INTERFACES":
                 continue
@@ -248,6 +259,28 @@ def _detect_findings(
             if port_key in seen_ports:
                 continue
             seen_ports.add(port_key)
+            covered_by = _POSTURE_COVERED_PORTS.get(port["port"])
+            if covered_by and (checks.get(covered_by) or {}).get("on") and (checks.get(covered_by) or {}).get("accepting"):
+                continue  # mac_detectors already reports "<service> is on and accepting connections"
+            if port.get("service"):
+                # SEC3-7: a system listener only netstat can see, named for the owner.
+                findings.append(SentryFinding(
+                    fingerprint=_fingerprint("exposed_port", port["command"], str(port["port"]), port["protocol"]),
+                    kind="exposed_port",
+                    severity="med",
+                    title=f"{port['service']} accepts connections from any network (port {port['port']})",
+                    detail=(
+                        f"{port['command']} (pid {port['pid']}, run by {port.get('user', 'the system')}) listens "
+                        f"for {port['service']} on {port['protocol']} port {port['port']} on every network this Mac "
+                        "joins, not just this machine. It belongs to the system, so only netstat shows it."
+                    ),
+                    recommended_action=(
+                        f"If you do not use {port['service']}, turn it off in "
+                        f"{port.get('service_setting') or 'System Settings > General > Sharing'}. "
+                        "Never applied automatically; this is a suggestion only."
+                    ),
+                ))
+                continue
             findings.append(SentryFinding(
                 fingerprint=_fingerprint(
                     "exposed_port", port["command"], str(port["port"]), port["protocol"]
@@ -790,6 +823,20 @@ def run_scan(
     raw = [a for a in bl.compare(observations, known, observed_categories=observed)
            if not (a.kind == "gone" and a.observation.key in unreadable)]
     anomalies = [a for a in raw if a.observation.scope not in learning]
+    if (bl.HOST, "telemetry", bl.ALL_USERS_SOCKETS) not in known:
+        # SEC3-7: the first scan that can see every user's sockets learns the
+        # system and root listeners and connections lsof could never show,
+        # instead of reporting them as "started listening": they were there
+        # all along. The exposure rule above still reports the reachable ones.
+        hidden_before = {
+            ("listening_port", f"{p['command']}|{p['protocol']}|{p['port']}")
+            for p in (state.get("listening_ports") or {}).get("listening_ports", []) if p.get("source") == "netstat"
+        } | {
+            ("network_process", str(c.get("command", "")))
+            for c in (state.get("established_connections") or {}).get("connections", []) if c.get("source") == "netstat"
+        }
+        anomalies = [a for a in anomalies
+                     if not (a.kind == "new" and (a.observation.category, a.observation.key) in hidden_before)]
     for finding in detect_mac_findings(state, anomalies):
         present.add(finding.fingerprint)
         status = store.record_and_classify(finding, ts)
@@ -817,8 +864,11 @@ def run_scan(
     }
     # Findings this scan no longer detects are cleared, so their return counts as new
     # (P4-57). Only after a scan that could read everything: a scan that could not
-    # read the firewall does not show the firewall finding is gone.
-    if telemetry_available and all(telemetry_available.values()):
+    # read the firewall does not show the firewall finding is gone, and one that saw
+    # only the owner's own sockets (SEC3-7) does not show a root listener is gone.
+    partial = [k for k in ("listening_ports", "established_connections")
+               if (state.get(k) or {}).get("complete") is False]
+    if telemetry_available and all(telemetry_available.values()) and not partial:
         store.mark_absent(present)
     return SentryScanResult(
         all_findings=all_findings,
@@ -865,6 +915,10 @@ class SentryRuntime:
         self.last_result: SentryScanResult | None = None
         self.last_scan_at: float | None = None
         self.tick_count = 0
+        # SEC3-9: failed scans are counted and shown, never swallowed.
+        self.consecutive_failed_scans = 0
+        self.last_scan_error: str | None = None
+        self._failure_alerted = False
 
     def start(self) -> None:
         if self._thread is not None:
@@ -887,7 +941,12 @@ class SentryRuntime:
         tests that want a real tick without a real threading.Event.wait
         delay."""
         with self._scan_lock:
-            result = run_scan(state_fn=self._state_fn or collect_state, store=self._store)
+            try:
+                result = run_scan(state_fn=self._state_fn or collect_state, store=self._store)
+            except Exception as exc:
+                self.record_scan_failure(exc)
+                raise
+            self.record_scan_success()
             self.last_result = result
             self.last_scan_at = time.time()
             self.tick_count += 1
@@ -896,10 +955,35 @@ class SentryRuntime:
                 fn(result, reason)
         return result
 
+    def record_scan_success(self) -> None:
+        self.consecutive_failed_scans = 0
+        self.last_scan_error = None
+        self._failure_alerted = False
+
+    def record_scan_failure(self, exc: BaseException) -> None:
+        """SEC3-9: count a failed scan and, once FAILED_SCANS_BEFORE_ALERT
+        scans in a row have failed, tell the owner with one HIGH alert per
+        run of failures. Before this the loop dropped every error, so a
+        sentry that could no longer scan looked exactly like a quiet Mac."""
+        self.consecutive_failed_scans += 1
+        self.last_scan_error = f"{type(exc).__name__}: {exc}"[:300]
+        _log.warning("security sentry scan failed (%d in a row): %s",
+                     self.consecutive_failed_scans, self.last_scan_error)
+        if self.consecutive_failed_scans >= FAILED_SCANS_BEFORE_ALERT and not self._failure_alerted:
+            self._failure_alerted = _write_alert(SentryFinding(
+                fingerprint=_fingerprint("sentry_scan_failing"),
+                kind="sentry_scan_failing",
+                severity="high",
+                title="The security sentry cannot scan",
+                detail=(f"The last {self.consecutive_failed_scans} scans failed with {self.last_scan_error}. "
+                        "Until a scan succeeds, nothing on this Mac is being checked."),
+                recommended_action="Open SECURITY and run a scan to see the error, or restart Dourmouse.",
+            ))
+
     def _loop(self) -> None:
         while not self._stop.is_set():
-            try:
+            # A failed tick is already counted and alerted by run_one_tick_now;
+            # the loop itself keeps going so the next tick can recover.
+            with contextlib.suppress(Exception):
                 self.run_one_tick_now()
-            except Exception:  # noqa: BLE001 -- a bug in one tick must never kill the runtime
-                pass
             self._stop.wait(self._interval)

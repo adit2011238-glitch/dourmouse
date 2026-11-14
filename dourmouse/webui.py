@@ -3756,6 +3756,9 @@ class _Handler(BaseHTTPRequestHandler):
                 "scanned": result is not None,
                 "last_scan_at": runtime.last_scan_at if runtime else None,
                 "tick_count": runtime.tick_count if runtime else 0,
+                # SEC3-9: a sentry that cannot scan says so instead of looking quiet.
+                "consecutive_failed_scans": runtime.consecutive_failed_scans if runtime else 0,
+                "last_scan_error": runtime.last_scan_error if runtime else None,
                 "risk_score": result.risk_score if result else 0.0,
                 "findings_by_severity": by_severity,
                 "findings": findings_payload,

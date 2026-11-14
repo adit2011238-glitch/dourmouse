@@ -429,7 +429,8 @@ class TestSecurityDashboardEndpoint:
             risk_score=9.0, telemetry_available={"firewall": True}, alerts_written=1,
         )
         srv, port = server
-        srv.security_sentry = type("R", (), {"last_result": result, "last_scan_at": 1234.0, "tick_count": 3})()
+        srv.security_sentry = type("R", (), {"last_result": result, "last_scan_at": 1234.0, "tick_count": 3,
+                                                 "consecutive_failed_scans": 0, "last_scan_error": None})()
         conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
         conn.request("GET", "/api/security_dashboard")
         data = json.loads(conn.getresponse().read())
@@ -459,7 +460,8 @@ class TestSecurityDashboardEndpoint:
             risk_score=9.0, telemetry_available={"firewall": True}, alerts_written=0,
         )
         srv, port = server
-        srv.security_sentry = type("R", (), {"last_result": result, "last_scan_at": 1.0, "tick_count": 1})()
+        srv.security_sentry = type("R", (), {"last_result": result, "last_scan_at": 1.0, "tick_count": 1,
+                                                 "consecutive_failed_scans": 0, "last_scan_error": None})()
         conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
         conn.request("GET", "/api/security_dashboard")
         data = json.loads(conn.getresponse().read())
@@ -2591,7 +2593,7 @@ class TestSseChat:
         conn.request(
             "POST",
             "/api/chat",
-            body=json.dumps({"prompt": "do the gated thing"}),
+            body=json.dumps({"prompt": "gated_echo: do the gated thing"}),
             headers={"Content-Type": "application/json"},
         )
         resp = conn.getresponse()
@@ -2658,7 +2660,7 @@ class TestSseChat:
         conn.request(
             "POST",
             "/api/chat",
-            body=json.dumps({"prompt": "gated"}),
+            body=json.dumps({"prompt": "gated_echo: gated"}),
             headers={"Content-Type": "application/json"},
         )
         resp = conn.getresponse()
@@ -2718,7 +2720,7 @@ class TestSseChat:
         conn.request(
             "POST",
             "/api/chat",
-            body=json.dumps({"prompt": "do the gated thing"}),
+            body=json.dumps({"prompt": "gated_echo: do the gated thing"}),
             headers={"Content-Type": "application/json"},
         )
         resp = conn.getresponse()
@@ -2906,7 +2908,7 @@ class TestPerTabSessions:
         connA = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
         connA.request(
             "POST", "/api/chat",
-            body=json.dumps({"prompt": "gated", "tab_id": "tabA"}),
+            body=json.dumps({"prompt": "gated_echo: gated", "tab_id": "tabA"}),
             headers={"Content-Type": "application/json"},
         )
         events_a = self._stream_until_done_or_confirm(connA.getresponse())

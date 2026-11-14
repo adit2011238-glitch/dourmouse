@@ -264,6 +264,10 @@ def _claude_tool_args() -> tuple[list[str], bool]:
     fixed = [
         "--strict-mcp-config",
         "--disallowedTools", _DISALLOWED_NATIVE_TOOLS,
+        # SEC2-2: never load project or local settings (.claude/settings.json and
+        # settings.local.json in the folder the CLI runs in), whose hooks would run
+        # shell commands with no approval. The owner's own user settings still apply.
+        "--setting-sources", "user",
         *_SETTINGS_OVERRIDE_ARGS,
     ]
     try:

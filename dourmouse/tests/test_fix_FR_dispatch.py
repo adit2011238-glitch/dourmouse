@@ -145,7 +145,7 @@ def _registry(handler=None, params=None, name="probe", permission=Permission.REG
 
 
 def _run(reg, client, **kw):
-    msgs = [{"role": "system", "content": "s"}, {"role": "user", "content": "go"}]
+    msgs = [{"role": "system", "content": "s"}, {"role": "user", "content": "probe: go"}]  # SEC2-1: only a routed tool runs
     return run_dispatch_messages(msgs, reg, client=client, force_plain_dispatch=True, **kw)
 
 
@@ -184,7 +184,7 @@ def test_secret_in_tool_arguments_is_redacted_in_transcript_and_history():
     reg = _registry(handler=lambda a: seen_by_handler.append(a) or "RAN",
                     params={"type": "object", "properties": {"text": {"type": "string"}}})
     client = _Scripted(_Msg(tool_calls=[_Tc("c1", "probe", args)]), _Msg(content="done"))
-    msgs = [{"role": "system", "content": "s"}, {"role": "user", "content": "go"}]
+    msgs = [{"role": "system", "content": "s"}, {"role": "user", "content": "probe: go"}]
     report = run_dispatch_messages(msgs, reg, client=client, force_plain_dispatch=True, dlp=DlpFilter())
     use = [e for e in report["transcript"] if e["type"] == "tool_use"][0]
     assert secret not in use["raw_arguments"] and "REDACTED" in use["raw_arguments"]
