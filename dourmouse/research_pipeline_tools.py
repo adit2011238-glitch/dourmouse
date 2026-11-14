@@ -462,6 +462,69 @@ def _research_design_experiment_tool(arguments: dict[str, Any]) -> str:
     return out
 
 
+def _research_start_job_tool(arguments: dict[str, Any]) -> str:
+    """PL-10 T1: a full research run is a background job, not a chat turn."""
+    from dourmouse.research_pipeline import research_job
+
+    try:
+        job_id = research_job.start_job(
+            str(arguments.get("topic") or ""), style=str(arguments.get("style") or "apa"),
+            pause_after_brief=bool(arguments.get("pause_after_brief", True)),
+        )
+    except ValueError as exc:
+        return f"ERROR: {exc}"
+    return (f"Started research job {job_id} in the background. It writes a context brief, then waits for the "
+            "owner to check it on the RESEARCH screen; it reads papers from OpenAlex, Semantic Scholar and arXiv, "
+            "proposes research questions and waits for the owner's approval, then answers them with citations. "
+            "Nothing has been answered yet: tell the owner to follow it on the RESEARCH screen.")
+
+
+def _research_job_status_tool(arguments: dict[str, Any]) -> str:
+    from dourmouse.research_pipeline import research_job
+
+    job_id = str(arguments.get("job_id") or "").strip()
+    view = research_job.job_view(job_id) if job_id else None
+    if view is None:
+        recent = research_job.jobs().list(5)
+        if not recent:
+            return "No research jobs exist yet."
+        return "Recent research jobs:\n" + "\n".join(f"- {j['id']}: {j['topic']}" for j in recent)
+    lines = [f"job {view['id']}: {view['topic']}", f"status: {view['status']}"]
+    if view["waiting_for"]:
+        lines.append(f"waiting for the owner: {view['blocked_reason']}")
+    lines.append(f"papers read: {(view['spend'] or {}).get('papers_read', 0)}, cards: {len(view['cards'])}")
+    report = view.get("report")
+    if report:
+        lines.append(f"stopped: {report['stop_reason']}")
+        for a in report["answers"]:
+            text = " ".join(f"{s['text']} {s['citation']}".strip() for s in a["sentences"]) or "not answered"
+            lines.append(f"- {a['sub_question']}: {text} [confidence {a['confidence']}]")
+    lines += [f"log: {line}" for line in view["log"][-5:]]
+    return "\n".join(lines)
+
+
+def _research_statistics_tool(arguments: dict[str, Any]) -> str:
+    """The statistics stage: describe_samples over numbers the caller gives."""
+    from dourmouse.research_pipeline.hypotheses import describe_samples
+
+    raw = arguments.get("values")
+    if not isinstance(raw, list):
+        return "ERROR: values must be a list of numbers."
+    values = [v for v in raw if isinstance(v, (int, float)) and not isinstance(v, bool)]
+    if len(values) != len(raw):
+        return "ERROR: every value must be a number."
+    null = arguments.get("null_mean")
+    stats = describe_samples(values, float(null)) if isinstance(null, (int, float)) and not isinstance(null, bool) \
+        else describe_samples(values)
+    if "error" in stats:
+        return f"Not computed: {stats['error']} (n={stats['n']})."
+    out = (f"n={stats['n']}, mean={stats['mean']:.6g}, sd={stats['sd']:.6g}, "
+           f"95% CI [{stats['ci95'][0]:.6g}, {stats['ci95'][1]:.6g}]")
+    if isinstance(null, (int, float)) and not isinstance(null, bool):
+        out += f", t={stats['t']:.4g}, p={stats['p_two_sided']:.4g} against {null:g} ({stats['method']})"
+    return out
+
+
 def build_research_pipeline_subagent(registry: DispatchRegistry) -> Subagent:
     return Subagent(
         name="evidence_pipeline",
@@ -474,6 +537,47 @@ def build_research_pipeline_subagent(registry: DispatchRegistry) -> Subagent:
             "these tools in sequence to drive a full research pass."
         ),
         tools=(
+            ToolSpec(
+                name="research_start_job",
+                description=(
+                    "Start a full research run on a topic as a BACKGROUND JOB (use this for any real research "
+                    "question): context brief, academic paper search (OpenAlex, Semantic Scholar, arXiv), one "
+                    "graded card per paper with verified quotes, research questions the owner approves, then "
+                    "answers with claim-level citations and an APA or MLA reference list. It does not answer in "
+                    "this turn; the owner follows it on the RESEARCH screen."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "topic": {"type": "string"},
+                        "style": {"type": "string", "enum": ["apa", "mla"], "default": "apa"},
+                        "pause_after_brief": {"type": "boolean", "default": True},
+                    },
+                    "required": ["topic"],
+                },
+                handler=_research_start_job_tool,
+            ),
+            ToolSpec(
+                name="research_job_status",
+                description="Status of a background research job (or the recent jobs when no id is given), "
+                            "with its answers once written.",
+                parameters={"type": "object", "properties": {"job_id": {"type": "string"}}},
+                handler=_research_job_status_tool,
+                permission=Permission.REGULAR,
+            ),
+            ToolSpec(
+                name="research_statistics",
+                description=("Statistics over numbers, computed without a model: n, mean, standard deviation, "
+                             "95% confidence interval, and a one-sample t-test when a null value is given."),
+                parameters={
+                    "type": "object",
+                    "properties": {"values": {"type": "array", "items": {"type": "number"}},
+                                   "null_mean": {"type": "number"}},
+                    "required": ["values"],
+                },
+                handler=_research_statistics_tool,
+                permission=Permission.REGULAR,
+            ),
             ToolSpec(
                 name="research_plan",
                 description=(

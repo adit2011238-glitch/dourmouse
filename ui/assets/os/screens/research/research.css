@@ -26,3 +26,20 @@
 [data-screen="RESEARCH"] .rs-loop > summary { cursor: pointer; margin-bottom: 0; }
 [data-screen="RESEARCH"] .rs-loop[open] > summary { margin-bottom: 8px; }
 [data-screen="RESEARCH"] .rs-loop > summary:focus-visible { outline: 2px solid var(--dm-active); outline-offset: 2px; }
+
+/* PL-10 T1: research jobs */
+[data-screen="RESEARCH"] .rs-jobs { margin-bottom: 12px; }
+[data-screen="RESEARCH"] .rs-job { margin-top: 10px; display: grid; gap: 10px; }
+[data-screen="RESEARCH"] .rs-jobhead { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+[data-screen="RESEARCH"] .rs-jobsec { display: grid; gap: 6px; }
+[data-screen="RESEARCH"] .rs-jobpause { display: block; margin-top: 6px; }
+[data-screen="RESEARCH"] .rs-brief { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflow: auto; margin: 0; font: inherit; }
+[data-screen="RESEARCH"] .rs-notes { width: 100%; box-sizing: border-box; font: inherit; }
+[data-screen="RESEARCH"] .rs-job input[type="text"] { width: 100%; box-sizing: border-box; }
+[data-screen="RESEARCH"] .rs-subq { margin: 0; padding-left: 18px; }
+[data-screen="RESEARCH"] .rs-steps { margin: 0; padding-left: 18px; }
+[data-screen="RESEARCH"] .rs-card summary { cursor: pointer; overflow-wrap: anywhere; }
+[data-screen="RESEARCH"] .rs-card { display: grid; gap: 4px; }
+[data-screen="RESEARCH"] .rs-finding blockquote { margin: 2px 0 0 12px; overflow-wrap: anywhere; }
+[data-screen="RESEARCH"] .rs-answer p { margin: 4px 0; }
+[data-screen="RESEARCH"] .rs-ref { margin: 2px 0; overflow-wrap: anywhere; }

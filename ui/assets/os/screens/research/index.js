@@ -20,6 +20,7 @@ import { isAbort } from '../../core/api.js';
 import { loopBoxes, stagesSub, countsLine, claimTag, safeFilename, shorten } from './helpers.js';
 import { SourceWidget } from './source-widget.js';
 import { graphSvg } from './graph-svg.js';
+import { mountJobsPanel } from './jobs-panel.js';
 
 const CLAIM_SHOW = 60;
 
@@ -44,6 +45,7 @@ export default {
     root.dataset.state = 'populated';
     setHtml(root, html`
       <div id="rsConfirm"></div>
+      <div class="card rs-jobs"><div class="lbl">Research jobs</div><div id="rsJobs" data-region></div><div id="rsJob"></div></div>
       <div class="card"><div class="lbl">Research questions</div><div id="rsQs" data-region></div></div>
       <div class="grid2 rs-mid">
         <div class="card"><div class="lbl">Claims</div><div id="rsClaims" data-region></div></div>
@@ -60,11 +62,17 @@ export default {
     const graphEl = $('rsGraph');
     const claimsEl = $('rsClaims');
     const guard = () => ctx.signal.aborted;
+    const jobs = mountJobsPanel($('rsJobs'), $('rsJob'), confirmEl, ctx);
 
     /* ---------------- stage bar ---------------- */
     const actions = () => [
       {
-        id: 'new-question', label: 'NEW QUESTION', kind: 'primary', disabled: ctx.chat.busy(),
+        id: 'new-job', label: 'NEW RESEARCH JOB', kind: 'primary',
+        spec: 'Starts a background research job after a confirm: a context brief, papers from OpenAlex, Semantic Scholar and arXiv, one graded card per paper, research questions you approve, then cited answers and references. It stops for you twice and never in this thread.',
+        onClick: () => jobs.startForm(),
+      },
+      {
+        id: 'new-question', label: 'NEW QUESTION', disabled: ctx.chat.busy(),
         title: ctx.chat.busy() ? 'Stop the run first' : '',
         spec: 'Asks the research agent to plan a new question. It opens a small form, asks you to confirm, then sends ONE message to the model in this thread: the agent decomposes the question and may fetch web pages.',
         onClick: () => newQuestion(),
@@ -353,7 +361,7 @@ export default {
 
     /* ---------------- refresh and live ---------------- */
     async function refreshAll() {
-      await Promise.all([loadLoop(), loadQs()]);
+      await Promise.all([loadLoop(), loadQs(), jobs.load()]);
     }
 
     /* Reads the graph event log from the cursor onward; returns how many events were new.

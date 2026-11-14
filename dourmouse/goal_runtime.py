@@ -40,8 +40,10 @@ Phase 2, not silently assumed done):
 
 from __future__ import annotations
 
+import importlib
 import os
 import threading
+from collections.abc import Callable
 from typing import Any
 
 from dourmouse.config import auto_approve_enabled, workspace_dir
@@ -53,6 +55,28 @@ _DEFAULT_TICK_SECONDS = 5.0
 #: delegate_parallel's own concurrency cap in spirit: bounded, not
 #: unlimited, even though this loop is single-threaded per tick today.
 _MAX_TASKS_PER_TICK = 3
+
+#: PL-10 shared foundation 1 (jobs): a task whose ``assigned_agent`` is
+#: "job:<kind>" runs a Python handler instead of a chat turn, so a long job
+#: (a research run) is a series of goal tasks rather than one chat turn that
+#: runs out of steps. The handler is called as ``handler(store, goal, task,
+#: approved)`` and returns {"verified": bool, "final_text": str, "evidence":
+#: str} or {"park": "what the owner must do"}. Its own checks are
+#: deterministic, so no model grades the work. A handler module registers
+#: itself on import; ``_JOB_MODULES`` says which module to import for a kind.
+JobHandler = Callable[[GoalStore, dict[str, Any], dict[str, Any], bool], dict[str, Any]]
+JOB_HANDLERS: dict[str, JobHandler] = {}
+_JOB_MODULES = {"research": "dourmouse.research_pipeline.research_job"}
+
+
+def register_job_handler(kind: str, handler: JobHandler) -> None:
+    JOB_HANDLERS[kind] = handler
+
+
+def job_handler(kind: str) -> JobHandler | None:
+    if kind not in JOB_HANDLERS and kind in _JOB_MODULES:
+        importlib.import_module(_JOB_MODULES[kind])
+    return JOB_HANDLERS.get(kind)
 
 
 def goal_runtime_enabled() -> bool:
@@ -276,6 +300,10 @@ class GoalRuntime:
             result={} if approved_this_run else None,
         )
         self._store.set_current_task(goal_id, task_id)
+        agent = str(task.get("assigned_agent") or "")
+        if agent.startswith("job:"):
+            self._run_job_step(goal, task, agent[len("job:"):], approved_this_run)
+            return
         try:
             report = self._execute_via_dispatch(goal, task, approved_prompts)
         except Exception as exc:
@@ -338,6 +366,42 @@ class GoalRuntime:
             task_id, "COMPLETED",
             result={"final_text": final_text, "verified": True, "note": "independently verified"},
         )
+
+    def _run_job_step(self, goal: dict[str, Any], task: dict[str, Any], kind: str, approved: bool) -> None:
+        """One step of a native job (see JOB_HANDLERS). Same failure, retry,
+        approval and cancel rules as a chat task; the verification is the
+        handler's own deterministic check, logged as such."""
+        goal_id, task_id = goal["id"], task["id"]
+        handler = job_handler(kind)
+        if handler is None:
+            self._handle_task_failure(goal, task, f"no job handler is registered for {kind!r}")
+            return
+        try:
+            out = handler(self._store, goal, task, approved)
+        except Exception as exc:  # noqa: BLE001 - routed through the normal retry path, never swallowed
+            self._handle_task_failure(goal, task, f"{type(exc).__name__}: {exc}")
+            return
+        current_task = self._store.get_task(task_id)
+        if current_task is None or current_task["status"] in TASK_TERMINAL_STATES:
+            return  # cancelled while the step ran
+        if out.get("park"):
+            reason = str(out["park"])
+            self._store.update_task_status(task_id, "WAITING_FOR_APPROVAL", error=reason,
+                                           result={"pending_prompts": [reason]})
+            if self._store.update_goal_status(goal_id, "WAITING_FOR_APPROVAL", blocked_reason=reason):
+                self._notify(goal_id, f"Needs you: {goal['objective']}", reason)
+            return
+        verified = bool(out.get("verified"))
+        final_text = str(out.get("final_text") or "")
+        self._store.log_event(goal_id, "verification", {
+            "verified": verified, "method": "deterministic (job handler)",
+            "reasoning": str(out.get("evidence") or final_text)[:2000], "error": None,
+        }, task_id=task_id)
+        if not verified:
+            self._handle_task_failure(goal, task, final_text or "the job step reported that it did not succeed")
+            return
+        self._store.update_task_status(task_id, "COMPLETED", result={
+            "final_text": final_text, "verified": True, "note": "checked by the job's own deterministic checks"})
 
     def _execute_via_dispatch(
         self, goal: dict[str, Any], task: dict[str, Any], approved_prompts: Any = (),

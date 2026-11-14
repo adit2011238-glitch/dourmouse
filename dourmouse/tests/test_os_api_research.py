@@ -77,7 +77,9 @@ class TestLoop:
         assert status == 200 and d["total"] == 15
         by = {s["key"]: s for s in d["stages"]}
         assert by["extract"]["built"] is True and by["hypothesis"]["built"] is True
-        assert by["validate"]["built"] is False and by["stats"]["built"] is False, "no tool backs these"
+        # PL-10 T1: research jobs grade sources and research_statistics runs describe_samples.
+        assert by["validate"]["built"] is True and by["stats"]["built"] is True
+        assert by["validate"]["tools"] == ["research_start_job"] and by["stats"]["tools"] == ["research_statistics"]
         assert d["built"] == sum(1 for s in d["stages"] if s["built"])
         assert d["back"]["built"] is True and d["back"]["max_follow_ups"] == 3
 
@@ -155,3 +157,15 @@ class TestExport:
         assert json.loads(d["content"])["id"] == "q1"
         assert call(seeded, "/api/os/research/export?question=q1&format=pdf")[0] == 400
         assert call(seeded, "/api/os/research/export?question=nope")[0] == 404
+
+
+class TestResearchJobs:
+    """PL-10 T1: the job routes are reachable through the real server."""
+
+    def test_jobs_list_and_detail_through_the_server(self, server):
+        status, d = call(server, "/api/os/research/jobs")
+        assert status == 200 and d == {"ok": True, "jobs": []}
+        status, d = call(server, "/api/os/research/job?id=goal_0000000000000000")
+        assert status == 404
+        status, d = call(server, "/api/os/research/job?id=../../etc")
+        assert status == 400
