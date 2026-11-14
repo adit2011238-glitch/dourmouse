@@ -62,6 +62,8 @@ from dourmouse.dispatch import (
     ToolSpec,
     current_dispatch_context,
     is_backend_failure_text,
+    is_known_agent,
+    known_agent_names,
     run_dispatch_messages,
     system_message,
 )
@@ -1983,14 +1985,14 @@ def _send_message_tool(registry: DispatchRegistry) -> ToolSpec:
                 "sends as the real calling agent."
             )
         from_agent = real_agent
-        if from_agent not in registry.subagent_names:
+        if not is_known_agent(registry, from_agent):
             return (
                 f"REFUSED: unknown sender {from_agent!r} — send_message can "
                 "only speak for a real roster agent."
             )
         if not to_agent:
             return "ERROR: send_message requires 'to_agent' (a subagent or '*')."
-        if to_agent != BROADCAST and to_agent not in registry.subagent_names:
+        if to_agent != BROADCAST and not is_known_agent(registry, to_agent):
             return (
                 f"REFUSED: unknown recipient {to_agent!r} — messages go to "
                 "real roster agents or '*'."
@@ -2058,7 +2060,7 @@ def _read_agent_inbox_tool(registry: DispatchRegistry) -> ToolSpec:
         agent = (arguments.get("agent") or "").strip()
         if not agent:
             return "ERROR: read_agent_inbox requires 'agent'."
-        if agent not in registry.subagent_names:
+        if not is_known_agent(registry, agent):
             return (
                 f"REFUSED: unknown agent {agent!r} — read_agent_inbox reads "
                 "the inbox of a real roster agent."
@@ -2815,6 +2817,24 @@ def _subagent(name: str, domain: str, description: str, tools: list[ToolSpec]) -
     return Subagent(name=name, domain=domain, description=description, tools=tuple(tools))
 
 
+def _routing_directive(registry: DispatchRegistry, target: str, task: str) -> str:
+    """The nested-run prompt that pins a run to ``target``.
+
+    An old agent name keeps the exact wording it always had. An agent id
+    (PL-10 T3) names the agent and its skills, so the nested run knows it is
+    scoped to that agent's tools.
+    """
+    if target in registry.subagent_names:
+        return (
+            f"[ROUTING DIRECTIVE] Complete this task using ONLY the "
+            f"'{target}' subagent and its tools. TASK: {task}"
+        )
+    return (
+        f"[ROUTING DIRECTIVE] Complete this task as the '{target}' agent, using ONLY "
+        f"that agent's tools. TASK: {task}"
+    )
+
+
 def _target_agent_name(d: dict[str, Any], *keys: str) -> str:
     """First non-empty string found under any of `keys` in `d`.
 
@@ -2876,10 +2896,10 @@ def _build_delegate_tool(registry: DispatchRegistry) -> ToolSpec:
         if not task:
             return "ERROR: delegate_task requires a non-empty 'task'."
         target = _target_agent_name(arguments, "subagent", "agent", "agent_or_task")
-        if target and target not in registry.subagent_names:
+        if target and not is_known_agent(registry, target):
             return (
                 f"ERROR: unknown subagent {target!r} — cannot delegate. "
-                f"Known: {', '.join(sorted(registry.subagent_names))}"
+                f"Known: {', '.join(known_agent_names(registry))}"
             )
         # Deterministic recursion guards (Rule 2.8).
         if ctx.depth >= ctx.max_depth:
@@ -2908,12 +2928,7 @@ def _build_delegate_tool(registry: DispatchRegistry) -> ToolSpec:
                 depth=ctx.depth + 1,
                 parent_id=ctx.current_job_id,
             )
-        nested_prompt = (
-            f"[ROUTING DIRECTIVE] Complete this task using ONLY the "
-            f"'{target}' subagent and its tools. TASK: {task}"
-            if target
-            else task
-        )
+        nested_prompt = _routing_directive(registry, target, task) if target else task
         # Shared truth (spec: state management & consistent context): the
         # nested agent receives the parent run's recent conversation so it
         # knows what the parent already learned/decided — it does not start
@@ -3246,10 +3261,10 @@ def _build_delegate_parallel_tool(registry: DispatchRegistry) -> ToolSpec:
                 # default, never a silent override of what the caller asked for.
                 target = target or preset["default_agent"]
                 instructions = preset["prefix"] + "\n\n" + instructions
-            if target and target not in registry.subagent_names:
+            if target and not is_known_agent(registry, target):
                 return (
                     f"ERROR: branch {i} names unknown subagent {target!r} — "
-                    f"cannot delegate. Known: {', '.join(sorted(registry.subagent_names))}"
+                    f"cannot delegate. Known: {', '.join(known_agent_names(registry))}"
                 )
             parsed.append((target, instructions))
 
@@ -3287,12 +3302,7 @@ def _build_delegate_parallel_tool(registry: DispatchRegistry) -> ToolSpec:
                     depth=ctx.depth + 1,
                     parent_id=ctx.current_job_id,
                 )
-            nested_prompt = (
-                f"[ROUTING DIRECTIVE] Complete this task using ONLY the "
-                f"'{target}' subagent and its tools. TASK: {instructions}"
-                if target
-                else instructions
-            )
+            nested_prompt = _routing_directive(registry, target, instructions) if target else instructions
             if ctx.parent_context:
                 # Finding #134: this is ONE branch of a fan-out. Live, every
                 # branch got the whole parent request as context and answered

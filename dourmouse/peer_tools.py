@@ -35,6 +35,8 @@ from dourmouse.dispatch import (
     Permission,
     ToolSpec,
     current_dispatch_context,
+    is_known_agent,
+    known_agent_names,
 )
 
 #: Longest agent description list_agents prints per agent.
@@ -118,10 +120,10 @@ def build_ask_agent_tool(registry: DispatchRegistry, delegate_tool: ToolSpec) ->
             return "ERROR: ask_agent requires 'agent', the agent to ask. list_agents shows who exists."
         if not question:
             return "ERROR: ask_agent requires a non-empty 'question'."
-        if target not in registry.subagent_names:
+        if not is_known_agent(registry, target):
             return (
                 f"ERROR: unknown agent {target!r}. Known: "
-                f"{', '.join(sorted(registry.subagent_names))}"
+                f"{', '.join(known_agent_names(registry))}"
             )
         # Who is asking: the one pinned agent, else the agents the planner scoped this turn to.
         asking = {ctx.forced_agent} if ctx.forced_agent else set(ctx.routed_agents)

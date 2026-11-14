@@ -1440,6 +1440,99 @@ def peer_tool_specs(registry: DispatchRegistry) -> list[ToolSpec]:
     return _specs_named(registry, PEER_TOOLS)
 
 
+# --------------------------------------------------------------------------- #
+# PL-10 T3 (finding #194): thirteen agents plus Agent Smith over the old roster.
+# The registry keeps the 44 old agents as they are; each is now a *skill* of one
+# agent (dourmouse.agent_profiles). A run may be pinned to an agent's own id
+# ("researcher") or to an old name ("research_info"); these helpers turn either
+# into the skills whose tools the run gets. Routing keeps scoring skills (see
+# planner.py's roll-up note on google_workspace for why), so nothing that names
+# an old agent changes.
+# --------------------------------------------------------------------------- #
+
+
+def _registered_skills(registry: DispatchRegistry, skills: tuple[str, ...]) -> tuple[str, ...]:
+    names = registry.subagent_names
+    return tuple(s for s in skills if s in names)
+
+
+def is_known_agent(registry: DispatchRegistry, name: str) -> bool:
+    """True for a registered agent (an old name, now a skill) and for an agent
+    id whose skills this registry carries. A test registry without the real
+    roster therefore never accepts an id it cannot run."""
+    if name in registry.subagent_names:
+        return True
+    from dourmouse.agent_profiles import resolve
+
+    found = resolve(name)
+    return found is not None and found.via == "agent" and bool(_registered_skills(registry, found.skills))
+
+
+def known_agent_names(registry: DispatchRegistry) -> list[str]:
+    """Every name a caller may use: the registered agents and the agent ids
+    this registry can run, sorted (for 'Known: ...' error messages)."""
+    from dourmouse.agent_profiles import agent_ids
+
+    names = set(registry.subagent_names)
+    names.update(a for a in agent_ids() if is_known_agent(registry, a))
+    return sorted(names)
+
+
+def _focus_skills(registry: DispatchRegistry, skills: tuple[str, ...], task: str) -> tuple[str, ...]:
+    """The skills of one agent that fit ``task``: the best-scoring one, plus the
+    second when it scores at least half as well, by the planner's own scorer.
+    When nothing scores, all of them (the agent was asked by name, so its whole
+    toolset is the honest fallback)."""
+    if len(skills) <= 1 or not task.strip():
+        return skills
+    from dourmouse.planner import _task_only, find_agents_for_query
+
+    # Score the owner's task only: a routing directive names tools (the shared
+    # desk, the peer tools) that would otherwise steer the choice of skill.
+    if task.startswith("[ROUTING DIRECTIVE]") and "TASK: " in task:
+        task = task.split("TASK: ", 1)[1]
+    task = _task_only(task)
+    ranked = [r for r in find_agents_for_query(registry, task, limit=len(registry.subagent_names))
+              if r["name"] in skills]
+    if not ranked:
+        return skills
+    best = ranked[0]["score"]
+    return tuple(r["name"] for r in ranked if r["score"] >= best * 0.5)[:2]
+
+
+def agent_scope(registry: DispatchRegistry, name: str, task: str = "") -> tuple[str | None, tuple[str, ...]]:
+    """``(agent_id, skills)`` for a run pinned to ``name``.
+
+    An agent's own id (which wins over an old name it shares, such as
+    ``markets``) gives the skills of that agent that fit the task; an old name
+    gives exactly that one skill, as before the merge. ``agent_id`` is None for
+    a registered agent no profile claims (a test registry's ``echo_agent``).
+    """
+    from dourmouse.agent_profiles import resolve
+
+    found = resolve(name)
+    if found is not None and found.via == "agent":
+        skills = _registered_skills(registry, found.skills)
+        if skills:
+            focused = _focus_skills(registry, skills, task)
+            # An id that is also an old agent name (media, markets, docs...)
+            # keeps that old agent's whole toolset: the merge only adds.
+            if name in skills and name not in focused:
+                focused = (name, *focused)
+            return found.agent_id, focused
+    if name in registry.subagent_names:
+        return (found.agent_id if found is not None else None), (name,)
+    return None, ()
+
+
+def agent_id_for(name: str | None) -> str | None:
+    """The agent identity behind a run name ('orchestrator' for an unpinned run)."""
+    from dourmouse.agent_profiles import resolve
+
+    found = resolve(name or "orchestrator")
+    return found.agent_id if found is not None else None
+
+
 def _scoped_tool_specs(
     registry: DispatchRegistry,
     agent_names: set[str],
@@ -2949,6 +3042,10 @@ def _emit_event(
     # no sink was given, and that contract must survive unchanged.
     agent = (ctx.forced_agent or "orchestrator") if ctx is not None else entry.get("agent", "orchestrator")
     trace = {**entry, "agent": entry.get("agent", agent)}
+    # PL-10 T3: the identity behind the name (research_info -> researcher), for
+    # the screens that show thirteen agents. Only the broadcast copy carries it;
+    # ``entry`` itself is left exactly as callers compare it.
+    trace.setdefault("agent_id", agent_id_for(trace["agent"]))
     if ctx is not None:
         trace.setdefault("call_id", ctx.call_id)
     _broadcast_live_trace(trace)
@@ -5211,7 +5308,11 @@ def _run_dispatch_loop(
     plan: list[dict[str, Any]] | None
     if ctx.forced_agent:
         plan = None
-        plan_agents = {ctx.forced_agent}
+        # PL-10 T3 (finding #194): an agent id pins the skills of that agent
+        # that fit the task; an old agent name pins exactly that skill, as
+        # before. A name nothing resolves keeps today's behaviour.
+        _pinned = agent_scope(registry, ctx.forced_agent, str(last_user))[1]
+        plan_agents = set(_pinned) if _pinned else {ctx.forced_agent}
     else:
         plan = build_plan(str(last_user), registry)
         # 2026-09-15, real live-caught gap in the fix right below this
