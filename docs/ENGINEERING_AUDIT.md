@@ -6188,3 +6188,13 @@ What changed:
 Verification: test_agent_profiles.py (62, from the saved work) and test_agent_merge.py (6, new here: every id and old name known, old name gives one skill, id gives its skills, directive wording, an id-pinned run sends that agent's tools and not another's, ask_agent by id); test_ask_agent.py back to 52 passing. Full suite count in the commit message.
 
 Honest limits: not done yet from the T3 plan: the public roster views (build_roster_payload, list_agents text, describe_roster, Office floors) still list the 44, the persona paragraph is not in the system prompt, memory namespaces are named but not wired to the library (T4), and capability tests (step 5), jobs (step 3), the Agent Room (step 4) and CC-1 (step 6) are unbuilt. Nothing here was run against live models (the model backend returns 402).
+
+### 198 -- Jobs foundation: goals with a kind and a budget, a board and /api/os/jobs (2026-11-15)
+
+Medium (plan thread 1.3, PL-10 shared foundation). Before: research had its own job handlers (finding 195) but nothing generic: an unattended multi-step run by one agent had no kind, no budget and no board, so a looping job could run until the owner noticed.
+
+What changed: dourmouse/jobs.py (new). A job is a goal whose resource_limits carry a kind (no new table; the goals, tasks and audit rows are the board and log). Kind "agent" jobs run each step as a chat task pinned to the owner agent (id or old name, via agent_profiles.resolve) and carry a budget: max_runs (task attempts, retries included, default 40) and max_tool_calls (audit tool_call events, default 200). GoalRuntime._stop_if_over_budget parks a job BLOCKED with a one-line reason and a notice; jobs.set_budget raises it and carries on at once only when budget was the reason. Native kinds (research) keep their own budget and are not touched. GoalStore gains set_resource_limits and count_events. dourmouse/os_api/jobs.py: GET /api/os/jobs (columns Needs you, Running, Paused, Done, Stopped), GET /api/os/jobs/job, POST start, pause, resume, cancel, budget.
+
+Verification: test_jobs.py, 17 tests (creation, refusals, ordering, runtime stop at budget through the real GoalRuntime tick, tool-call counting, owner-wait not unparked, research untouched, routes). Full suite: 10579 passed, 12 skipped, 1 xpassed.
+
+Honest limits: no Jobs screen yet (thread 1.5/1.7 and the Agents place); elapsed time and model cost are not budgeted (time would burn while a job waits overnight; cost needs per-call accounting that does not exist); not run against a live model (backend returns 402), so the agent-pinned dispatch path is covered only by finding 196's tests.

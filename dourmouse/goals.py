@@ -335,6 +335,23 @@ class GoalStore:
         self.update_goal_status(goal["id"], "EXECUTING")
         return self.get_goal(goal["id"])  # type: ignore[return-value]
 
+    def set_resource_limits(self, goal_id: str, limits: dict[str, Any]) -> bool:
+        """Replace a goal's resource_limits (a job's kind and budget live there)."""
+        with self._lock, self._connect() as connection:
+            cursor = connection.execute(
+                "UPDATE goals SET resource_limits=?, updated_at=? WHERE id=?",
+                (json.dumps(limits or {}), _now(), goal_id),
+            )
+            return cursor.rowcount > 0
+
+    def count_events(self, goal_id: str, type: str) -> int:
+        """How many audit events of one type a goal has (the real count, not capped like goal_events)."""
+        with self._lock, self._connect() as connection:
+            row = connection.execute(
+                "SELECT COUNT(*) AS n FROM goal_events WHERE goal_id=? AND type=?", (goal_id, type)
+            ).fetchone()
+        return int(row["n"])
+
     def set_current_task(self, goal_id: str, task_id: str | None) -> None:
         with self._lock, self._connect() as connection:
             connection.execute(

@@ -235,6 +235,8 @@ class GoalRuntime:
             return  # still being planned by whatever created the goal (a create_goal call with tasks=[] mid-construction)
         if self._resolve_if_terminal(goal, tasks):
             return
+        if self._stop_if_over_budget(goal, tasks):
+            return
         ready = [t for t in self._store.ready_tasks(goal_id) if t["status"] == "READY"]
         retrying = [t for t in tasks if t["status"] == "RETRYING"]
         runnable = (ready + retrying)[:_MAX_TASKS_PER_TICK]
@@ -258,6 +260,18 @@ class GoalRuntime:
         current = self._store.get_goal(goal_id)
         if current["status"] in ("EXECUTING", "READY"):
             self._resolve_if_terminal(current, self._store.list_tasks(goal_id))
+
+    def _stop_if_over_budget(self, goal: dict[str, Any], tasks: list[dict[str, Any]]) -> bool:
+        """A job with a budget (dourmouse.jobs) stops, parked BLOCKED with the reason, when it has used
+        it up. Nothing is lost: the owner raises the budget and the next tick carries on."""
+        from dourmouse import jobs  # lazy: jobs imports this module's store, not the reverse
+
+        reason = jobs.over_budget(self._store, goal, tasks)
+        if reason is None:
+            return False
+        if self._store.update_goal_status(goal["id"], "BLOCKED", blocked_reason=reason):
+            self._notify(goal["id"], f"Budget used up: {goal['objective']}", reason)
+        return True
 
     def _resolve_if_terminal(self, goal: dict[str, Any], tasks: list[dict[str, Any]]) -> bool:
         """Completes or blocks the goal if its task graph has already
