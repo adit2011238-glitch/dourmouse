@@ -32,6 +32,8 @@
       "extensions.js",
       "importers.js",
       "drm.js",
+      "appearance.js",
+      "appmenu.js",
       "content/**",
       "resources/icon.png",
       "package.json"

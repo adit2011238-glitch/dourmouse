@@ -11,8 +11,8 @@ export function createComposer({ root }) {
     <label class="sr-only" for="cin">Directive</label>
     <textarea class="os-field" id="cin" rows="1" placeholder="Ask anything, or /all &lt;goal&gt; to put every resource on it" data-spec="Directive box. Enter sends, Shift+Enter is a newline. Routes to THIS screen's own thread on the six thread screens, otherwise falls back to HOME's."></textarea>
     <span class="cq" id="cqCount" hidden></span>
-    <button type="button" class="os-btn os-btn--danger" id="cstop" hidden data-spec="Stops the run: aborts the stream and declines any open approval so the server thread wakes.">STOP</button>
-    <button type="button" class="os-btn os-btn--primary" id="csend" data-spec="Sends the directive. While a run is in flight it queues instead.">SEND</button>`);
+    <button type="button" class="os-btn os-btn--danger" id="cstop" hidden data-spec="Stops the run: aborts the stream and declines any open approval so the server thread wakes.">Stop</button>
+    <button type="button" class="os-btn os-btn--primary" id="csend" data-spec="Sends the directive. While a run is in flight it queues instead.">Send</button>`);
   const ta = root.querySelector('#cin');
   const send = root.querySelector('#csend');
   const stop = root.querySelector('#cstop');
@@ -49,7 +49,7 @@ export function createComposer({ root }) {
       root.hidden = false;
       ta.placeholder = next.placeholder || 'Ask anything, or /all <goal> to put every resource on it';
       ta.disabled = Boolean(next.disabled);
-      send.textContent = next.busy ? 'QUEUE' : 'SEND';
+      send.textContent = next.busy ? 'Queue' : 'Send';
       stop.hidden = !next.busy;
       const q = next.queued || 0;
       count.hidden = !q;

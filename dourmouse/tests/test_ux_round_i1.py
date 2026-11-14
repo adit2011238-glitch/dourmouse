@@ -144,7 +144,7 @@ const before = t.local().slice().reverse(); t.clearLocal(); R.cleared = t.local(
 
     def test_boot_binds_command_z_and_the_shortcut_is_listed(self):
         boot = _read("ui/assets/os/boot.js")
-        assert "undo: () => toasts.undoLast()" in boot
+        assert "keymap.bind(s.combo, () => toasts.undoLast(), { editable: false })" in boot
         assert "id: 'undo'" in _read("ui/assets/os/core/shortcuts.js")
 
 

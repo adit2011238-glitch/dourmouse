@@ -1,7 +1,7 @@
 /* Pure helpers for SETTINGS (no DOM at import time, so node can test them). */
 
 export const SECTION_TITLE = { security: 'Security', agents: 'Agents' };
-export const SHELL_LABEL = { auto: 'AUTO', electron: 'ELECTRON', pywebview: 'PYWEBVIEW' };
+export const SHELL_LABEL = { auto: 'Automatic', electron: 'Electron', pywebview: 'pywebview' };
 export const SHELL_WORD = { auto: 'auto', electron: 'Electron', pywebview: 'pywebview' };
 
 /* the background switches, grouped by their section, in the server's order */
@@ -142,9 +142,9 @@ export function osReducedMotion(win) {
 
 /* ---------------- PRIV-5: privacy ---------------- */
 export const CONSENT_CHOICES = [
-  { id: 'ask', label: 'ASK', spec: 'Ask once, the first time a chat needs it, and remember your answer.' },
-  { id: 'allow', label: 'ALLOW', spec: 'Send it to the cloud model when a chat needs it, with identifiers swapped for placeholders.' },
-  { id: 'deny', label: 'NEVER', spec: 'Never send it. A chat that needs it is told it was not allowed.' },
+  { id: 'ask', label: 'Ask', spec: 'Ask once, the first time a chat needs it, and remember your answer.' },
+  { id: 'allow', label: 'Allow', spec: 'Send it to the cloud model when a chat needs it, with identifiers swapped for placeholders.' },
+  { id: 'deny', label: 'Never', spec: 'Never send it. A chat that needs it is told it was not allowed.' },
 ];
 
 export function consentPrompt(source, next) {

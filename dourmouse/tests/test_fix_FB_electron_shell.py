@@ -98,7 +98,7 @@ def run_scenario(tmp_path: Path, scenario: str, *, main: Path | None = None, ext
 def test_activate_no_longer_counts_hidden_windows():
     assert "BrowserWindow.getAllWindows().length === 0" not in MAIN_CODE
     assert 'app.on("activate", onActivate)' in MAIN_CODE
-    assert MAIN_CODE.count("title: \"DOURMOUSE // CENTRAL AGENT DISPATCH\"") == 1, "one place builds the console window"
+    assert MAIN_CODE.count('titleBarStyle: "hiddenInset"') == 1, "one place builds the console window"
 
 
 A1 = r'''
@@ -143,7 +143,7 @@ def test_the_console_is_hidden_not_destroyed_and_the_dock_brings_it_back(tmp_pat
     out = run_scenario(tmp_path, A1)
     assert out["have"] == ["function", "function"]
     first = out["first"]
-    assert first["isMain"] and first["opts"] == {"w": 1111, "h": 777, "x": 40, "y": 50, "title": "DOURMOUSE // CENTRAL AGENT DISPATCH"}
+    assert first["isMain"] and first["opts"] == {"w": 1111, "h": 777, "x": 40, "y": 50, "title": "Dourmouse"}
     assert "maximize" in first["acts"] and first["paneOnIt"] and first["loads"][0].startswith("http://127.0.0.1:")
     close = out["close"]
     assert close["prevented"] is True and close["hidden"] is True and close["destroyed"] is False

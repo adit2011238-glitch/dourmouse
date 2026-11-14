@@ -78,42 +78,45 @@ assertUniqueActions(fixed); R.clean = true;
 
 
 class TestShortcuts:
-    IMPORTS = "import { shortcutList, keysFor, bindable } from 'core/shortcuts.js';\nimport { SCREENS } from 'core/registry.js';\nimport { createKeymap } from 'core/keymap.js';"
+    """T6 (finding #194): Command 1 to 8 go to the eight places; the same list feeds the keymap,
+    the launcher, the Keyboard shortcuts sheet and (checked in test_shell_mac_window.py) the menu bar."""
+    IMPORTS = "import { shortcutList, keysFor, bindable } from 'core/shortcuts.js';\nimport { PLACES } from 'core/registry.js';\nimport { createKeymap } from 'core/keymap.js';"
 
-    def test_the_first_nine_screens_in_sidebar_order_get_command_1_to_9(self, tmp_path):
+    def test_the_eight_places_in_sidebar_order_get_command_1_to_8(self, tmp_path):
         out = run(tmp_path, """
-const l = shortcutList(SCREENS);
-R.screens = l.filter((s) => s.group === 'Screens').map((s) => [s.combo, s.screen]);
-R.settings = keysFor(l, 'SETTINGS'); R.home = keysFor(l, 'HOME'); R.help = keysFor(l, 'help'); R.newc = keysFor(l, 'new');
+const l = shortcutList(PLACES);
+R.places = l.filter((s) => s.group === 'Go').map((s) => [s.combo, s.place]);
+R.settings = keysFor(l, 'settings'); R.home = keysFor(l, 'HOME'); R.help = keysFor(l, 'shortcuts'); R.newc = keysFor(l, 'new');
 R.combos = bindable(l).map((s) => s.combo);
 """, self.IMPORTS)
-        ids = ["HOME", "COMMS", "RESEARCH", "BROWSER", "MEDIA", "CODE", "PROJECTS", "WIKI", "GOALS"]
-        assert out["screens"] == [[f"Meta+{i + 1}", ids[i]] for i in range(9)]
-        assert out["settings"] == "⌘," and out["home"] == "⌘1"
-        assert out["help"] == "⌘/" and out["newc"] == "⌘N"
+        ids = ["HOME", "PROJECTS", "OFFICE", "RESEARCH", "LIBRARY", "BROWSER", "SECURITY", "SETTINGS"]
+        assert out["places"] == [[f"Meta+{i + 1}", ids[i]] for i in range(8)]
+        assert out["settings"] == "\u2318," and out["home"] == "\u23181"
+        assert out["help"] == "\u2318/" and out["newc"] == "\u2318N"
         assert "Meta+," in out["combos"] and "Meta+/" in out["combos"] and "Meta+n" in out["combos"]
-        assert "Alt+a" not in out["combos"] and "Escape" not in out["combos"]
+        assert "Ctrl+Meta+s" in out["combos"] and "Alt+Meta+i" in out["combos"]
+        assert "Alt+a" not in out["combos"] and "Escape" not in out["combos"] and "Meta+9" not in out["combos"]
 
     def test_every_bound_combo_works_while_typing_and_escape_is_untouched(self, tmp_path):
         out = run(tmp_path, """
-const l = shortcutList(SCREENS); const km = createKeymap(); const fired = [];
+const l = shortcutList(PLACES); const km = createKeymap(); const fired = [];
 bindable(l).forEach((s) => km.bind(s.combo, () => fired.push(s.id), { editable: true }));
 const field = { tagName: 'TEXTAREA' };
 const key = (k) => km.handle({ key: k, metaKey: true, target: field });
-key(','); key('1'); key('9'); key('n'); key('/'); key('0');
+key(','); key('1'); key('8'); key('9'); key('n'); key('/'); key('0');
 R.fired = fired;
 R.esc = km.handle({ key: 'Escape', target: field });
 """, self.IMPORTS)
-        assert out["fired"] == ["settings", "screen1", "screen9", "new", "help"]
+        assert out["fired"] == ["settings", "place:home", "place:settings", "new", "shortcuts"]
         assert out["esc"] is False  # nothing pushed on the Esc stack: unchanged behaviour
 
-    def test_boot_binds_them_and_the_launcher_and_help_panel_use_the_same_list(self):
+    def test_boot_binds_them_and_the_launcher_and_help_sheet_use_the_same_list(self):
         boot = (_OS / "boot.js").read_text(encoding="utf-8")
-        assert "bindable(shortcuts)" in boot and "editable: true" in boot
+        assert "bindable(shortcuts)" in boot and "editable: true" in boot and "commands.run(s.id)" in boot
+        assert "shortcutList(registry.PLACES)" in boot and "title: 'Keyboard shortcuts'" in boot
         pal = (_OS / "chrome" / "palette.js").read_text(encoding="utf-8")
         assert "keysFor(shortcuts" in pal and "act:shortcuts" in pal
         assert "tab_id: scope.tabId()" in pal  # the launcher's new conversation used to send no tab id (HTTP 400)
-        assert 'id="shortcuts"' in (_ROOT / "ui" / "shell.html").read_text(encoding="utf-8")
 
 
 class TestMarkdownBlocks:
@@ -169,8 +172,10 @@ class TestThreadView:
 
 
 class TestStageLights:
-    def test_the_lookalike_traffic_lights_are_hidden_inside_electron_only(self):
+    def test_the_painted_traffic_lights_are_gone_and_macos_draws_the_window(self):
+        """T6 (finding #194): the stage-only look-alikes of S6 are retired; the window is hiddenInset."""
         stage = (_OS / "chrome" / "stage.js").read_text(encoding="utf-8")
-        assert "host.kind === 'electron'" in stage and "lights.hidden = true" in stage
-        boot = (_OS / "boot.js").read_text(encoding="utf-8")
-        assert "go: (slug) => router.go(slug), host," in boot
+        html = (_ROOT / "ui" / "shell.html").read_text(encoding="utf-8")
+        assert "os-tl" not in stage and 'id="lights"' not in html
+        main = (_ROOT / "electron" / "main.js").read_text(encoding="utf-8")
+        assert 'titleBarStyle: "hiddenInset"' in main and 'vibrancy: "sidebar"' in main

@@ -4,7 +4,7 @@
 
    resolveRoute is pure so the deep-link rules can be tested without a DOM. */
 
-import { bySlug } from './registry.js';
+import { bySlug, placeBySlug } from './registry.js';
 
 /* Destinations desktop.py / deeplink.py may append as a hash. */
 const ALIASES = { world: 'ATLAS', atlas: 'ATLAS', settings: 'SETTINGS' };
@@ -25,6 +25,9 @@ export function resolveRoute(hash, current = 'HOME') {
   }
   if (slug === 'alerts') return { id: current || 'HOME', openPanel: 'notifications', notice: '' };
   if (ALIASES[slug]) return { id: ALIASES[slug], openPanel: null, notice: '' };
+  /* T6: a place's own slug (#/office, #/library) opens its first view */
+  const place = placeBySlug(slug);
+  if (place && !bySlug(slug)) return { id: place.views[0], openPanel: null, notice: '' };
   const entry = bySlug(slug);
   if (entry) return { id: entry.id, openPanel: null, notice: '' };
   if (UNBACKED.has(slug)) {
@@ -78,8 +81,13 @@ export function createRouter({ registry, win = globalThis.window, stage, nav, ct
     await unmountCurrent();
     if (my !== seq) return;
     nav.setCurrent(entry.id);
-    stage.setTitle(entry.label || entry.id);
-    stage.setSub(entry.sub || '');
+    /* T6 (finding #194): the toolbar title is the place, the switcher shows the view, and there is no
+       tagline under it (a view may still put a live line there through ctx.chrome.setSub) */
+    const place = stage.setViews ? stage.setViews(entry.id) : null;
+    const title = place ? place.label : entry.label || entry.id;
+    stage.setTitle(title);
+    stage.setSub('');
+    if (win.document) win.document.title = title;
     const root = stage.newRoot(entry.id);
     states.loading(root, 'Loading ' + entry.id);
 
@@ -143,7 +151,6 @@ export function createRouter({ registry, win = globalThis.window, stage, nav, ct
       win.document.head.append(css);
     }
     current = { id: entry.id, entry, screen, handle, css };
-    if (screen.sub) stage.setSub(screen.sub);
     try {
       await screen.mount(root, handle.ctx);
     } catch (err) {

@@ -35,7 +35,42 @@ export const SCREENS = [
   S('OFFICE', false, 'agents at work', () => import('../screens/office/index.js')),
 ];
 
-/* S8: the sidebar's section labels. Each group is a CONTIGUOUS run of SCREENS, so the
+/* T6 milestone 1 (finding #194, Adit's approval 2026-11-14): eight places replace the flat list of
+   screens in the sidebar. Every screen above still exists and keeps its route (#/comms, #/goals and
+   so on); a place groups them as views, the first view is where the place opens, and the toolbar
+   shows a switcher when a place has more than one. Command 1 to 8 go to the places in this order.
+   icon: an ICON key from kit/icons.js. */
+const P = (id, label, icon, views) => ({ id, slug: id.toLowerCase(), label, icon, views });
+export const PLACES = [
+  P('HOME', 'Home', 'M4 11l8-7 8 7v8a1 1 0 01-1 1h-5v-6h-4v6H5a1 1 0 01-1-1z', ['HOME', 'VOICE']),
+  P('PROJECTS', 'Projects', 'PROJECTS', ['PROJECTS', 'CODE']),
+  P('OFFICE', 'Office', 'OFFICE', ['OFFICE', 'COMMAND_CENTER', 'ORCHESTRATION', 'GOALS', 'TIMETABLE', 'AGENTSMITH', 'APPS']),
+  P('RESEARCH', 'Research', 'RESEARCH', ['RESEARCH', 'NEWS', 'ATLAS']),
+  P('LIBRARY', 'Library', 'WIKI', ['WIKI', 'COMMS', 'MEDIA']),
+  P('BROWSER', 'Browser', 'BROWSER', ['BROWSER']),
+  P('SECURITY', 'Security', 'SECURITY', ['SECURITY']),
+  P('SETTINGS', 'Settings', 'SETTINGS', ['SETTINGS']),
+];
+
+/* the label a view carries inside its place's switcher */
+export const VIEW_LABELS = {
+  HOME: 'Ask', VOICE: 'Voice', PROJECTS: 'Projects', CODE: 'Code', OFFICE: 'Floor', COMMAND_CENTER: 'Activity',
+  ORCHESTRATION: 'Runs', GOALS: 'Jobs', TIMETABLE: 'Automations', AGENTSMITH: 'Toolsmith', APPS: 'Apps',
+  RESEARCH: 'Jobs', NEWS: 'News', ATLAS: 'World', WIKI: 'Wiki', COMMS: 'Mail', MEDIA: 'Media',
+  BROWSER: 'Browser', SECURITY: 'Status', SETTINGS: 'Settings',
+};
+
+/* the place a screen belongs to (every screen is in exactly one place) */
+export function placeOf(screenId) {
+  return PLACES.find((p) => p.views.includes(screenId)) || null;
+}
+
+export function placeBySlug(slug) {
+  const s = String(slug || '').toLowerCase();
+  return PLACES.find((p) => p.slug === s) || null;
+}
+
+/* S8: the sidebar's section labels (before T6; no longer drawn, kept for the launcher's grouping). Each group is a CONTIGUOUS run of SCREENS, so the
    sidebar order, the launcher order and Command 1 to 9 all stay the registry order.
    [label, id of the first screen in the group]. Ids are not renamed. */
 export const SIDEBAR_GROUPS = [

@@ -190,7 +190,7 @@ export default {
     /* ---------------- the thread ---------------- */
     const view = mountThreadView(threadEl, ctx, {
       scroller: root.parentElement,
-      emptyHint: 'Type a directive below. Enter sends, Shift+Enter starts a new line. Start with /all and a goal to put every model on it at once; the run appears above the conversation and in ORCHESTRATION.',
+      emptyHint: 'Enter sends. /all puts every model on it.',
       emptyActions: [
         { label: 'What needs my attention?', send: 'What needs my attention right now? Check mail, security alerts and anything still running, and answer in a few short lines.', spec: 'Sends this question to the companion on HOME. It uses the model and may call read-only tools.' },
         { label: 'What can you do here?', send: 'List what you can do on this Mac in five short lines, using only the tools you really have.', spec: 'Sends this question to the companion on HOME. It uses the model.' },

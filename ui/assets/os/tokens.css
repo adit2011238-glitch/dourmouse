@@ -1,0 +1,191 @@
+/* Design tokens (T6 milestone 1, finding #194). The one place a colour, font or size is written
+   for the shell. Inside the Electron app core/appearance.js overwrites the neutrals, the accent and
+   the status colours with what macOS reports (and resends on every change), after darkening any
+   text colour that would read below 4.5:1. The values here are the fallbacks for a plain browser,
+   taken from Apple's system colours.
+
+   The theme comes from <html data-theme="light|dark">, which appearance.js sets from macOS or from
+   prefers-color-scheme. Older stylesheets read --dm-* and --os-* names; the bottom block points
+   those names at these tokens, but only inside the shell (html[data-shell="os"]), so the classic
+   console that shares dourmouse-ui.css keeps its own look. */
+
+:root {
+  /* type: the system font at macOS sizes, weights 400, 500 and 600 only */
+  --tk-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", system-ui, sans-serif;
+  --tk-font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --tk-size-title: 22px;
+  --tk-size-page: 17px;
+  --tk-size-section: 15px;
+  --tk-size-body: 13px;
+  --tk-size-small: 12px;
+  --tk-size-caption: 11px;
+  --tk-line-body: 18px;
+  --tk-line-long: 20px;
+
+  /* spacing on 4 and 8 */
+  --tk-space-1: 4px;
+  --tk-space-2: 8px;
+  --tk-space-3: 12px;
+  --tk-space-4: 16px;
+  --tk-space-5: 20px;
+  --tk-space-6: 24px;
+  --tk-space-8: 32px;
+
+  /* sizes */
+  --tk-toolbar: 52px;
+  --tk-sidebar: 220px;
+  --tk-inspector: 280px;
+  --tk-row: 28px;
+  --tk-control: 28px;
+  --tk-control-small: 24px;
+
+  /* radii follow size */
+  --tk-radius-control: 6px;
+  --tk-radius-block: 8px;
+  --tk-radius-sheet: 12px;
+
+  /* the one shadow: under sheets, menus and popovers */
+  --tk-shadow-float: 0 8px 28px rgba(0, 0, 0, 0.22), 0 0 0 0.5px rgba(0, 0, 0, 0.18);
+
+  --tk-dur: 160ms;
+
+  /* project covers: Apple's system hues, used as a solid square, never a gradient */
+  --tk-cover-1: #3a9fb5;
+  --tk-cover-2: #c8742f;
+  --tk-cover-3: #7d6bc4;
+  --tk-cover-4: #3ba57a;
+  --tk-cover-5: #c4506a;
+  --tk-cover-6: #5b7fa8;
+
+  /* light fallbacks */
+  --tk-bg-content: #ffffff;
+  --tk-bg-sidebar: #e9e9eb;
+  --tk-bg-inspector: #f5f5f7;
+  --tk-bg-window: #ececec;
+  --tk-bg-raised: #ffffff;
+  --tk-text: rgba(0, 0, 0, 0.85);
+  --tk-text-2: rgba(0, 0, 0, 0.6);
+  --tk-text-3: rgba(0, 0, 0, 0.55);
+  --tk-separator: rgba(0, 0, 0, 0.1);
+  --tk-fill: rgba(0, 0, 0, 0.05);
+  --tk-fill-2: rgba(0, 0, 0, 0.09);
+  --tk-accent: #007aff;
+  --tk-accent-fill: #0066d6;
+  --tk-on-accent: #ffffff;
+  --tk-link: #0068da;
+  --tk-accent-text: #0068da;
+  --tk-selected: rgba(0, 0, 0, 0.1);
+  --tk-good: #28cd41;
+  --tk-warning: #ff9500;
+  --tk-critical: #ff3b30;
+  --tk-good-text: #1a7f37;
+  --tk-warning-text: #9a5b00;
+  --tk-critical-text: #d70015;
+  --tk-scrim: rgba(0, 0, 0, 0.18);
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  --tk-bg-content: #1e1e1e;
+  --tk-bg-sidebar: #2b2b2d;
+  --tk-bg-inspector: #262628;
+  --tk-bg-window: #232323;
+  --tk-bg-raised: #2c2c2e;
+  --tk-text: rgba(255, 255, 255, 0.85);
+  --tk-text-2: rgba(255, 255, 255, 0.6);
+  --tk-text-3: rgba(255, 255, 255, 0.55);
+  --tk-separator: rgba(255, 255, 255, 0.1);
+  --tk-fill: rgba(255, 255, 255, 0.06);
+  --tk-fill-2: rgba(255, 255, 255, 0.11);
+  --tk-accent: #0a84ff;
+  --tk-accent-fill: #0066d6;
+  --tk-link: #409cff;
+  --tk-accent-text: #409cff;
+  --tk-selected: rgba(255, 255, 255, 0.12);
+  --tk-good: #32d74b;
+  --tk-warning: #ff9f0a;
+  --tk-critical: #ff453a;
+  --tk-good-text: #32d74b;
+  --tk-warning-text: #ff9f0a;
+  --tk-critical-text: #ff453a;
+  --tk-scrim: rgba(0, 0, 0, 0.4);
+  color-scheme: dark;
+}
+
+/* before appearance.js has run (or with scripts off), follow the browser's own setting */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    --tk-bg-content: #1e1e1e;
+    --tk-bg-sidebar: #2b2b2d;
+    --tk-bg-inspector: #262628;
+    --tk-bg-window: #232323;
+    --tk-bg-raised: #2c2c2e;
+    --tk-text: rgba(255, 255, 255, 0.85);
+    --tk-text-2: rgba(255, 255, 255, 0.6);
+    --tk-text-3: rgba(255, 255, 255, 0.55);
+    --tk-separator: rgba(255, 255, 255, 0.1);
+    --tk-fill: rgba(255, 255, 255, 0.06);
+    --tk-fill-2: rgba(255, 255, 255, 0.11);
+    --tk-accent: #0a84ff;
+    --tk-link: #409cff;
+    --tk-selected: rgba(255, 255, 255, 0.12);
+    --tk-good-text: #32d74b;
+    --tk-warning-text: #ff9f0a;
+    --tk-critical-text: #ff453a;
+    color-scheme: dark;
+  }
+}
+
+/* Increased contrast in System Settings: stronger separators and secondary text */
+:root[data-contrast="more"] {
+  --tk-separator: rgba(127, 127, 127, 0.5);
+  --tk-text-2: var(--tk-text);
+}
+
+/* The legacy names, inside the shell only. Screens built before the tokens keep working and
+   follow light, dark and the accent without being rewritten (they are restyled in T6 milestone 2). */
+:root[data-shell="os"] {
+  --dm-canvas: var(--tk-bg-content);
+  --dm-layer: var(--tk-fill);
+  --dm-layer-hi: var(--tk-fill-2);
+  --dm-line: var(--tk-separator);
+  --dm-line-focus: var(--tk-accent);
+  --dm-fg: var(--tk-text);
+  --dm-fg-body: var(--tk-text);
+  --dm-fg-prose: var(--tk-text);
+  --dm-fg-label: var(--tk-text-2);
+  --dm-fg-dim: var(--tk-text-2);
+  --dm-active: var(--tk-accent);
+  --dm-active-ink: var(--tk-on-accent);
+  --dm-ok: var(--tk-good-text);
+  --dm-error: var(--tk-critical-text);
+  --os-warn: var(--tk-warning-text);
+  --dm-font-sans: var(--tk-font);
+  --dm-font-mono: var(--tk-font-mono);
+  --dm-text-2xs: 11px;
+  --dm-text-xs: 11px;
+  --dm-text-sm: 12px;
+  --dm-text-base: 13px;
+  --dm-text-md: 13px;
+  --dm-text-lg: 15px;
+  --dm-text-xl: 17px;
+  --dm-text-2xl: 22px;
+  --os-mat-ultrathin: var(--tk-bg-content);
+  --os-mat-thin: var(--tk-bg-content);
+  --os-mat-regular: var(--tk-bg-content);
+  --os-mat-thick: var(--tk-bg-raised);
+  --os-blur-ultrathin: none;
+  --os-blur-thin: none;
+  --os-blur-regular: none;
+  --os-blur-thick: none;
+  --os-edge-hi: var(--tk-separator);
+  --os-edge-lo: var(--tk-separator);
+  --os-elev-rest: none;
+  --os-elev-raise: none;
+  --os-elev-float: var(--tk-shadow-float);
+  --os-elev-modal: var(--tk-shadow-float);
+  --os-radius-window: var(--tk-radius-block);
+  --os-radius-panel: var(--tk-radius-block);
+  --os-radius-widget: var(--tk-radius-block);
+  --os-radius-tile: var(--tk-radius-block);
+}

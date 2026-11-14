@@ -11,7 +11,7 @@ const POLL_MS = 30000;
 
 export function createStatus({ api, events, timers }) {
   const state = {
-    agents: { known: false, total: 0, busy: 0, error: '' },
+    agents: { known: false, total: 0, busy: 0, working: 0, error: '' },
     security: { known: false, scanned: false, risk: 0, high: 0, med: 0, low: 0, lastScanAt: null, error: '' },
     network: { known: false, watching: false, gateway: '', iface: '', ssid: '', changes: 0, error: '' },
     brain: { known: false, backend: '', model: '', error: '' },
@@ -29,11 +29,15 @@ export function createStatus({ api, events, timers }) {
 
   function recountAgents() {
     let busy = 0;
+    let working = 0;
     activity.forEach((s) => {
       if (s !== 'idle') busy += 1;
+      /* T6: "live" is an always-on feed poll, not an agent at work (CC-1). Only a run counts as working. */
+      if (s === 'computing' || s === 'auth') working += 1;
     });
     state.agents.total = activity.size;
     state.agents.busy = busy;
+    state.agents.working = working;
     state.agents.known = true;
     state.agents.error = '';
   }

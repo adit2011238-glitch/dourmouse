@@ -1,30 +1,28 @@
-[data-screen="SETTINGS"] .set-note { margin-bottom: 12px; padding: 8px 12px; border-radius: 8px; font-size: var(--dm-text-sm); color: var(--dm-fg-body); border: 1px solid var(--os-edge-lo); background: rgba(255,255,255,.04); overflow-wrap: anywhere; }
+/* Settings, in the System Settings style (T6, Adit 2026-11-14): grouped inset sections, one line per
+   setting, controls on the right, short grey notes only where they change a decision. Colours come
+   from the shell's tokens. */
+[data-screen="SETTINGS"] { max-width: 760px; margin: 0 auto; }
+[data-screen="SETTINGS"] .grid2 { grid-template-columns: 1fr; gap: var(--tk-space-5); }
+[data-screen="SETTINGS"] .set-gap { margin-top: var(--tk-space-5); }
+[data-screen="SETTINGS"] .set-note { margin-bottom: var(--tk-space-3); padding: var(--tk-space-2) var(--tk-space-3); border-radius: var(--tk-radius-control); font-size: var(--tk-size-small); color: var(--tk-text); background: var(--tk-fill); overflow-wrap: anywhere; }
 [data-screen="SETTINGS"] .set-note[hidden] { display: none; }
-[data-screen="SETTINGS"] .set-note[data-tone="ok"] { border-color: rgba(16,185,129,.4); }
-[data-screen="SETTINGS"] .set-note[data-tone="error"] { border-color: rgba(239,68,68,.45); color: var(--dm-error); }
-[data-screen="SETTINGS"] #setConfirm:not(:empty) { margin-bottom: 12px; }
-[data-screen="SETTINGS"] .set-gap { margin-top: 12px; }
-[data-screen="SETTINGS"] .set-help { margin: 2px 0 6px; font-size: var(--dm-text-xs); color: var(--dm-fg-dim); overflow-wrap: anywhere; }
-[data-screen="SETTINGS"] .set-err { margin: 4px 0; color: var(--dm-error); font-size: var(--dm-text-sm); overflow-wrap: anywhere; }
-[data-screen="SETTINGS"] .set-block { display: block; font-size: var(--dm-text-xs); }
-[data-screen="SETTINGS"] .set-sec { margin-top: 12px; }
-[data-screen="SETTINGS"] .set-sec:first-of-type { margin-top: 8px; }
-[data-screen="SETTINGS"] .set-feat { border-bottom: 1px solid var(--os-edge-lo); }
-[data-screen="SETTINGS"] .set-feat:last-child { border-bottom: 0; }
+[data-screen="SETTINGS"] .set-note[data-tone="ok"] { color: var(--tk-good-text); }
+[data-screen="SETTINGS"] .set-note[data-tone="error"] { color: var(--tk-critical-text); }
+[data-screen="SETTINGS"] #setConfirm:not(:empty) { margin-bottom: var(--tk-space-3); }
+[data-screen="SETTINGS"] .set-help { margin: 0 0 var(--tk-space-1); font-size: var(--tk-size-small); color: var(--tk-text-2); overflow-wrap: anywhere; }
+[data-screen="SETTINGS"] .set-err { margin: var(--tk-space-1) 0; color: var(--tk-critical-text); font-size: var(--tk-size-small); overflow-wrap: anywhere; }
+[data-screen="SETTINGS"] .set-block { display: block; font-size: var(--tk-size-small); color: var(--tk-text-2); font-weight: 400; }
+[data-screen="SETTINGS"] .set-sec { margin-top: var(--tk-space-4); }
+[data-screen="SETTINGS"] .set-sec:first-of-type { margin-top: var(--tk-space-2); }
+[data-screen="SETTINGS"] .set-feat, [data-screen="SETTINGS"] .set-priv { border-top: 1px solid var(--tk-separator); }
+[data-screen="SETTINGS"] .rt b { font-weight: 400; }
 [data-screen="SETTINGS"] .set-tg { align-items: center; }
-[data-screen="SETTINGS"] .set-btns { display: flex; gap: 8px; margin-top: 8px; }
-[data-screen="SETTINGS"] .set-test { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--os-edge-lo); }
-[data-screen="SETTINGS"] .set-folders { margin-top: 12px; }
-[data-screen="SETTINGS"] .set-folders label { display: block; margin-bottom: 4px; color: var(--dm-fg-body); font-size: var(--dm-text-sm); }
-[data-screen="SETTINGS"] .set-folders b { color: var(--dm-fg); font-weight: 500; }
-[data-screen="SETTINGS"] .set-folders textarea { width: 100%; box-sizing: border-box; font-family: var(--dm-font-mono); font-size: var(--dm-text-xs); color: var(--dm-fg); background: rgba(0,0,0,.25); border: 1px solid var(--os-edge-lo); border-radius: 8px; padding: 7px 10px; resize: vertical; }
-[data-screen="SETTINGS"] .set-folders textarea:focus-visible { outline: 2px solid var(--dm-active); outline-offset: 1px; }
-[data-screen="SETTINGS"] .os-seg button[disabled] { opacity: .38; cursor: not-allowed; }
-[data-screen="SETTINGS"] .os-switch[disabled] { opacity: .38; cursor: not-allowed; }
-
-/* PRIV-5: the privacy section */
-[data-screen="SETTINGS"] .set-priv { border-bottom: 1px solid var(--os-edge-lo); padding: 6px 0; }
-[data-screen="SETTINGS"] .set-priv:last-child { border-bottom: 0; }
+[data-screen="SETTINGS"] .set-btns { display: flex; justify-content: flex-end; gap: var(--tk-space-2); margin-top: var(--tk-space-2); }
+[data-screen="SETTINGS"] .set-test { margin-top: var(--tk-space-2); padding-top: var(--tk-space-2); border-top: 1px solid var(--tk-separator); }
+[data-screen="SETTINGS"] .set-folders { margin-top: var(--tk-space-3); }
+[data-screen="SETTINGS"] .set-folders label { display: block; margin-bottom: var(--tk-space-1); }
+[data-screen="SETTINGS"] .set-folders b { font-weight: 400; }
+[data-screen="SETTINGS"] .set-folders textarea { width: 100%; box-sizing: border-box; font-family: var(--tk-font-mono); font-size: var(--tk-size-small); color: var(--tk-text); background: var(--tk-bg-content); border: 1px solid var(--tk-separator); border-radius: var(--tk-radius-control); padding: 6px 8px; resize: vertical; }
+[data-screen="SETTINGS"] .os-seg button[disabled], [data-screen="SETTINGS"] .os-switch[disabled] { opacity: 0.4; cursor: default; }
 [data-screen="SETTINGS"] .set-priv .os-seg { flex-shrink: 0; }
-[data-screen="SETTINGS"] .set-prov input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--dm-active); }
-[data-screen="SETTINGS"] .set-prov input[type="checkbox"]:focus-visible { outline: 2px solid var(--dm-active); outline-offset: 2px; }
+[data-screen="SETTINGS"] .set-prov input[type="checkbox"] { width: 14px; height: 14px; }

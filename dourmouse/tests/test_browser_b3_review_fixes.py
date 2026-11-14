@@ -220,4 +220,4 @@ def test_the_package_file_list_names_the_four_new_b3_modules():
 
 def test_main_js_requires_exactly_the_modules_this_phase_added():
     main = (ELECTRON / "main.js").read_text(encoding="utf-8")
-    assert re.findall(r'require\("\./(\w+)"\)', main) == ["policy", "permissions", "passwords", "profiles", "extensions", "importers", "drm"]
+    assert re.findall(r'require\("\./(\w+)"\)', main) == ["policy", "permissions", "passwords", "profiles", "extensions", "importers", "drm", "appearance", "appmenu"]

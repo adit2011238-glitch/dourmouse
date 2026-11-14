@@ -24,4 +24,5 @@ def test_a_server_that_hangs_at_start_cannot_restart_forever():
 
 def test_command_z_is_left_to_text_fields():
     boot = (ROOT / "ui" / "assets" / "os" / "boot.js").read_text(encoding="utf-8")
-    assert "{ editable: s.id !== 'undo' }" in boot
+    # T6: the undo shortcut is bound on its own line, not editable, so a text field keeps Command Z
+    assert "keymap.bind(s.combo, () => toasts.undoLast(), { editable: false })" in boot

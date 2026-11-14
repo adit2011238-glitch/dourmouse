@@ -173,7 +173,8 @@ R.afterFailedRead = bad.strip.el.hidden;
 class TestWiring:
     def test_boot_creates_the_strip_under_the_menu_bar_and_reads_it_once(self):
         boot = (_OS / "boot.js").read_text(encoding="utf-8")
-        assert "createDrivingStrip({ after: $('menubar'), api, events, toasts })" in boot
+        # T6: the fake menu bar is gone; the strip goes first in the page, across the top of the window
+        assert "createDrivingStrip({ after: $('wall'), api, events, toasts })" in boot
         assert boot.count("drivingStrip.read()") == 1
 
     def test_the_strip_listens_for_the_event_the_server_sends(self):
@@ -188,8 +189,8 @@ class TestWiring:
 
     def test_shell_css_makes_room_for_the_strip_and_keeps_it_above_content(self):
         css = (_OS / "shell.css").read_text(encoding="utf-8")
-        assert "#drivingstrip" in css and 'body[data-driving="true"] #shell { top: 56px; }' in css
-        assert "z-index: 940" in css  # under the menu bar (950) and its panels, over the stage
+        assert "#drivingstrip" in css and 'body[data-driving="true"] #shell { top: 32px; }' in css
+        assert "z-index: 940" in css  # under sheets (980) and the launcher (990), over the window content
 
     def test_webui_makes_exactly_one_registration_call(self):
         webui = (_ROOT / "dourmouse" / "webui.py").read_text(encoding="utf-8")

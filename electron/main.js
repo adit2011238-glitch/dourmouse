@@ -22,7 +22,7 @@
 // no Electron and must still start -- run `npm install` here to enable it.
 
 const electronApi = require("electron");
-const { app, BrowserWindow, BrowserView, ipcMain, shell, Tray, Menu, nativeImage, Notification, session, dialog, safeStorage, systemPreferences } = electronApi;
+const { app, BrowserWindow, BrowserView, ipcMain, shell, Tray, Menu, nativeImage, nativeTheme, Notification, session, dialog, safeStorage, systemPreferences } = electronApi;
 const { spawn, execFile } = require("child_process");
 const crypto = require("crypto");
 const http = require("http");
@@ -35,6 +35,8 @@ const profLib = require("./profiles");
 const extLib = require("./extensions");
 const impLib = require("./importers");
 const drmLib = require("./drm");
+const appearanceLib = require("./appearance");
+const appMenuLib = require("./appmenu");
 
 // An isolated copy (a test run, a second profile) can keep every file the shell
 // writes (window state, the browser profile, history, bookmarks, downloads list)
@@ -66,6 +68,13 @@ app.commandLine.appendSwitch("remote-debugging-port", String(CDP_PORT));
 // is a known, accepted residual risk of using CDP. Browsers cannot reach it
 // (Chromium rejects a non-local Host header and cross-origin websockets).
 app.commandLine.appendSwitch("remote-debugging-address", "127.0.0.1");
+// An isolated test copy that pins its theme (DOURMOUSE_ELECTRON_THEME) keeps painting while another
+// window covers it, so the evidence screenshots of finding #194 can be taken over CDP. The owner's
+// app never sets it and keeps Chromium's normal power saving.
+if (process.env.DOURMOUSE_ELECTRON_THEME === "light" || process.env.DOURMOUSE_ELECTRON_THEME === "dark") {
+  app.commandLine.appendSwitch("disable-backgrounding-occluded-windows");
+  app.commandLine.appendSwitch("disable-renderer-backgrounding");
+}
 
 // Stage E: when packaged, electron-builder's extraResources (see
 // package.json's "build" config) lay dourmouse/, ui/, and .venv/ out as
@@ -3788,6 +3797,36 @@ function stopConsoleCapture(win) {
   });
 }
 
+// T6 (finding #194): the macOS appearance and the real menu bar, for the console window only.
+function sendToConsole(channel, payload) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send(channel, payload);
+}
+function currentAppearance() {
+  return appearanceLib.readAppearance({ nativeTheme, systemPreferences });
+}
+ipcMain.handle("appearance:get", (evt) => (consoleOnly(evt) ? currentAppearance() : null));
+let appMenu = null;
+ipcMain.on("menu:state", (evt, state) => {
+  if (consoleOnly(evt) && appMenu) appMenu.update(state);
+});
+function installShellMenuAndAppearance() {
+  // An isolated test copy can pin light or dark (macOS's own appearance for this app, the same
+  // path the System Settings switch takes); the owner's app always follows the system.
+  const pinned = process.env.DOURMOUSE_ELECTRON_THEME;
+  if (pinned === "light" || pinned === "dark") nativeTheme.themeSource = pinned;
+  appMenu = appMenuLib.installAppMenu({
+    Menu,
+    appName: "Dourmouse",
+    send: (id) => {
+      if (!appMenuLib.COMMAND_IDS.includes(id)) return;
+      if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isVisible()) mainWindow.show();
+      sendToConsole("menu:command", id);
+    },
+  });
+  appearanceLib.watchAppearance({ nativeTheme, systemPreferences, send: (a) => sendToConsole("appearance:changed", a) });
+}
+
 function createMainWindow() {
   const geometry = readWindowState();
   const win = new BrowserWindow({
@@ -3797,7 +3836,14 @@ function createMainWindow() {
     y: Number.isFinite(geometry.y) ? geometry.y : undefined,
     minWidth: 1024,
     minHeight: 680,
-    title: "DOURMOUSE // CENTRAL AGENT DISPATCH",
+    // T6 (finding #194): macOS draws the window. Real traffic lights inset into the sidebar, the
+    // system sidebar material behind it, and the title is the place the page is showing.
+    title: "Dourmouse",
+    titleBarStyle: "hiddenInset",
+    trafficLightPosition: { x: 18, y: 18 },
+    vibrancy: "sidebar",
+    visualEffectState: "followWindow",
+    backgroundColor: "#00000000",
     webPreferences: { preload: PRELOAD, contextIsolation: true },
   });
   mainWindow = win;
@@ -3868,6 +3914,7 @@ app.whenReady().then(async () => {
   }
 
   installPermissionPolicy(session.defaultSession);
+  installShellMenuAndAppearance();
   createMainWindow();
 
   // Created hidden up front, same as dourmouse/desktop.py's map_window --

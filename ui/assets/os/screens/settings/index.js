@@ -38,12 +38,12 @@ export default {
       <div id="setConfirm"></div>
       <div class="grid2">
         <div class="card"><div class="lbl">Shell</div><div id="setShell" data-region></div></div>
-        <div class="card"><div class="lbl">Models &middot; large cloud only</div><div id="setModels" data-region></div></div>
+        <div class="card"><div class="lbl">Models</div><div id="setModels" data-region></div></div>
       </div>
-      <div class="card set-gap"><div class="lbl">Privacy &middot; what may reach a cloud model</div><div id="setPrivacy" data-region></div></div>
+      <div class="card set-gap"><div class="lbl">Privacy</div><div id="setPrivacy" data-region></div></div>
       <div class="card set-gap"><div class="lbl">Appearance</div><div id="setLook" data-region></div></div>
       <div class="card set-gap"><div class="lbl">Remote access</div><div id="setAccess" data-region></div></div>
-      <div class="card set-gap"><div class="lbl">Background switches</div><div id="setFeatures" data-region></div></div>
+      <div class="card set-gap"><div class="lbl">Background</div><div id="setFeatures" data-region></div></div>
       <div class="card set-gap"><div class="lbl">Behaviour</div><div id="setBehaviour" data-region></div></div>`);
     const $ = (id) => root.querySelector('#' + id);
     const noteEl = $('setNote');
@@ -82,7 +82,7 @@ export default {
       const sources = Array.isArray(p.sources) ? p.sources : [];
       const providers = Array.isArray(p.providers) ? p.providers : [];
       privEl.dataset.state = 'populated';
-      setHtml(privEl, html`<div class="muted set-help">${p.limits || ''} Public web results and your own calendar, tasks and file names are never asked about. Never sent in any mode: passwords, Keychain items, .env files, keys, cookies, tokens and card numbers.</div>
+      setHtml(privEl, html`<div class="muted set-help">Never sent in any mode: passwords, Keychain items, .env files, keys, cookies, tokens, card numbers.</div>
         ${p.note ? html`<div class="muted set-err">${p.note}</div>` : ''}
         <div class="kv set-tg"><span>Private mode for every chat${p.private_mode ? html` <span class="tag ok">on</span>` : ''}</span>
           ${sw('data-privmode', 'all', p.private_mode, 'Private mode for every chat', 'When on, no sensitive source is sent to a cloud model from any chat and the tools that read them are hidden. Each chat also has its own Private switch in its toolbar.', false)}</div>
@@ -90,10 +90,9 @@ export default {
         ${sources.map((src) => html`<div class="os-row set-priv"><span class="rt"><b>${src.label}</b><span class="muted set-block">${src.what}${src.note ? '. ' + src.note : ''}</span></span>
           <span class="os-seg" role="group" aria-label="${src.label}">${CONSENT_CHOICES.map((c) => html`<button type="button" aria-selected="${String(c.id === src.decision)}" data-consent="${src.id}" data-decision="${c.id}" data-spec="${c.spec}">${c.label}</button>`)}</span></div>`)}
         <div class="lbl set-sec">Providers</div>
-        <div class="muted set-help">Which company receives what a model reads. Dourmouse cannot see an account's data retention or training settings: check them on the provider's site, then tick the box.</div>
         ${providers.map((pr) => {
           const t = providerTag(pr);
-          return html`<div class="os-row set-priv set-prov"><span class="rt"><b>${pr.label}</b><span class="muted set-block">${pr.company}. Region: ${pr.region || 'not stated by the provider'}.${pr.verified_at ? ' Checked ' + pr.verified_at + '.' : ''}</span></span>
+          return html`<div class="os-row set-priv set-prov"><span class="rt"><b>${pr.label}</b><span class="muted set-block">${pr.company}${pr.region ? ', ' + pr.region : ''}</span></span>
             <span class="tag ${t.tone}">${t.word}</span>
             <input type="checkbox" aria-label="I checked ${pr.label}'s retention and training settings" data-provider="${pr.id}" ${pr.verified ? 'checked' : ''} data-spec="Tick after you checked this account's retention and training settings yourself. Asks first."></div>`;
         })}`);
@@ -126,8 +125,7 @@ export default {
     function paintLook() {
       const cur = ctx.appearance.textSize();
       lookEl.dataset.state = 'populated';
-      setHtml(lookEl, html`<div class="kv"><span>Text size</span><span class="os-seg" role="group" aria-label="Text size">${TEXT_SIZES.map((t) => html`<button type="button" aria-selected="${String(t.id === cur)}" data-textsize="${t.id}" data-spec="Sets the size of the text across the whole app to ${t.name.toLowerCase()}. It applies at once and is remembered.">${t.name}</button>`)}</span></div>
-        <div class="muted set-help">Scales the text everywhere in the app. Small never goes below 11 pixels. It applies at once and is remembered on this device and on the server.</div>`);
+      setHtml(lookEl, html`<div class="kv"><span>Text size</span><span class="os-seg" role="group" aria-label="Text size">${TEXT_SIZES.map((t) => html`<button type="button" aria-selected="${String(t.id === cur)}" data-textsize="${t.id}" data-spec="Sets the size of the text across the whole app to ${t.name.toLowerCase()}. It applies at once and is remembered.">${t.name}</button>`)}</span></div>`);
     }
 
     async function chooseTextSize(sizeId) {
@@ -144,7 +142,7 @@ export default {
       const items = st.sum && st.sum.features && Array.isArray(st.sum.features.items) ? st.sum.features.items : null;
       ctx.chrome.setActions([
         {
-          id: 'reset', label: 'RESET', kind: 'danger', disabled: !items,
+          id: 'reset', label: 'Reset', kind: 'danger', disabled: !items,
           spec: 'Puts the background switches back to their defaults, after asking. It does not touch API keys, the model choice, auto approve or the shell.',
           onClick: () => resetSwitches(items),
         },
@@ -238,17 +236,15 @@ export default {
         const choices = shellChoices(sh);
         const running = ctx.host && ctx.host.kind ? ctx.host.kind : 'browser';
         parts.push(html`<div class="kv"><span>Native shell</span><span class="os-seg" role="group" aria-label="Native shell">${choices.map((c) => html`<button type="button" aria-selected="${String(c.selected)}" data-shell="${c.value}" ${c.disabled ? 'disabled' : ''} data-spec="${c.reason || (c.value === 'auto' ? 'Electron when it is installed, pywebview otherwise. Read at the next launch, after asking.' : c.value === 'electron' ? 'The Electron shell with the browser pane. Read at the next launch, after asking.' : 'The older pywebview window. Always available. Read at the next launch, after asking.')}">${c.label}</button>`)}</span></div>
-          <div class="muted set-help">Running now: ${running}. The next launch will use ${SHELL_WORD[sh.effective_next_launch] || sh.effective_next_launch}.${sh.invalid_value ? ' The saved value ' + sh.invalid_value + ' is not one of auto, electron or pywebview, so it is read as auto.' : ''}${sh.electron_available === false ? ' Electron is not installed in this checkout.' : ''}</div>`);
+          <div class="muted set-help">Next launch: ${SHELL_WORD[sh.effective_next_launch] || sh.effective_next_launch}.${running === 'browser' ? ' Running in a browser.' : ''}${sh.invalid_value ? ' The saved value ' + sh.invalid_value + ' is not one of auto, electron or pywebview, so it is read as auto.' : ''}${sh.electron_available === false ? ' Electron is not installed in this checkout.' : ''}</div>`);
       }
       const rm = osReducedMotion(globalThis);
-      parts.push(html`<div class="kv"><span>Reduced motion</span><span class="tag" data-spec="This window follows the operating system's reduced-motion setting. A forced override is not available yet: the shell stylesheet has no switch for it.">${rm === null ? 'unknown' : rm ? 'OS: reduce' : 'OS: no preference'}</span></div>
-        <div class="muted set-help">Follows the OS setting. Forcing it on from here is not available yet. The wallpaper animation has its own switch in the WALLPAPER menu.</div>`);
+      parts.push(html`<div class="kv"><span>Reduced motion</span><span class="tag" data-spec="This window follows the operating system's reduced-motion setting. A forced override is not available yet: the shell stylesheet has no switch for it.">${rm === null ? 'Unknown' : rm ? 'On (System Settings)' : 'Off (System Settings)'}</span></div>`);
       if (tgErr) {
         parts.push(html`<div class="muted set-err">Auto approve unavailable: ${tgErr}</div>`);
       } else {
         const auto = tg.items.find((t) => t.id === 'auto_approve');
         if (auto) parts.push(toggleRow(auto));
-        parts.push(html`<div class="muted set-help">Off is the safe default. Turning it on asks first and says what it does.</div>`);
       }
       shellEl.dataset.state = 'populated';
       setHtml(shellEl, html`${parts}`);
@@ -295,10 +291,10 @@ export default {
         : tests && tests.error
           ? html`<div class="muted set-err">${tests.error}</div>`
           : tests
-            ? html`<div class="set-test"><div class="muted set-help">Checked ${tests.at}. Keys and reachability only: no prompt was sent, so nothing was spent and no model answer was tested.</div>${tests.rows.map((r) => html`<div class="kv"><span>${r.name}${r.model ? html` <span class="muted mono">${r.model}</span>` : ''}</span><b><span class="tag ${r.tone}">${r.word}</span></b></div>${r.detail ? html`<div class="muted set-help">${r.detail}</div>` : ''}`)}</div>`
+            ? html`<div class="set-test"><div class="muted set-help">Checked ${tests.at}. Keys and reachability only.</div>${tests.rows.map((r) => html`<div class="kv"><span>${r.name}${r.model ? html` <span class="muted mono">${r.model}</span>` : ''}</span><b><span class="tag ${r.tone}">${r.word}</span></b></div>${r.detail ? html`<div class="muted set-help">${r.detail}</div>` : ''}`)}</div>`
             : '';
       modelsEl.dataset.state = 'populated';
-      setHtml(modelsEl, html`${rows}<div class="set-btns"><button type="button" class="os-btn" data-testall ${st.testing ? 'disabled' : ''} data-spec="Checks that each backend has its key or is reachable, and shows the real reason when it is not. It sends no prompt to any model, so it costs nothing and does not prove a model will answer.">${st.testing ? 'TESTING' : 'TEST ALL'}</button></div>${testBlock}`);
+      setHtml(modelsEl, html`${rows}<div class="set-btns"><button type="button" class="os-btn" data-testall ${st.testing ? 'disabled' : ''} data-spec="Checks that each backend has its key or is reachable, and shows the real reason when it is not. It sends no prompt to any model, so it costs nothing and does not prove a model will answer.">${st.testing ? 'Testing' : 'Test all'}</button></div>${testBlock}`);
     }
 
     function paintAccess() {
@@ -313,8 +309,7 @@ export default {
       setHtml(accessEl, html`
         <div class="kv"><span>Bind host</span><b class="mono">${bindLine(a)}</b></div>
         <div class="kv"><span>Access token</span><b><span class="tag ${tk.tone}">${tk.word}</span></b></div>
-        <div class="muted set-help">${tk.note}${a.insecure_override ? ' The insecure-bind override is on, so the server may start beyond this Mac without a token.' : ''}</div>
-        <div class="muted set-help">The server refuses to start on an address other than this Mac without an access token, unless an explicit insecure-bind override is set. The token itself is never shown here.</div>`);
+        ${a.insecure_override ? html`<div class="muted set-err">Insecure-bind override is on: the server may start beyond this Mac without a token.</div>` : ''}`);
     }
 
     function featureRow(f) {
@@ -335,7 +330,7 @@ export default {
         return;
       }
       featEl.dataset.state = 'populated';
-      setHtml(featEl, html`<div class="muted set-help">These run in the background from the moment Dourmouse starts, so a change is saved now and applied at the next launch.</div>
+      setHtml(featEl, html`<div class="muted set-help">Applied at next launch.</div>
         ${groups.map((g) => html`<div class="lbl set-sec">${g.title}</div>${g.switches.map(featureRow)}${g.folders.map((f) => html`<div class="set-folders"><label for="setFolders"><b>${f.label}</b><span class="muted set-block">${f.help}</span></label>
           <textarea id="setFolders" rows="3" data-folders="${f.key}" spellcheck="false" data-spec="One full folder path per line. Empty means Documents, Desktop and Downloads.">${(f.value || []).join('\n')}</textarea>
           <div class="set-btns"><button type="button" class="os-btn" data-folders-save="${f.key}" data-spec="Saves this list of folders for the librarian after asking. Each must be a real folder on this Mac. Applies at the next launch.">SAVE FOLDERS</button></div></div>`)}`)}`);
@@ -350,7 +345,7 @@ export default {
       }
       const rest = tg.items.filter((t) => t.id !== 'auto_approve');
       behEl.dataset.state = 'populated';
-      setHtml(behEl, html`<div class="muted set-help">These apply at once, with no restart, and are saved to your config file.</div>${rest.map((t) => html`${toggleRow(t)}<div class="muted set-help">${t.help}</div>`)}`);
+      setHtml(behEl, html`${rest.map((t) => html`${toggleRow(t)}<div class="muted set-help">${t.help}</div>`)}`);
     }
 
     /* ---------------- actions ---------------- */

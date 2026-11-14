@@ -6,8 +6,8 @@
 
 import { html, setHtml } from '../kit/html.js';
 import { icon } from '../kit/icons.js';
-import { SCREENS, CONSOLE_LINKS } from '../core/registry.js';
-import { ACCENTS, TEXT_SIZES } from '../core/prefs.js';
+import { SCREENS, PLACES, VIEW_LABELS, placeOf, CONSOLE_LINKS } from '../core/registry.js';
+import { TEXT_SIZES } from '../core/prefs.js';
 import { putPaneRequest } from '../core/pane-inbox.js';
 import { rank, withRecentFirst } from './palette-search.js';
 import { keysFor } from '../core/shortcuts.js';
@@ -15,7 +15,7 @@ import { keysFor } from '../core/shortcuts.js';
 const RECENT_KEY = 'dm.os.palRecent';
 const RECENT_MAX = 6;
 const RESULT_MAX = 40;
-const KIND = { SCREEN: 'Screen', ACTION: 'Action', PANEL: 'Panel', CONSOLE: 'Classic console', ASK: 'Ask', WEB: 'Web' };
+const KIND = { SCREEN: 'Go to', ACTION: 'Action', PANEL: 'Panel', CONSOLE: 'Classic console', ASK: 'Ask', WEB: 'Web' };
 const GROUP = { SCREEN: 'Screens', ACTION: 'Actions', PANEL: 'Panels', CONSOLE: 'Classic console' };
 
 export function createPalette({ scope, shortcuts = [], root, go, refresh, openPanel, api, chat, prefs, toasts, startup = null }) {
@@ -84,12 +84,17 @@ export function createPalette({ scope, shortcuts = [], root, go, refresh, openPa
 
   function buildItems() {
     const items = [];
-    SCREENS.forEach((s) => items.push({ id: 'screen:' + s.id, label: s.label, help: s.sub, kind: 'SCREEN', glyph: s.icon, keys: keysFor(shortcuts, s.id), run: () => go(s.slug) }));
+    /* T6: the eight places first (Command 1 to 8), then every view inside them by its place */
+    PLACES.forEach((p) => items.push({ id: 'place:' + p.id, label: p.label, help: 'place', kind: 'SCREEN', glyph: p.icon, keys: keysFor(shortcuts, p.id), run: () => go(p.views[0].toLowerCase()) }));
+    SCREENS.forEach((s) => {
+      const place = placeOf(s.id);
+      items.push({ id: 'screen:' + s.id, label: (place ? place.label + ': ' : '') + (VIEW_LABELS[s.id] || s.label), help: s.label, kind: 'SCREEN', glyph: s.icon, run: () => go(s.slug) });
+    });
     items.push(
       { id: 'act:scan', label: 'Scan this Mac now', help: 'a read-only security scan', kind: 'ACTION', run: scanNow },
       { id: 'act:new', label: 'New conversation', help: 'start a fresh thread on HOME', kind: 'ACTION', keys: keysFor(shortcuts, 'new'), run: newConversation },
-      { id: 'act:shortcuts', label: 'Keyboard shortcuts', help: 'every shortcut in one list', kind: 'ACTION', keys: keysFor(shortcuts, 'help'), run: () => openPanel('shortcuts') },
-      { id: 'act:refresh', label: 'Refresh this screen', help: 'read it again', kind: 'ACTION', run: () => refresh() },
+      { id: 'act:shortcuts', label: 'Keyboard shortcuts', help: 'every shortcut in one list', kind: 'ACTION', keys: keysFor(shortcuts, 'shortcuts'), run: () => openPanel('shortcuts') },
+      { id: 'act:refresh', label: 'Refresh this view', help: 'read it again', kind: 'ACTION', keys: keysFor(shortcuts, 'refresh'), run: () => refresh() },
       {
         id: 'act:auto', label: chat.autonomous() ? 'Turn longer runs off' : 'Turn longer runs on', help: 'up to 24 steps per run instead of 8; risky actions still ask', kind: 'ACTION',
         run: () => { chat.setAutonomous(!chat.autonomous()); toasts.show({ level: 'info', title: 'Longer runs ' + (chat.autonomous() ? 'on' : 'off'), detail: 'This tab only. It is not auto-approve.' }); },
@@ -104,14 +109,9 @@ export function createPalette({ scope, shortcuts = [], root, go, refresh, openPa
       id: 'textsize:' + t.id, label: 'Text size: ' + t.name, help: 'size of the text across the app', kind: 'ACTION',
       run: () => { prefs.applyTextSize(t.id); prefs.save('textSize', t.id); },
     }));
-    ACCENTS.forEach((a) => items.push({
-      id: 'accent:' + a.id, label: 'Accent: ' + a.name, help: 'colour of buttons and highlights', kind: 'ACTION',
-      run: () => { prefs.applyAccent(a.hex); prefs.save('accent', a.hex); },
-    }));
     items.push(
-      { id: 'panel:cc', label: 'Control Centre', help: 'agents, security, network, brain', kind: 'PANEL', run: () => openPanel('cc') },
-      { id: 'panel:notifications', label: 'Notifications', help: 'alerts and this session', kind: 'PANEL', run: () => openPanel('notifications') },
-      { id: 'panel:wallpaper', label: 'Wallpaper', help: 'gradients or your own photo', kind: 'PANEL', run: () => openPanel('wallpaper') },
+      { id: 'panel:notifications', label: 'Alerts', help: 'alerts and this session, in the inspector', kind: 'PANEL', keys: keysFor(shortcuts, 'alerts'), run: () => openPanel('notifications') },
+      { id: 'panel:inspector', label: 'Show or hide the inspector', help: 'details for the selected item', kind: 'PANEL', keys: keysFor(shortcuts, 'inspector'), run: () => openPanel('inspector') },
     );
     CONSOLE_LINKS.forEach(([id, label]) => items.push({ id: 'console:' + id, label: label, help: 'opens the classic console', kind: 'CONSOLE', run: () => { window.location.href = '/console'; } }));
     return items;

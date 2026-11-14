@@ -1,27 +1,29 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-shell="os">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>DOURMOUSE</title>
-  <!-- The OS shell (finding #143). Thin on purpose: PWA head tags, the chrome
-       skeleton and ONE module script. There is no inline script, no inline
-       event handler and no importmap, because the server sends this page with
-       script-src 'self': the page can approve actions (POST /api/confirm), so
-       injected script would be a way to approve an attacker's request. -->
+  <!-- The shell (finding #143, rebuilt as a Mac window in finding #194). Thin on purpose: PWA head
+       tags, the window skeleton and ONE module script. There is no inline script, no inline event
+       handler and no importmap, because the server sends this page with script-src 'self': the
+       page can approve actions (POST /api/confirm), so injected script would be a way to approve
+       an attacker's request. macOS draws the window frame, the traffic lights and the menu bar. -->
   <link rel="manifest" href="/manifest.json">
-  <meta name="theme-color" content="#09090B">
+  <meta name="theme-color" content="#1e1e1e">
+  <meta name="color-scheme" content="light dark">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black">
-  <meta name="apple-mobile-web-app-title" content="DourMouse">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Dourmouse">
   <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
   <link rel="icon" type="image/png" href="/assets/icon-192.png">
 <link rel="stylesheet" href="/assets/dourmouse-ui.css">
 <link rel="stylesheet" href="/assets/dourmouse-os.css">
-<link rel="stylesheet" href="/assets/os/shell.css">
 <link rel="stylesheet" href="/assets/os/kit/kit.css">
 <link rel="stylesheet" href="/assets/os/palette.css">
+<link rel="stylesheet" href="/assets/os/tokens.css">
+<link rel="stylesheet" href="/assets/os/shell.css">
 <link rel="modulepreload" href="/assets/os/boot.js">
 <link rel="modulepreload" href="/assets/os/core/api.js">
 <link rel="modulepreload" href="/assets/os/core/events.js">
@@ -29,6 +31,8 @@
 <link rel="modulepreload" href="/assets/os/core/approvals.js">
 <link rel="modulepreload" href="/assets/os/core/scope.js">
 <link rel="modulepreload" href="/assets/os/core/prefs.js">
+<link rel="modulepreload" href="/assets/os/core/appearance.js">
+<link rel="modulepreload" href="/assets/os/core/commands.js">
 <link rel="modulepreload" href="/assets/os/core/keymap.js">
 <link rel="modulepreload" href="/assets/os/core/ring.js">
 <link rel="modulepreload" href="/assets/os/core/host.js">
@@ -40,42 +44,32 @@
 </head>
 <body>
 <button type="button" class="skip-link" id="skipLink">Skip to content</button>
-<div class="os-wallpaper" id="wall" data-wall="aurora" data-animated="true"></div>
-<div id="walldim"></div>
+<!-- reserved for the owner's own wallpaper (thread 1.2); empty and transparent until then -->
+<div id="wall" aria-hidden="true" data-wall="none"></div>
 
-<header class="os-menubar" id="menubar" aria-label="Menu bar"></header>
+<div id="palette" role="dialog" aria-modal="true" aria-label="Search" hidden></div>
 
-<div class="os-panel" id="controlcenter" role="dialog" aria-label="Control Centre" hidden></div>
-<div class="os-panel" id="notifcenter" role="dialog" aria-label="Notifications" hidden></div>
-<div class="os-panel" id="shortcuts" role="dialog" aria-label="Keyboard shortcuts" hidden></div>
-<div id="palette" role="dialog" aria-modal="true" aria-label="Launcher" hidden></div>
-
-<div id="shell">
-  <nav id="sidebar" aria-label="Screens"></nav>
-  <main id="stage" aria-label="Stage">
-    <div id="stagebar">
-      <span class="os-lights" id="lights"></span>
-      <h1 id="stagetitle" tabindex="-1">HOME</h1>
+<div id="shell" data-sidebar="shown" data-inspector="hidden">
+  <nav id="sidebar" aria-label="Places"></nav>
+  <main id="stage" aria-label="Content">
+    <div id="stagebar" data-drag>
+      <div id="tbLead"></div>
+      <h1 id="stagetitle" tabindex="-1">Home</h1>
+      <div id="viewswitch" class="segs" role="navigation" hidden></div>
       <span id="stagesub"></span>
       <span class="grow"></span>
       <div id="stageactions"></div>
+      <div id="tbTrail"></div>
     </div>
     <div id="stagebanner" role="region" aria-label="Finish signing in" hidden></div>
     <div id="body"></div>
     <div class="composer" id="composer" hidden></div>
   </main>
+  <aside id="inspector" aria-label="Inspector" hidden></aside>
 </div>
 
-<div id="wallpicker" role="dialog" aria-label="Wallpaper" hidden></div>
-
-<div id="specbar">
-  <button type="button" class="os-btn" id="specBtn" data-spec="Toggles this overlay. Keyboard: Alt+A.">SPEC</button>
-  <span id="speclegend">Alt+A labels every control</span>
-</div>
-
+<div id="sheetlayer" hidden></div>
 <div id="toasts" role="status" aria-live="polite" aria-atomic="false"></div>
-
-<nav class="os-dock" id="dock" aria-label="Dock"></nav>
 
 <script type="module" src="/assets/os/boot.js" data-sw="/sw.js"></script>
 </body>

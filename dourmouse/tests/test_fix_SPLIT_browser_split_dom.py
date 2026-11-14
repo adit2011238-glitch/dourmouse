@@ -25,11 +25,12 @@ _UI = Path(os.environ["SPLIT_UI_ROOT"]) if os.environ.get("SPLIT_UI_ROOT") else 
 CHROME = Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
 pytestmark = pytest.mark.skipif(not CHROME.exists(), reason="Google Chrome is not installed")
 
-HARNESS_HTML = """<!doctype html><html lang="en"><head><meta charset="utf-8"><title>split harness</title>
+HARNESS_HTML = """<!doctype html><html lang="en" data-shell="os"><head><meta charset="utf-8"><title>split harness</title>
 <link rel="stylesheet" href="/assets/dourmouse-ui.css">
 <link rel="stylesheet" href="/assets/dourmouse-os.css">
-<link rel="stylesheet" href="/assets/os/shell.css">
 <link rel="stylesheet" href="/assets/os/kit/kit.css">
+<link rel="stylesheet" href="/assets/os/tokens.css">
+<link rel="stylesheet" href="/assets/os/shell.css">
 <link rel="stylesheet" href="/assets/os/screens/browser/browser.css" data-screen-css="BROWSER">
 </head><body>
 <div id="shell" data-sidebar="shown">

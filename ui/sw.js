@@ -21,7 +21,7 @@
  * user) ever enter the cache. A signed-in user going offline sees the
  * shared bucket — honestly marked stale — never someone's personal data.
  */
-const CACHE = 'dourmouse-shell-v5';  // finding #154: '/' is now the OS shell; v5 drops every cached copy of the old console at '/'
+const CACHE = 'dourmouse-shell-v6';  // finding #194: the shell is a Mac window now; v6 drops the retired chrome modules
 // v5.22.3: the PWA manifest + icons join the shell so the INSTALLED app
 // opens instantly with its icon even offline.
 // finding #154: the OS shell is the default page. Its page, its two design
@@ -31,29 +31,28 @@ const CACHE = 'dourmouse-shell-v5';  // finding #154: '/' is now the OS shell; v
 const SHELL = ['/', '/shell', '/console', '/index.html', '/login.html', '/map', '/map.html',
   '/manifest.json', '/assets/icon-192.png', '/assets/icon-512.png',
   '/assets/apple-touch-icon.png',
-  '/assets/dourmouse-ui.css', '/assets/dourmouse-os.css', '/assets/os/shell.css', '/assets/os/kit/kit.css', '/assets/os/palette.css',
+  '/assets/dourmouse-ui.css', '/assets/dourmouse-os.css', '/assets/os/tokens.css', '/assets/os/shell.css', '/assets/os/kit/kit.css', '/assets/os/palette.css',
   '/assets/os/boot.js',
   '/assets/os/chrome/composer.js',
-  '/assets/os/chrome/control-centre.js',
-  '/assets/os/chrome/dock.js',
   '/assets/os/chrome/driving-strip.js',
   '/assets/os/chrome/google-signin.js',
-  '/assets/os/chrome/menubar.js',
+  '/assets/os/chrome/inspector.js',
   '/assets/os/chrome/notif-centre.js',
   '/assets/os/chrome/palette-search.js',
   '/assets/os/chrome/palette.js',
   '/assets/os/chrome/panels.js',
+  '/assets/os/chrome/sheet.js',
   '/assets/os/chrome/sidebar.js',
-  '/assets/os/chrome/shortcuts-panel.js',
   '/assets/os/chrome/spec-overlay.js',
   '/assets/os/chrome/stage.js',
   '/assets/os/chrome/startup-check.js',
   '/assets/os/chrome/status.js',
   '/assets/os/chrome/toasts.js',
-  '/assets/os/chrome/wallpaper.js',
   '/assets/os/core/api.js',
+  '/assets/os/core/appearance.js',
   '/assets/os/core/approvals.js',
   '/assets/os/core/chat.js',
+  '/assets/os/core/commands.js',
   '/assets/os/core/ctx.js',
   '/assets/os/core/events.js',
   '/assets/os/core/host.js',

@@ -30,6 +30,28 @@ contextBridge.exposeInMainWorld("pywebview", {
 // Finding #116 (OS-3): the console's browser pane drives the real
 // BrowserView through these, instead of an iframe plus a rewriting proxy.
 contextBridge.exposeInMainWorld("dourmouseShell", {
+  // T6 (finding #194): read-only macOS appearance (light or dark, accent, contrast, system colours),
+  // the commands the real menu bar sends, and the Show/Hide labels the page reports back. main.js
+  // answers only the console window's top frame.
+  appearance: {
+    get: () => ipcRenderer.invoke("appearance:get"),
+    onChange: (cb) => {
+      const h = (_evt, a) => cb(a);
+      ipcRenderer.on("appearance:changed", h);
+      return () => ipcRenderer.removeListener("appearance:changed", h);
+    },
+  },
+  menu: {
+    onCommand: (cb) => {
+      const h = (_evt, id) => cb(id);
+      ipcRenderer.on("menu:command", h);
+      return () => ipcRenderer.removeListener("menu:command", h);
+    },
+    setState: (state) => ipcRenderer.send("menu:state", {
+      sidebar: Boolean(state && state.sidebar),
+      inspector: Boolean(state && state.inspector),
+    }),
+  },
   pane: {
     navigate: (url) => ipcRenderer.invoke("pane:navigate", url),
     nav: (what) => ipcRenderer.invoke("pane:nav", what),

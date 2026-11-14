@@ -35,9 +35,22 @@ const LS = {
   motion: 'dm.wallAnim',
   textSize: 'dm.textSize',
   dnd: 'dm.os.dnd',
+  pinned: 'dm.pinnedProjects',
   alertsSeen: 'dm.os.alertsSeen',
 };
-export const PREF_KEYS = { accent: 'os.accent', wall: 'os.wall', dim: 'os.dim', motion: 'os.motion', textSize: 'os.textSize' };
+export const PREF_KEYS = { accent: 'os.accent', wall: 'os.wall', dim: 'os.dim', motion: 'os.motion', textSize: 'os.textSize', pinned: 'os.pinnedProjects' };
+
+/* T6: pinned projects are project folder paths, at most 12, no repeats, no control characters */
+export const PIN_MAX = 12;
+export function cleanPins(v) {
+  const list = Array.isArray(v) ? v : [];
+  const out = [];
+  list.forEach((p) => {
+    if (typeof p !== 'string' || !p || p.length > 1024 || /[\u0000-\u001f]/.test(p) || out.includes(p)) return;
+    if (out.length < PIN_MAX) out.push(p);
+  });
+  return out;
+}
 
 export function isHex(v) {
   return typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v);
@@ -127,6 +140,24 @@ export function createPrefs({ storage, api, root } = {}) {
     motion: () => read(LS.motion) !== 'false',
     textSize: () => (TEXT_SIZES.some((t) => t.id === read(LS.textSize)) ? read(LS.textSize) : 'default'),
     dnd: () => read(LS.dnd) === '1',
+    pinned() {
+      try {
+        return cleanPins(JSON.parse(read(LS.pinned) || '[]'));
+      } catch (_err) {
+        return [];
+      }
+    },
+    /* saves the pins locally at once and on the server as the durable copy; resolves like save() */
+    setPinned(list) {
+      const clean = cleanPins(list);
+      write(LS.pinned, JSON.stringify(clean));
+      emit('pinned', clean);
+      if (!api) return Promise.resolve({ ok: true, local: true });
+      return api.post('/api/state/prefs', { key: PREF_KEYS.pinned, value: clean }).then(
+        () => ({ ok: true, local: true }),
+        (err) => ({ ok: false, local: true, error: err && err.message ? err.message : String(err) }),
+      );
+    },
     setDnd(on) {
       write(LS.dnd, on ? '1' : '0');
       emit('dnd', Boolean(on));
@@ -175,12 +206,11 @@ export function createPrefs({ storage, api, root } = {}) {
       return true;
     },
     /* First paint: everything readable without the network. */
+    /* T6 (finding #194): the accent now comes from macOS (core/appearance.js) and the old gradient
+       wallpapers are retired, so first paint sets only the text size. applyAccent, applyWall and
+       applyDim stay for the wallpaper and appearance settings thread (1.2) to build on. */
     applyAll() {
       prefs.applyTextSize(prefs.textSize());
-      prefs.applyAccent(prefs.accent());
-      prefs.applyDim(prefs.dim());
-      prefs.applyMotion(prefs.motion());
-      prefs.applyWall(prefs.wallPhoto() && read(LS.wall) === 'photo' ? 'photo' : prefs.wall());
     },
 
     /* Save to this browser at once and to the server as the durable copy.
@@ -207,28 +237,31 @@ export function createPrefs({ storage, api, root } = {}) {
       const changed = [];
       if (isHex(p[PREF_KEYS.accent]) && p[PREF_KEYS.accent].toLowerCase() !== prefs.accent().toLowerCase()) {
         write(LS.accent, p[PREF_KEYS.accent]);
-        prefs.applyAccent(p[PREF_KEYS.accent]);
         changed.push('accent');
       }
       if (WALLPAPERS.includes(p[PREF_KEYS.wall]) && p[PREF_KEYS.wall] !== read(LS.wall) && read(LS.wall) !== 'photo') {
         write(LS.wall, p[PREF_KEYS.wall]);
-        prefs.applyWall(p[PREF_KEYS.wall]);
         changed.push('wall');
       }
       if (Number.isFinite(Number(p[PREF_KEYS.dim])) && p[PREF_KEYS.dim] !== null && clampDim(p[PREF_KEYS.dim]) !== prefs.dim()) {
         write(LS.dim, String(clampDim(p[PREF_KEYS.dim])));
-        prefs.applyDim(p[PREF_KEYS.dim]);
         changed.push('dim');
       }
       if (typeof p[PREF_KEYS.motion] === 'boolean' && p[PREF_KEYS.motion] !== prefs.motion()) {
         write(LS.motion, String(p[PREF_KEYS.motion]));
-        prefs.applyMotion(p[PREF_KEYS.motion]);
         changed.push('motion');
       }
       if (TEXT_SIZES.some((t) => t.id === p[PREF_KEYS.textSize]) && p[PREF_KEYS.textSize] !== prefs.textSize()) {
         write(LS.textSize, p[PREF_KEYS.textSize]);
         prefs.applyTextSize(p[PREF_KEYS.textSize]);
         changed.push('textSize');
+      }
+      if (Array.isArray(p[PREF_KEYS.pinned])) {
+        const pins = cleanPins(p[PREF_KEYS.pinned]);
+        if (JSON.stringify(pins) !== JSON.stringify(prefs.pinned())) {
+          write(LS.pinned, JSON.stringify(pins));
+          changed.push('pinned');
+        }
       }
       changed.forEach((n) => emit(n, prefs[n] ? prefs[n]() : undefined));
       return changed;
