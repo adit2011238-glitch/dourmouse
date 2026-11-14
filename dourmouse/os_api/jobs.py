@@ -1,6 +1,6 @@
 """Backend for the Jobs view (plan 1.3, finding 198).
 
-* ``GET  /api/os/jobs``: the board, jobs grouped Needs you, Running, Paused, Done, Stopped.
+* ``GET  /api/os/jobs[?project=]``: the board, jobs grouped Needs you, Running, Paused, Done, Stopped.
 * ``GET  /api/os/jobs/job?id=``: one job with its steps, budget spent and log.
 * ``POST /api/os/jobs/start {title, steps, owner, budget, priority}``: an unattended job run by one agent.
 * ``POST /api/os/jobs/pause|resume|cancel {id}`` and ``/budget {id, max_runs, max_tool_calls}``.
@@ -39,7 +39,10 @@ def _job(req: Request) -> tuple[Any, str]:
 
 @route("GET", "/api/os/jobs")
 def board(req: Request) -> tuple[int, dict[str, Any]]:
-    return 200, {"ok": True, **jobs.board(_store())}
+    project = req.arg("project").strip() or None
+    if project is not None and not _ID.match(project):
+        raise ApiError(400, "not a project id")
+    return 200, {"ok": True, **jobs.board(_store(), project_id=project)}
 
 
 @route("GET", "/api/os/jobs/job")

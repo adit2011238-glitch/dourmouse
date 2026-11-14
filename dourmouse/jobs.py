@@ -101,6 +101,7 @@ def over_budget(store: GoalStore, goal: dict[str, Any], tasks: list[dict[str, An
 def create_job(
     title: str, steps: list[str] | None = None, *, owner: str = "orchestrator",
     budget: dict[str, Any] | None = None, priority: str = "normal", store: GoalStore | None = None,
+    project_id: str | None = None,
 ) -> dict[str, Any]:
     """An unattended multi-step job run by one agent. Steps run in the order written; with none, the
     title is the one step (nothing invents steps the owner did not write)."""
@@ -121,6 +122,8 @@ def create_job(
     if resolved is None:
         raise ValueError(f"no agent called {owner!r}")
     limits = {"kind": KIND_AGENT, "owner_agent": resolved.agent_id, "budget": clean_budget(budget)}
+    if project_id:
+        limits["project_id"] = str(project_id)
     store = store or get_goal_store()
     goal = store.create_goal(title, owner=resolved.agent_id, priority=priority, resource_limits=limits)
     previous: str | None = None
@@ -172,8 +175,9 @@ def summary(store: GoalStore, goal: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def board(store: GoalStore, limit: int = 100) -> dict[str, Any]:
-    jobs = [g for g in store.list_goals() if is_job(g)]
+def board(store: GoalStore, limit: int = 100, project_id: str | None = None) -> dict[str, Any]:
+    jobs = [g for g in store.list_goals() if is_job(g)
+            and (project_id is None or (g.get("resource_limits") or {}).get("project_id") == project_id)]
     rows = [summary(store, g) for g in jobs[:limit]]
     return {
         "columns": [{"key": k, "label": label, "jobs": [r for r in rows if r["column"] == k]} for k, label, _ in COLUMNS],

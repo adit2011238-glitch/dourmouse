@@ -5787,6 +5787,16 @@ class _Handler(BaseHTTPRequestHandler):
                     if context:
                         seed += f"\n\nWhat's known about this project so far: {context}"
                     session.messages.append({"role": "system", "content": seed})
+                elif tab_id.startswith("pj:"):
+                    # plan 1.4: a thread of a Projects-store project (tab "pj:<project id>:<thread id>") starts with that
+                    # project's own instructions, agents and file names. Only this project's store is read, and an id
+                    # that is not a real project is left alone, like the bookkeeper branch above.
+                    try:
+                        from dourmouse.projects_store import get_project_store
+
+                        session.messages.append({"role": "system", "content": get_project_store().context_for(tab_id.split(":")[1])})
+                    except Exception:  # noqa: BLE001 - a project read must never break chat
+                        pass
                 gate = WebConfirmationGate(lambda _e: None)
                 lock = threading.Lock()
                 self.server.sessions_by_tab[tab_id] = session
