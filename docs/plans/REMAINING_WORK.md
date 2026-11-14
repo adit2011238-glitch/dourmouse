@@ -2099,3 +2099,9 @@ Live Electron check of J and D; grant Accessibility and drive TextEdit and Music
 Owner actions: (1) sign in to Google once in the BROWSER pane, then run scripts/live_checks/docs_and_youtube.md; (2) grant Accessibility (APPS screen has the button), allow TextEdit, test a drive; (3) decide the DRM build (B3_DRM_PLAN.md); (4) OK the real 40-task benchmark (G_BENCHMARK_HOWTO.md, uses your cloud key); (5) pick folders once in the extension and Chrome-import pickers; (6) choose ad-hoc or Apple Developer ID signing (SHIP_PLAN.md).
 Exit gates still to measure: 60-site browser parity at 95 percent; 40-task benchmark at 85 percent with a real model; clean-account install.
 Code still open: calendar, files and notes screens (need backend routes); 13 open and 28 partly fixed UX items; self-contained build blockers (SHIP_PLAN.md); the CDP port trusts any local process; Send-button clicks ungated; start-up burst of about 50 threads; extensions global across profiles; History import timeout.
+
+---
+
+### 2026-11-14 -- UI rebuild, what is left after the foundation (finding #194)
+
+Done: window, tokens, menus, eight places, pins, inspector, sheets, style lint, Settings (see CURRENT_STATUS.md and EVIDENCE/194_*). Open, in the order of MASTER_FEATURE_AND_UI_PLAN section 5: Home (greeting, ask box, needs you, in the office, continue a project), Projects screens, Office floor (1.5 to 1.7); wallpapers and appearance settings (1.2); notifications and deep links (1.8); restyle of Research, Security, Library, Browser and the other screens on the tokens, with their uppercase labels and old stylesheets (1.9, T6 milestone 2); SF Symbols for the sidebar; approvals as sheets (PL-01 S1-8). The ui_style_lint covers only the shell's own files until those screens join it.

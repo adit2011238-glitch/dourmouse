@@ -508,3 +508,9 @@ Setup and login restyle, Text size, UX round: 11 fixed, 28 partly. Suite 8007 pa
 
 ## 2026-10-05 Wave 4 complete (findings #169 to #171): EXECUTION_PLAN.md fully built
 All four waves built, reviewed and pushed (commit e74001a). Suite 8071 passed, 12 skipped, 0 failed. Crash recovery and the map-window CPU fix seen live (HOME 8 to 14 s, was over 60 s). Numbers in PERF_BUDGET.md; build plan in SHIP_PLAN.md.
+
+---
+
+## 2026-11-14 -- UI foundation (finding #194)
+
+The app window is now a real Mac window: macOS draws the frame, traffic lights and menu bar, and the page reads the accent, light or dark and system colours from macOS (electron/appearance.js, ui/assets/os/core/appearance.js, with a 4.5:1 contrast guard). The sidebar has the eight approved places (Home, Projects, Office, Research, Library, Browser, Security, Settings, Cmd 1 to 8) with pinned projects under them; every earlier screen is a view inside a place. New inspector, sheets and one shared command table. Settings is restyled in the System Settings way. Evidence: EVIDENCE/194_*.png. Not built yet: the new Home, Projects and Office designs, wallpapers, SF Symbols.

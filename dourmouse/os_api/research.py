@@ -17,6 +17,16 @@ All routes are read-only over what the research pipeline already stored:
   and every stored claim with its passage and source URL, returned as text. The
   browser turns it into a download; the server writes no file.
 
+Research jobs (PL-10 T1, research_pipeline/research_job.py), the background
+runs with the owner's two decisions:
+
+* ``GET  /api/os/research/jobs`` and ``GET /api/os/research/job?id=``
+* ``POST /api/os/research/jobs/start {topic, style, pause_after_brief}``
+* ``POST /api/os/research/job/brief {id, owner_notes}``, then ``/job/continue {id}``
+* ``POST /api/os/research/job/questions {id, question, goals, sub_questions}``,
+  then ``/job/approve {id}``
+* ``GET  /api/os/research/job/export?id=&format=markdown|json&style=apa|mla``
+
 A claim's ``status`` is ACTIVE or REJECTED. "Contested" means it has a
 ``contradicted_by`` edge. There is no stored "verified" flag: every stored claim
 passed the verbatim substring check on the fetched page when it was extracted.
@@ -40,13 +50,13 @@ _STAGES: tuple[tuple[str, str, tuple[str, ...], str], ...] = (
     ("decomposition", "Decomposition", ("research_plan",), "research_plan splits it into sub-questions"),
     ("plan", "Research plan", ("research_plan",), "research_plan stores the plan"),
     ("discover", "Source discovery", ("research_discover_sources",), "research_discover_sources searches and fetches"),
-    ("validate", "Source validation", (), "no tool judges a source's credibility; only the verbatim passage check exists, inside extraction"),
+    ("validate", "Source validation", ("research_start_job",), "research_start_job grades every paper it reads: venue, citations per year, age, full text or abstract, agreement with the other papers"),
     ("extract", "Evidence extraction", ("research_extract_evidence",), "research_extract_evidence keeps a claim only if its quote is a verbatim substring of the page"),
     ("hypothesis", "Hypothesis gen", ("research_hypothesize",), "research_hypothesize"),
     ("critique", "Criticism", ("research_critique",), "research_critique"),
     ("design", "Experiment design", ("research_design_experiment",), "research_design_experiment"),
     ("run", "Experiment run", ("research_experiment",), "research_experiment"),
-    ("stats", "Statistics", (), "describe_samples exists in code but no registered tool calls it"),
+    ("stats", "Statistics", ("research_statistics",), "research_statistics (describe_samples); a research job also summarizes numbers several papers report"),
     ("replicate", "Replication", ("research_replicate",), "research_replicate"),
     ("contradict", "Contradiction", ("research_detect_contradictions",), "research_detect_contradictions"),
     ("revise", "Revision", ("research_follow_up",), "research_follow_up runs the backward edge"),
@@ -259,3 +269,108 @@ def export(req: Request) -> tuple[int, dict[str, Any]]:
     if fmt == "json":
         return 200, {"ok": True, "filename": f"{stem}.json", "mime": "application/json", "content": json.dumps(d, indent=2, ensure_ascii=False)}
     return 200, {"ok": True, "filename": f"{stem}.md", "mime": "text/markdown", "content": _markdown(d)}
+
+
+# ---------------------------------------------------------------- research jobs (PL-10 T1)
+
+_JOB_ID = re.compile(r"^goal_[0-9a-f]{16}$")
+
+
+def _job_id(value: str) -> str:
+    value = (value or "").strip()
+    if not _JOB_ID.match(value):
+        raise ApiError(400, "bad research job id")
+    return value
+
+
+def _rj():  # type: ignore[no-untyped-def]
+    from dourmouse.research_pipeline import research_job
+
+    return research_job
+
+
+@route("GET", "/api/os/research/jobs")
+def jobs_list(req: Request) -> tuple[int, dict[str, Any]]:
+    rj = _rj()
+    out = []
+    for j in rj.jobs().list(50):
+        view = rj.job_view(j["id"])
+        if view is None:
+            continue
+        out.append({"id": j["id"], "topic": view["topic"], "status": view["status"], "waiting_for": view["waiting_for"],
+                    "cards": len(view["cards"]), "answered": bool(view["report"]), "created_at": j["created_at"]})
+    return 200, {"ok": True, "jobs": out}
+
+
+@route("GET", "/api/os/research/job")
+def job_detail(req: Request) -> tuple[int, dict[str, Any]]:
+    view = _rj().job_view(_job_id(req.arg("id")))
+    if view is None:
+        raise ApiError(404, "no such research job")
+    return 200, {"ok": True, **view}
+
+
+@route("POST", "/api/os/research/jobs/start")
+def job_start(req: Request) -> tuple[int, dict[str, Any]]:
+    try:
+        job_id = _rj().start_job(str(req.body.get("topic") or ""), style=str(req.body.get("style") or "apa"),
+                                 pause_after_brief=bool(req.body.get("pause_after_brief", True)))
+    except ValueError as exc:
+        raise ApiError(400, str(exc)) from None
+    return 200, {"ok": True, "id": job_id}
+
+
+@route("POST", "/api/os/research/job/brief")
+def job_brief(req: Request) -> tuple[int, dict[str, Any]]:
+    job_id = _job_id(str(req.body.get("id") or ""))
+    try:
+        _rj().correct_brief(job_id, str(req.body.get("owner_notes") or ""))
+    except KeyError:
+        raise ApiError(404, "no such research job") from None
+    except ValueError as exc:
+        raise ApiError(409, str(exc)) from None
+    return 200, {"ok": True}
+
+
+@route("POST", "/api/os/research/job/continue")
+def job_continue(req: Request) -> tuple[int, dict[str, Any]]:
+    if not _rj().continue_after_brief(_job_id(str(req.body.get("id") or ""))):
+        raise ApiError(409, "this job is not waiting for the brief to be checked")
+    return 200, {"ok": True}
+
+
+@route("POST", "/api/os/research/job/questions")
+def job_questions(req: Request) -> tuple[int, dict[str, Any]]:
+    job_id = _job_id(str(req.body.get("id") or ""))
+    payload = {k: req.body.get(k) for k in ("question", "goals", "sub_questions")}
+    try:
+        body = _rj().edit_questions(job_id, payload)
+    except KeyError:
+        raise ApiError(404, "no such research job") from None
+    except ValueError as exc:
+        raise ApiError(400, str(exc)) from None
+    return 200, {"ok": True, "questions": body["questions"]}
+
+
+@route("POST", "/api/os/research/job/approve")
+def job_approve(req: Request) -> tuple[int, dict[str, Any]]:
+    try:
+        ok = _rj().approve_questions(_job_id(str(req.body.get("id") or "")))
+    except ValueError as exc:
+        raise ApiError(400, str(exc)) from None
+    if not ok:
+        raise ApiError(409, "this job is not waiting for its questions to be approved")
+    return 200, {"ok": True}
+
+
+@route("GET", "/api/os/research/job/export")
+def job_export(req: Request) -> tuple[int, dict[str, Any]]:
+    job_id = _job_id(req.arg("id"))
+    try:
+        name, mime, content = _rj().export(job_id, (req.arg("format", "markdown") or "markdown").lower(),
+                                           (req.arg("style") or "").lower() or None)
+    except KeyError:
+        raise ApiError(404, "no such research job") from None
+    except ValueError as exc:
+        raise ApiError(409, str(exc)) from None
+    return 200, {"ok": True, "filename": name, "mime": mime, "content": content}

@@ -1,0 +1,158 @@
+{
+  "about": "PL-10 T1 research benchmark: 10 fixed questions, each with a reference list of known good sources. Every DOI was checked against Crossref and every arXiv id against the arXiv API on 2026-11-13 (title, year and first authors matched). The questions are fixed, so a benchmark run needs no owner approval.",
+  "verified_on": "2026-11-13",
+  "items": [
+    {
+      "id": "spacing",
+      "topic": "spacing effect distributed practice",
+      "question": "Does spacing out study sessions improve long-term retention compared with massed study?",
+      "sub_questions": [
+        "Does spaced study produce better long-term retention than massed study?",
+        "How does the best gap between study sessions depend on how long the material must be remembered?",
+        "Do spacing benefits hold for real students in educational settings?"
+      ],
+      "references": [
+        {"doi": "10.1037/0033-2909.132.3.354", "title": "Distributed practice in verbal recall tasks: A review and quantitative synthesis"},
+        {"doi": "10.1111/j.1467-9280.2008.02209.x", "title": "Spacing Effects in Learning"},
+        {"doi": "10.1177/1529100612453266", "title": "Improving Students' Learning With Effective Learning Techniques"}
+      ]
+    },
+    {
+      "id": "testing",
+      "topic": "testing effect retrieval practice",
+      "question": "Does retrieval practice improve learning more than restudying?",
+      "sub_questions": [
+        "Does taking practice tests improve long-term retention more than restudying the material?",
+        "How large is the testing effect across studies?",
+        "Does retrieval practice outperform elaborative study methods such as concept mapping?"
+      ],
+      "references": [
+        {"doi": "10.1111/j.1467-9280.2006.01693.x", "title": "Test-Enhanced Learning"},
+        {"doi": "10.1126/science.1199327", "title": "Retrieval Practice Produces More Learning than Elaborative Studying with Concept Mapping"},
+        {"doi": "10.1037/a0037559", "title": "The effect of testing versus restudy on retention: A meta-analytic review of the testing effect"},
+        {"doi": "10.3102/0034654316689306", "title": "Rethinking the Use of Tests: A Meta-Analysis of Practice Testing"}
+      ]
+    },
+    {
+      "id": "mindset",
+      "topic": "growth mindset intervention academic achievement",
+      "question": "Do growth mindset interventions improve students' academic achievement?",
+      "sub_questions": [
+        "Do growth mindset interventions raise students' grades?",
+        "How large are the effects of growth mindset interventions across studies?",
+        "Which students benefit most from growth mindset interventions?"
+      ],
+      "references": [
+        {"doi": "10.1038/s41586-019-1466-y", "title": "A national experiment reveals where a growth mindset improves achievement"},
+        {"doi": "10.1177/0956797617739704", "title": "To What Extent and Under Which Circumstances Are Growth Mind-Sets Important to Academic Achievement? Two Meta-Analyses"},
+        {"doi": "10.1111/j.1467-8624.2007.00995.x", "title": "Implicit Theories of Intelligence Predict Achievement Across an Adolescent Transition"}
+      ]
+    },
+    {
+      "id": "sleep",
+      "topic": "sleep memory consolidation",
+      "question": "Does sleep after learning improve memory consolidation?",
+      "sub_questions": [
+        "Does sleep after learning improve later recall compared with staying awake?",
+        "Which stages of sleep are linked to memory consolidation?",
+        "Does sleep help procedural skills as well as facts?"
+      ],
+      "references": [
+        {"doi": "10.1038/nrn2762", "title": "The memory function of sleep"},
+        {"doi": "10.1152/physrev.00032.2012", "title": "About Sleep's Role in Memory"},
+        {"doi": "10.1016/j.neuron.2004.08.031", "title": "Sleep-Dependent Learning and Memory Consolidation"}
+      ]
+    },
+    {
+      "id": "classsize",
+      "topic": "class size student achievement",
+      "question": "Do smaller class sizes improve student achievement?",
+      "sub_questions": [
+        "What did randomized class size experiments such as Project STAR find about test scores?",
+        "Do class size effects last into adulthood?",
+        "What do natural experiments in class size show?"
+      ],
+      "references": [
+        {"doi": "10.1162/003355399556052", "title": "Experimental Estimates of Education Production Functions"},
+        {"doi": "10.1093/qje/qjr041", "title": "How Does Your Kindergarten Classroom Affect Your Earnings? Evidence from Project Star"},
+        {"doi": "10.1162/003355399556061", "title": "Using Maimonides' Rule to Estimate the Effect of Class Size on Scholastic Achievement"}
+      ]
+    },
+    {
+      "id": "rag",
+      "topic": "retrieval-augmented language models",
+      "question": "Does retrieval augmentation improve language models on knowledge-intensive tasks?",
+      "sub_questions": [
+        "Does adding retrieval improve open-domain question answering accuracy?",
+        "Can a smaller model with retrieval match a much larger model without it?",
+        "How is retrieval combined with generation in these models?"
+      ],
+      "references": [
+        {"arxiv": "2005.11401", "title": "Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks"},
+        {"arxiv": "2002.08909", "title": "REALM: Retrieval-Augmented Language Model Pre-Training"},
+        {"arxiv": "2007.01282", "title": "Leveraging Passage Retrieval with Generative Models for Open Domain Question Answering"},
+        {"arxiv": "2112.04426", "title": "Improving language models by retrieving from trillions of tokens"}
+      ]
+    },
+    {
+      "id": "cot",
+      "topic": "chain-of-thought prompting large language models",
+      "question": "Does chain-of-thought prompting improve reasoning in large language models?",
+      "sub_questions": [
+        "Does chain-of-thought prompting improve accuracy on arithmetic and reasoning benchmarks?",
+        "Does chain-of-thought work without worked examples (zero-shot)?",
+        "Does sampling several reasoning paths improve on a single chain of thought?"
+      ],
+      "references": [
+        {"arxiv": "2201.11903", "title": "Chain-of-Thought Prompting Elicits Reasoning in Large Language Models"},
+        {"arxiv": "2205.11916", "title": "Large Language Models are Zero-Shot Reasoners"},
+        {"arxiv": "2203.11171", "title": "Self-Consistency Improves Chain of Thought Reasoning in Language Models"}
+      ]
+    },
+    {
+      "id": "scaling",
+      "topic": "neural scaling laws language models",
+      "question": "How does language model performance scale with model size, data and compute?",
+      "sub_questions": [
+        "How does test loss change as model size, data and compute grow?",
+        "How should a fixed compute budget be split between model size and training data?",
+        "Are scaling relationships predictable across deep learning domains?"
+      ],
+      "references": [
+        {"arxiv": "2001.08361", "title": "Scaling Laws for Neural Language Models"},
+        {"arxiv": "2203.15556", "title": "Training Compute-Optimal Large Language Models"},
+        {"arxiv": "1712.00409", "title": "Deep Learning Scaling is Predictable, Empirically"}
+      ]
+    },
+    {
+      "id": "batchnorm",
+      "topic": "batch normalization deep neural network training",
+      "question": "Why does batch normalization help train deep neural networks?",
+      "sub_questions": [
+        "How much does batch normalization speed up training?",
+        "Does batch normalization work by reducing internal covariate shift?",
+        "How do alternatives such as layer normalization compare?"
+      ],
+      "references": [
+        {"arxiv": "1502.03167", "title": "Batch Normalization: Accelerating Deep Network Training by Reducing Internal Covariate Shift"},
+        {"arxiv": "1805.11604", "title": "How Does Batch Normalization Help Optimization?"},
+        {"arxiv": "1607.06450", "title": "Layer Normalization"}
+      ]
+    },
+    {
+      "id": "meddiet",
+      "topic": "Mediterranean diet cardiovascular disease",
+      "question": "Does a Mediterranean diet reduce cardiovascular events?",
+      "sub_questions": [
+        "Did randomized trials of a Mediterranean diet reduce major cardiovascular events?",
+        "Does a Mediterranean diet help people who already had a heart attack?",
+        "What do meta-analyses of observational studies show about adherence and health?"
+      ],
+      "references": [
+        {"doi": "10.1056/NEJMoa1800389", "title": "Primary Prevention of Cardiovascular Disease with a Mediterranean Diet Supplemented with Extra-Virgin Olive Oil or Nuts"},
+        {"doi": "10.1161/01.CIR.99.6.779", "title": "Mediterranean Diet, Traditional Risk Factors, and the Rate of Cardiovascular Complications after Myocardial Infarction"},
+        {"doi": "10.1136/bmj.a1344", "title": "Adherence to Mediterranean diet and health status: meta-analysis"}
+      ]
+    }
+  ]
+}

@@ -254,6 +254,7 @@ class TestBuildResearchPipelineSubagent:
             "research_experiment", "research_replicate", "research_experiment_status",  # finding #127
             "research_hypothesize", "research_critique", "research_design_experiment",  # finding #131
             "research_critique_answer",  # R9
+            "research_start_job", "research_job_status", "research_statistics",  # PL-10 T1
         }
 
 
