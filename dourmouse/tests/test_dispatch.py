@@ -717,7 +717,7 @@ class TestLoop:
         second = _FakeResponse(_FakeMessage(content="ok"))
         client = FakeClient([first, second])
 
-        report = run_dispatch("x", _test_registry(), client=client)
+        report = run_dispatch("echo x", _test_registry(), client=client)
 
         result = next(t for t in report["transcript"] if t["type"] == "tool_result")
         assert "invalid JSON" in result["text"]
@@ -738,7 +738,7 @@ class TestLoop:
         second = _FakeResponse(_FakeMessage(content="ok"))
         client = FakeClient([first, second])
 
-        report = run_dispatch("x", r, client=client)
+        report = run_dispatch("boom", r, client=client)
 
         result = next(t for t in report["transcript"] if t["type"] == "tool_result")
         assert "failed" in result["text"]
@@ -840,7 +840,7 @@ class TestShouldStop:
             return seen["n"] >= 3
 
         report = run_dispatch(
-            "do two things", _test_registry(), client=client, should_stop=should_stop,
+            "echo two things", _test_registry(), client=client, should_stop=should_stop,
         )
         assert client.chat.completions.calls.__len__() == 1  # never asked the model again
         tool_results = [t for t in report["transcript"] if t["type"] == "tool_result"]
@@ -875,7 +875,7 @@ class TestPermissions:
         second = _FakeResponse(_FakeMessage(content="Cannot do that."))
         client = FakeClient([first, second])
 
-        report = run_dispatch("do it", r, client=client, confirmation_gate=None)
+        report = run_dispatch("gated_echo: do it", r, client=client, confirmation_gate=None)
 
         result = next(t for t in report["transcript"] if t["type"] == "tool_result")
         assert "CONFIRMATION REQUIRED" in result["text"]
@@ -899,7 +899,7 @@ class TestPermissions:
 
         gate_prompts: list[str] = []
         report = run_dispatch(
-            "do it", r, client=client,
+            "gated_echo: do it", r, client=client,
             confirmation_gate=lambda text: gate_prompts.append(text) or True,
         )
 
@@ -922,7 +922,7 @@ class TestPermissions:
         second = _FakeResponse(_FakeMessage(content="Skipped."))
         client = FakeClient([first, second])
 
-        report = run_dispatch("do it", r, client=client, confirmation_gate=lambda text: False)
+        report = run_dispatch("gated_echo: do it", r, client=client, confirmation_gate=lambda text: False)
 
         result = next(t for t in report["transcript"] if t["type"] == "tool_result")
         assert "DECLINED BY USER" in result["text"]
@@ -943,7 +943,7 @@ class TestPermissions:
         second = _FakeResponse(_FakeMessage(content="ok"))
         client = FakeClient([first, second])
 
-        report = run_dispatch("x", r, client=client, confirmation_gate=lambda t: True)
+        report = run_dispatch("forbidden x", r, client=client, confirmation_gate=lambda t: True)
 
         result = next(t for t in report["transcript"] if t["type"] == "tool_result")
         assert "REFUSED" in result["text"]
@@ -2034,7 +2034,7 @@ class TestEndToEndThroughGeneralRoster:
         second = _FakeResponse(_FakeMessage(content="No positions."))
         client = FakeClient([first, second])
 
-        report = run_dispatch("check positions", registry, client=client)
+        report = run_dispatch("monitoring: poll positions", registry, client=client)
 
         result = next(t for t in report["transcript"] if t["type"] == "tool_result")
         assert "POSITIONS" in result["text"]
@@ -2054,7 +2054,7 @@ class TestEndToEndThroughGeneralRoster:
         second = _FakeResponse(_FakeMessage(content="I will not send that."))
         client = FakeClient([first, second])
 
-        report = run_dispatch("send it", registry, client=client, confirmation_gate=None)
+        report = run_dispatch("send the draft", registry, client=client, confirmation_gate=None)
 
         result = next(t for t in report["transcript"] if t["type"] == "tool_result")
         assert "CONFIRMATION REQUIRED" in result["text"]
@@ -2783,7 +2783,7 @@ class TestRepeatToolCallGuard:
                 _FakeResponse(_FakeMessage(content="OK-CLAUDE")),
             ]
         )
-        report = run_dispatch("say ok", registry, client=client, max_turns=5)
+        report = run_dispatch("claude_code: say ok", registry, client=client, max_turns=5)
         # The real handler ran exactly once, not twice.
         assert len(calls) == 1
         # The second (duplicate) call's tool result told the model it was
@@ -2820,7 +2820,7 @@ class TestRepeatToolCallGuard:
                 _FakeResponse(_FakeMessage(content="done")),
             ]
         )
-        run_dispatch("do two things", registry, client=client, max_turns=5)
+        run_dispatch("codex_code: do two things", registry, client=client, max_turns=5)
         # Different arguments -> both real calls run, guard never fires.
         assert len(calls) == 2
 

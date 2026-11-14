@@ -3222,6 +3222,14 @@ def _argument_gate(
     ):
         return ("confirm", "Type text with line breaks as real key presses? Each line break is an Enter key, "
                 "which can send a message or submit a form on this page.")
+    if name in ("write_path", "apply_patch", "apply_search_replace"):
+        # SEC2-6 (owner decision 2026-11-13): these write without asking only inside the owner's own
+        # folders; system_access decides, and anywhere else asks first.
+        from dourmouse import system_access
+
+        decision = system_access.write_gate(name, arguments)
+        if decision is not None:
+            return decision
     if name == "security_sentry_dismiss" and spec.permission is not Permission.REQUIRES_CONFIRMATION:
         # The registered tool asks for itself, with the finding's title (security/tools.py); this is for a
         # copy of it that lost that gate. Asking in both places stacked two questions in one card (W1R-10).
@@ -6031,6 +6039,17 @@ def _run_dispatch_loop(
                         result_text = (
                             f"ERROR: unknown tool '{name}' — not in the registered roster."
                         )
+            elif name not in offered_tool_names:
+                # SEC2-1: a run executes only the tools it was offered. The schema list
+                # used to be the only scope, and the name was looked up in the whole
+                # registry, so a mail or web turn steered by what it read could run any
+                # tool (run_command, write_path, gmail_send) just by naming it.
+                owner = tool_owner.get(name) or "another"
+                handoff = " or ask_agent" if "ask_agent" in offered_tool_names else ""
+                result_text = (
+                    f"ERROR: '{name}' is not available in this conversation: it belongs to the {owner} agent, "
+                    f"which this request was not routed to. Use one of the tools you were given{handoff}."
+                )
             elif rbac is not None and not rbac.allows(name):
                 # Deterministic RBAC refusal BEFORE anything executes (spec:
                 # role-based access control).

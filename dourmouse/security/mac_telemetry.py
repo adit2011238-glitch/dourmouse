@@ -326,12 +326,32 @@ def persistence_dirs() -> list[Path]:
     return [home / "Library/LaunchAgents", Path("/Library/LaunchAgents"), Path("/Library/LaunchDaemons")]
 
 
+#: launchd job files are a few kilobytes; anything bigger is not read into memory.
+MAX_LAUNCHD_PLIST_BYTES = 1024 * 1024
+
+
 def parse_launchd_plist(data: bytes) -> dict[str, Any]:
+    """The fields of one launchd job that the persistence check needs.
+
+    Raises ValueError for a file launchd itself would refuse to load (SEC3-9):
+    a top level that is not a dictionary, or a Label, Program or
+    ProgramArguments of the wrong type. Before, such files raised
+    AttributeError or TypeError here."""
     plist = plistlib.loads(data)
-    program = plist.get("Program") or (plist.get("ProgramArguments") or [None])[0]
+    if not isinstance(plist, dict):
+        raise ValueError(f"the top level is a {type(plist).__name__}, not a dictionary")
+    label = plist.get("Label")
+    program = plist.get("Program")
+    args = plist.get("ProgramArguments")
+    if label is not None and not isinstance(label, str):
+        raise ValueError(f"Label is a {type(label).__name__}, not a string")
+    if program is not None and not isinstance(program, str):
+        raise ValueError(f"Program is a {type(program).__name__}, not a string")
+    if args is not None and not (isinstance(args, list) and all(isinstance(a, str) for a in args)):
+        raise ValueError("ProgramArguments is not a list of strings")
     return {
-        "label": plist.get("Label"),
-        "program": program,
+        "label": label,
+        "program": program or (args[0] if args else None),
         "run_at_load": bool(plist.get("RunAtLoad")),
         "keep_alive": bool(plist.get("KeepAlive")),
     }
@@ -346,15 +366,24 @@ def get_persistence_items() -> dict[str, Any]:
         if not d.is_dir():
             continue
         for f in sorted(d.glob("*.plist")):
+            # Every file here is untrusted input that anything running as the
+            # owner can write. Whatever reading or parsing one file raises
+            # becomes an error item for that file (reported by mac_detectors
+            # as persistence_unreadable), never an exception that stops the
+            # scan: SEC3-9, where one array-rooted or truncated plist raised
+            # AttributeError or ExpatError and silently stopped every scan.
             try:
+                info = f.stat()
+                if info.st_size > MAX_LAUNCHD_PLIST_BYTES:
+                    raise ValueError(f"too large to be a launch job ({info.st_size} bytes)")
                 data = f.read_bytes()
                 parsed = parse_launchd_plist(data)
-            except (OSError, plistlib.InvalidFileException, ValueError) as exc:
-                items.append({"path": str(f), "error": f"unreadable: {exc}"})
+            except Exception as exc:  # noqa: BLE001 -- one bad file must not stop the scan, see above
+                items.append({"path": str(f), "error": f"unreadable: {type(exc).__name__}: {exc}"[:300]})
                 continue
             items.append({
                 "path": str(f), "scope": "user" if str(f).startswith(str(Path.home())) else "system",
-                "sha256": hashlib.sha256(data).hexdigest(), "modified_at": f.stat().st_mtime, **parsed,
+                "sha256": hashlib.sha256(data).hexdigest(), "modified_at": info.st_mtime, **parsed,
             })
     return {"available": True, "items": items,
             "gaps": ["Login items in the Background Task Management database need root to read (sfltool dumpbtm)."]}

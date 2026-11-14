@@ -682,7 +682,7 @@ class TestEngineWiring:
         second = _FakeResponse(_FakeMessage(content="ok"))
         client = FakeClient([first, second])
         report = run_dispatch_messages(
-            [{"role": "user", "content": "go"}],
+            [{"role": "user", "content": "typed: go"}],
             r,
             client=client,
         )
@@ -726,7 +726,7 @@ class TestEngineWiring:
         second = _FakeResponse(_FakeMessage(content="ok"))
         client = FakeClient([first, second])
         report = run_dispatch_messages(
-            [{"role": "user", "content": "go"}],
+            [{"role": "user", "content": "json_tool: go"}],
             r,
             client=client,
         )
@@ -755,7 +755,7 @@ class TestEngineWiring:
         second = _FakeResponse(_FakeMessage(content="ok"))
         client = FakeClient([first, second])
         report = run_dispatch_messages(
-            [{"role": "user", "content": "go"}],
+            [{"role": "user", "content": "bad_json_tool: go"}],
             r,
             client=client,
         )
@@ -778,7 +778,7 @@ class TestEngineWiring:
         second = _FakeResponse(_FakeMessage(content="ok"))
         client = FakeClient([first, second])
         report = run_dispatch_messages(
-            [{"role": "user", "content": "go"}],
+            [{"role": "user", "content": "text_tool: go"}],
             r,
             client=client,
         )
@@ -807,7 +807,7 @@ class TestEngineWiring:
             [
                 {"role": "user", "content": "remember: budget number is 42"},
                 {"role": "assistant", "content": "Noted."},
-                {"role": "user", "content": "delegate this"},
+                {"role": "user", "content": "echo agent: delegate this"},
             ],
             registry,
             client=client,
@@ -875,7 +875,7 @@ class TestInterventionLedger:
         client = FakeClient([first, second])
         decisions = []
         report = run_dispatch_messages(
-            [{"role": "user", "content": "go"}],
+            [{"role": "user", "content": "gated_echo: go"}],
             r,
             client=client,
             confirmation_gate=lambda t: decisions.append(t) or True,
@@ -988,7 +988,7 @@ class TestAuditLedger:
             client=FakeClient([first, second]),
             confirmation_gate=lambda t: True,
         )
-        session.ask("go")
+        session.ask("gated_echo: go")
         rec = json.loads(session.session_file.read_text(encoding="utf-8").splitlines()[0])
         assert len(rec["interventions"]) == 2
         assert rec["interventions"][0]["type"] == "confirmation_requested"

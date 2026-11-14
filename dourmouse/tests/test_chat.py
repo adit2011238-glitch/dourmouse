@@ -572,7 +572,7 @@ class TestGatedToolThroughChat:
         )
         # No gate attached => tool must NOT execute.
         session = ChatSession(r, client=client, session_file=tmp_path / "g1.jsonl", confirmation_gate=None)
-        report = session.ask("do it")
+        report = session.ask("gated_echo: do it")
         result = next(t for t in report["transcript"] if t["type"] == "tool_result")
         assert "CONFIRMATION REQUIRED" in result["text"]
         assert "ECHOED" not in result["text"]
@@ -586,7 +586,7 @@ class TestGatedToolThroughChat:
             ]
         )
         session2 = ChatSession(r, client=client2, session_file=tmp_path / "g2.jsonl", confirmation_gate=lambda t: True)
-        report2 = session2.ask("do it")
+        report2 = session2.ask("gated_echo: do it")
         result2 = next(t for t in report2["transcript"] if t["type"] == "tool_result")
         assert result2["text"] == "ECHOED: y"
 
