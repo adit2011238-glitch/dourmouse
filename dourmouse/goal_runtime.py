@@ -270,7 +270,7 @@ class GoalRuntime:
         if reason is None:
             return False
         if self._store.update_goal_status(goal["id"], "BLOCKED", blocked_reason=reason):
-            self._notify(goal["id"], f"Budget used up: {goal['objective']}", reason)
+            self._notify(goal["id"], f"Budget used up: {goal['objective']}", reason, kind="needs_you")
         return True
 
     def _resolve_if_terminal(self, goal: dict[str, Any], tasks: list[dict[str, Any]]) -> bool:
@@ -290,7 +290,7 @@ class GoalRuntime:
                 goal_id, "BLOCKED",
                 blocked_reason=f"task {culprit['id']!r} ({culprit['description']}) failed permanently: {culprit['last_error']}",
             ):
-                self._notify(goal_id, f"Blocked: {goal['objective']}", culprit["last_error"] or "a task failed")
+                self._notify(goal_id, f"Blocked: {goal['objective']}", culprit["last_error"] or "a task failed", kind="heads_up")
             return True
         return False
 
@@ -339,7 +339,7 @@ class GoalRuntime:
                 result={"pending_prompts": list(report.get("pending_prompts") or [])},
             )
             if self._store.update_goal_status(goal_id, "WAITING_FOR_APPROVAL", blocked_reason=reason):
-                self._notify(goal_id, f"Needs your approval: {goal['objective']}", reason)
+                self._notify(goal_id, f"Needs your approval: {goal['objective']}", reason, kind="needs_you")
             return
         final_text = (report.get("final_text") or "").strip()
         if not final_text:
@@ -403,7 +403,7 @@ class GoalRuntime:
             self._store.update_task_status(task_id, "WAITING_FOR_APPROVAL", error=reason,
                                            result={"pending_prompts": [reason]})
             if self._store.update_goal_status(goal_id, "WAITING_FOR_APPROVAL", blocked_reason=reason):
-                self._notify(goal_id, f"Needs you: {goal['objective']}", reason)
+                self._notify(goal_id, f"Needs you: {goal['objective']}", reason, kind="needs_you")
             return
         verified = bool(out.get("verified"))
         final_text = str(out.get("final_text") or "")
@@ -625,25 +625,25 @@ class GoalRuntime:
                     goal_id, "COMPLETED",
                     result={"summary": summary, "criteria_checked": False, "note": f"criteria check could not run: {verdict['error']}"},
                 ):
-                    self._notify(goal_id, f"Done: {goal['objective']}", "every task completed (criteria check could not run)")
+                    self._notify(goal_id, f"Done: {goal['objective']}", "every task completed (criteria check could not run)", kind="finished")
                 return
             if not verdict["satisfied"]:
                 if self._store.update_goal_status(
                     goal_id, "BLOCKED",
                     blocked_reason=f"success criteria not met: {verdict['reasoning'][:500]}",
                 ):
-                    self._notify(goal_id, f"Blocked: {goal['objective']}", "every task completed, but success criteria were not met")
+                    self._notify(goal_id, f"Blocked: {goal['objective']}", "every task completed, but success criteria were not met", kind="heads_up")
                 return
             if self._store.update_goal_status(
                 goal_id, "COMPLETED",
                 result={"summary": summary, "criteria_checked": True, "reasoning": verdict["reasoning"][:2000]},
             ):
-                self._notify(goal_id, f"Done: {goal['objective']}", "every task completed, success criteria verified")
+                self._notify(goal_id, f"Done: {goal['objective']}", "every task completed, success criteria verified", kind="finished")
             return
         if self._store.update_goal_status(goal_id, "COMPLETED", result={"summary": summary}):
-            self._notify(goal_id, f"Done: {goal['objective']}", "every task completed")
+            self._notify(goal_id, f"Done: {goal['objective']}", "every task completed", kind="finished")
 
-    def _notify(self, goal_id: str, title: str, detail: str) -> None:
+    def _notify(self, goal_id: str, title: str, detail: str, kind: str = "heads_up") -> None:
         """Real, established two-step notification, same as every other
         system-generated alert in this codebase (see webui.py's ATLAS-run
         alert): create the alert, then broadcast the section change so
@@ -664,3 +664,12 @@ class GoalRuntime:
                     self._events_broadcast.broadcast({"type": "state_change", "section": "alerts", "owner": SHARED_OWNER})
             except Exception:
                 pass  # a broken alert/broadcast must never break the goal runtime
+        # Plan 1.8: the same event in the one attention feed, linked to the job. A job that is not parked or
+        # stopped for good clears the waiting item it may have had earlier.
+        from dourmouse import attention
+
+        if self._events_broadcast is not None:
+            attention.get_attention_store().bind_hub(self._events_broadcast)
+        attention.settle(f"goal:{goal_id}")
+        attention.notify(kind, title[:90], detail=detail[:200], screen="goals", params={"goal": goal_id},
+                         source="jobs", dedupe_key=f"goal:{goal_id}" if kind == "needs_you" else "")

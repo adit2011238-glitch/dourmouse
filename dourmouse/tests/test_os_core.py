@@ -375,11 +375,11 @@ R.parts = parseHash('#/home/a/b');
         assert out["home"]["id"] == "HOME" and out["home"]["notice"] == ""
         assert out["sec"]["id"] == "SECURITY"
         assert out["world"]["id"] == "ATLAS" and out["atlas"]["id"] == "ATLAS" and out["settings"]["id"] == "SETTINGS"
-        assert out["alerts"] == {"id": "NEWS", "openPanel": "notifications", "notice": ""}
+        assert out["alerts"] == {"id": "NEWS", "openPanel": "notifications", "notice": "", "params": {"path": [], "query": {}, "anchor": ""}}
         assert out["market"]["id"] == "HOME" and "no screen" in out["market"]["notice"]
         assert out["junk"]["id"] == "HOME" and "Unknown destination" in out["junk"]["notice"]
         assert out["unknown"]["id"] == "HOME" and "nonsense" in out["unknown"]["notice"]
-        assert out["parts"] == {"slug": "home", "rest": ["a", "b"]}
+        assert out["parts"] == {"slug": "home", "rest": ["a", "b"], "query": {}, "anchor": ""}
 
 
 class TestChatCore:

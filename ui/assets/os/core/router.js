@@ -10,37 +10,92 @@ import { bySlug, placeBySlug } from './registry.js';
 const ALIASES = { world: 'ATLAS', atlas: 'ATLAS', settings: 'SETTINGS' };
 const UNBACKED = new Set(['portfolio', 'markets', 'intelligence', 'command']);
 
-export function parseHash(hash) {
-  const h = String(hash || '').replace(/^#/, '').replace(/^\/+/, '');
-  const [slug, ...rest] = h.split('/');
-  return { slug: slug.toLowerCase(), rest: rest.filter(Boolean) };
+/* Link arguments (plan 1.8, USE1-37): #/office?goal=g12&anchor=steps. At most six simple keys with short
+   values survive; anything else is dropped, never passed on. "anchor" is its own field. */
+const PARAM_KEY = /^[a-z][a-z0-9_]{0,31}$/;
+const ANCHOR = /^[A-Za-z0-9_.-]{1,64}$/;
+const MAX_PARAMS = 6;
+const MAX_VALUE = 120;
+
+export function parseQuery(text) {
+  const query = {};
+  let anchor = '';
+  let n = 0;
+  for (const chunk of String(text || '').split('&')) {
+    if (!chunk) continue;
+    const eq = chunk.indexOf('=');
+    const key = eq < 0 ? chunk : chunk.slice(0, eq);
+    let val = '';
+    try {
+      val = eq < 0 ? '' : decodeURIComponent(chunk.slice(eq + 1));
+    } catch (_err) {
+      continue;
+    }
+    if (!PARAM_KEY.test(key) || val.length > MAX_VALUE || /[\u0000-\u001f\u007f]/.test(val)) continue;
+    if (key === 'anchor') {
+      if (ANCHOR.test(val)) anchor = val;
+      continue;
+    }
+    if (n >= MAX_PARAMS || Object.prototype.hasOwnProperty.call(query, key)) continue;
+    query[key] = val;
+    n += 1;
+  }
+  return { query, anchor };
 }
 
-/* -> { id, openPanel, notice } */
+export function parseHash(hash) {
+  const h = String(hash || '').replace(/^#/, '').replace(/^\/+/, '');
+  const q = h.indexOf('?');
+  const pathPart = q < 0 ? h : h.slice(0, q);
+  const [slug, ...rest] = pathPart.split('/');
+  const { query, anchor } = parseQuery(q < 0 ? '' : h.slice(q + 1));
+  return { slug: slug.toLowerCase(), rest: rest.filter(Boolean), query, anchor };
+}
+
+export function sameParams(a, b) {
+  if (!a || !b) return a === b;
+  if (a.anchor !== b.anchor || a.path.join('/') !== b.path.join('/')) return false;
+  const ka = Object.keys(a.query);
+  const kb = Object.keys(b.query);
+  return ka.length === kb.length && ka.every((k) => a.query[k] === b.query[k]);
+}
+
+/* The hash for a destination with arguments: hashFor('office', { goal: 'g12' }, 'steps') */
+export function hashFor(slug, query = {}, anchor = '') {
+  const pairs = Object.keys(query || {}).sort().map((k) => k + '=' + encodeURIComponent(query[k]));
+  if (anchor) pairs.push('anchor=' + anchor);
+  return '#/' + String(slug || 'home').toLowerCase() + (pairs.length ? '?' + pairs.join('&') : '');
+}
+
+/* -> { id, openPanel, notice, params: { path, query, anchor } }
+   A destination that is not shown (an unknown or unbacked one) falls back to HOME with no arguments. */
 export function resolveRoute(hash, current = 'HOME') {
-  const { slug } = parseHash(hash);
-  if (!slug) return { id: 'HOME', openPanel: null, notice: '' };
-  if (!/^[a-z0-9_-]{1,64}$/.test(slug)) {
-    return { id: 'HOME', openPanel: null, notice: 'Unknown destination. Showing HOME.' };
-  }
-  if (slug === 'alerts') return { id: current || 'HOME', openPanel: 'notifications', notice: '' };
-  if (ALIASES[slug]) return { id: ALIASES[slug], openPanel: null, notice: '' };
+  const { slug, rest, query, anchor } = parseHash(hash);
+  const none = { path: [], query: {}, anchor: '' };
+  const at = (id) => ({ id, openPanel: null, notice: '', params: { path: rest, query, anchor } });
+  const home = (notice) => ({ id: 'HOME', openPanel: null, notice, params: none });
+  if (!slug) return home('');
+  if (!/^[a-z0-9_-]{1,64}$/.test(slug)) return home('Unknown destination. Showing HOME.');
+  if (slug === 'alerts') return { id: current || 'HOME', openPanel: 'notifications', notice: '', params: none };
+  if (ALIASES[slug]) return at(ALIASES[slug]);
   /* T6: a place's own slug (#/office, #/library) opens its first view */
   const place = placeBySlug(slug);
-  if (place && !bySlug(slug)) return { id: place.views[0], openPanel: null, notice: '' };
+  if (place && !bySlug(slug)) return at(place.views[0]);
   const entry = bySlug(slug);
-  if (entry) return { id: entry.id, openPanel: null, notice: '' };
-  if (UNBACKED.has(slug)) {
-    return { id: 'HOME', openPanel: null, notice: 'The ' + slug + ' destination has no screen in the new shell yet. Showing HOME.' };
-  }
-  return { id: 'HOME', openPanel: null, notice: 'Unknown destination "' + slug + '". Showing HOME.' };
+  if (entry) return at(entry.id);
+  if (UNBACKED.has(slug)) return home('The ' + slug + ' destination has no screen in the new shell yet. Showing HOME.');
+  return home('Unknown destination "' + slug + '". Showing HOME.');
 }
+
+/* the server's navigate event and the Electron shell both carry only this much of a hash */
+export const NAV_HREF = /^#[A-Za-z0-9_\/#?&=.:@%-]{0,240}$/;
 
 const IMPORT_FAIL = /dynamically imported module|Importing a module script failed|Failed to fetch|error loading/i;
 
 export function createRouter({ registry, win = globalThis.window, stage, nav, ctxFactory, states, toasts, panels, events, kit, getBuilt }) {
   let seq = 0;
   let current = null; /* { id, entry, screen, handle, css } */
+  let wanted = { path: [], query: {}, anchor: '' }; /* the arguments of the route being shown */
   let started = false;
 
   function slugUrl(entry) {
@@ -75,7 +130,7 @@ export function createRouter({ registry, win = globalThis.window, stage, nav, ct
     stage.reset();
   }
 
-  async function show(id) {
+  async function show(id, params = wanted) {
     const my = ++seq;
     const entry = registry.byId(id) || registry.byId('HOME');
     await unmountCurrent();
@@ -141,7 +196,7 @@ export function createRouter({ registry, win = globalThis.window, stage, nav, ct
       stage.focusTitle();
       return;
     }
-    const handle = ctxFactory({ id: entry.id, root, screen });
+    const handle = ctxFactory({ id: entry.id, root, screen, params });
     let css = null;
     if (screen.css) {
       css = win.document.createElement('link');
@@ -157,15 +212,24 @@ export function createRouter({ registry, win = globalThis.window, stage, nav, ct
       if (my === seq) states.error(root, err, { title: entry.id + ' failed to start', retry: () => show(entry.id) });
       console.error(err);
     }
-    if (my === seq) stage.focusTitle();
+    if (my === seq) {
+      stage.focusTitle();
+      handle.ctx.params.reveal();
+    }
   }
 
   function route() {
     const r = resolveRoute(win.location.hash, current ? current.id : 'HOME');
     if (r.notice) toasts.show({ level: 'warn', title: 'Navigation', detail: r.notice });
     if (r.openPanel && panels[r.openPanel]) panels[r.openPanel].open();
-    if (current && current.id === r.id) return Promise.resolve();
-    return show(r.id);
+    const before = wanted;
+    wanted = r.params;
+    if (current && current.id === r.id) {
+      /* the same screen with other arguments: tell it, do not remount it */
+      if (!sameParams(before, r.params)) current.handle.setParams(r.params);
+      return Promise.resolve();
+    }
+    return show(r.id, r.params);
   }
 
   return {
@@ -176,13 +240,14 @@ export function createRouter({ registry, win = globalThis.window, stage, nav, ct
       if (events) {
         /* The server can ask every window to navigate (allow-listed href). */
         events.on('navigate', (e) => {
-          if (typeof e.href === 'string' && /^#[A-Za-z0-9_\/#-]{0,120}$/.test(e.href)) win.location.hash = e.href;
+          if (typeof e.href === 'string' && NAV_HREF.test(e.href)) win.location.hash = e.href;
         });
       }
       return route();
     },
-    go(slug) {
-      const target = '#/' + String(slug || 'home').toLowerCase();
+    /* go('office') or go('office', { goal: 'g12' }, 'steps') */
+    go(slug, query = {}, anchor = '') {
+      const target = hashFor(slug, query, anchor);
       if (win.location.hash === target) return route();
       win.location.hash = target;
       return Promise.resolve();

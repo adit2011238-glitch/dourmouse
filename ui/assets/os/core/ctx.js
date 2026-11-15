@@ -41,7 +41,7 @@ export function createTimers({ setInterval: setI = globalThis.setInterval, clear
 /* deps: { api, events, chat, approvals, scope, host, prefs, keymap, timers,
            toasts, chrome, overlays, kit, renderApproval }
    chrome is the shell's stage/nav control surface, already bound to `screen`. */
-export function createScreenCtx({ id, root, deps }) {
+export function createScreenCtx({ id, root, deps, params: initial }) {
   const owner = { id };
   const ac = new AbortController();
   const events = deps.events.scope();
@@ -49,10 +49,45 @@ export function createScreenCtx({ id, root, deps }) {
   let resyncRegistered = false;
   let disposed = false;
 
+  /* Link arguments of the route that opened this screen (plan 1.8). One stable object: path segments after
+     the screen name, the ?key=value pairs, and the anchor. The router calls setParams when only the
+     arguments change, so a screen that wants to react subscribes with onChange. reveal() scrolls to the
+     anchor if it is on screen; a screen whose content arrives late calls it again when that content is in. */
+  const paramFns = new Set();
+  const params = {
+    path: [],
+    query: {},
+    anchor: '',
+    get(key, fallback = '') {
+      return Object.prototype.hasOwnProperty.call(params.query, key) ? params.query[key] : fallback;
+    },
+    onChange(fn) {
+      paramFns.add(fn);
+      const off = () => paramFns.delete(fn);
+      offs.push(off);
+      return off;
+    },
+    reveal() {
+      if (!params.anchor || !root || typeof root.querySelector !== 'function') return false;
+      const el = root.querySelector('[data-anchor="' + params.anchor + '"]') || root.querySelector('#' + params.anchor);
+      if (!el) return false;
+      if (typeof el.scrollIntoView === 'function') el.scrollIntoView({ block: 'center' });
+      if (typeof el.focus === 'function' && el.tabIndex >= 0) el.focus({ preventScroll: true });
+      return true;
+    },
+  };
+  const applyParams = (next) => {
+    params.path = next && Array.isArray(next.path) ? next.path.slice() : [];
+    params.query = next && next.query ? { ...next.query } : {};
+    params.anchor = (next && next.anchor) || '';
+  };
+  applyParams(initial);
+
   const thread = deps.chat.thread(id);
   const ctx = {
     id,
     root,
+    params,
     signal: ac.signal,
     api: deps.api.withSignal(ac.signal),
     /* subscribe() is tracked so leaving the screen removes the listener */
@@ -163,6 +198,18 @@ export function createScreenCtx({ id, root, deps }) {
     ctx,
     owner,
     wantsResync: () => !resyncRegistered,
+    setParams(next) {
+      if (disposed) return;
+      applyParams(next);
+      paramFns.forEach((fn) => {
+        try {
+          fn(params);
+        } catch (err) {
+          console.error(err);
+        }
+      });
+      params.reveal();
+    },
     dispose() {
       if (disposed) return;
       disposed = true;

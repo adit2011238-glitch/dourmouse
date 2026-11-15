@@ -3508,6 +3508,67 @@ function startPaneBridge() {
 // flag, bounded size) in JS. No Python changes.
 // --------------------------------------------------------------------- //
 
+// Plan 1.8 (finding 204): a native notification opens the app and goes to a place; it never does anything else.
+// The place is a hash the server built from validated parts, checked here again before it is used.
+const _NOTIFY_HREF = /^#\/[a-z0-9_-]{1,64}(\?[A-Za-z0-9_&=.:@%-]{0,200})?$/;
+const _liveNotifications = new Set(); // a Notification that is garbage collected never fires its click
+
+function keepNotification(note) {
+  _liveNotifications.add(note);
+  const drop = () => _liveNotifications.delete(note);
+  note.on("close", drop);
+  note.on("click", drop);
+}
+
+function openFromNotification(href) {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createMainWindow();
+  } else {
+    if (typeof mainWindow.isMinimized === "function" && mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+  }
+  if (typeof href !== "string" || !_NOTIFY_HREF.test(href)) return;
+  Promise.resolve(mainWindow.webContents.executeJavaScript(`location.hash = ${JSON.stringify(href)}`)).catch((exc) =>
+    log("notifications: could not open the notification's place:", (exc && exc.message) || exc),
+  );
+}
+
+// The dock shows how many items wait for the owner, and nothing when none do.
+function setDockBadge(count) {
+  if (process.platform !== "darwin" || !app.dock || typeof app.dock.setBadge !== "function") return;
+  const n = Number.isFinite(count) && count > 0 ? Math.min(Math.floor(count), 99) : 0;
+  app.dock.setBadge(n ? String(n) : "");
+}
+
+// An attention event (dourmouse/attention.py). The server already applied the kind switches and quiet hours
+// (`native`); here only the window decides: a window the owner is looking at does not also pop a banner.
+function handleAttentionEvent(payload) {
+  if (payload.counts && typeof payload.counts.needs_you === "number") setDockBadge(payload.counts.needs_you);
+  if (payload.action !== "added" || payload.native !== true || !payload.item) return;
+  if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible() && mainWindow.isFocused()) return;
+  if (!Notification.isSupported()) return;
+  const text = payload.native_text || {};
+  const note = new Notification({
+    title: String(text.title || "DourMouse").slice(0, 80),
+    body: String(text.body || "").slice(0, 120),
+  });
+  const href = payload.item.href;
+  note.on("click", () => openFromNotification(href));
+  keepNotification(note);
+  note.show();
+}
+
+// The count the dock should show right now, read when the event stream opens (events sent before it opened are lost).
+async function refreshDockBadge() {
+  try {
+    const feed = await fetchJson(`${BASE_URL}/api/os/attention`, { method: "GET" });
+    if (feed && feed.counts) setDockBadge(feed.counts.needs_you);
+  } catch (exc) {
+    log("notifications: attention count unavailable (non-fatal):", (exc && exc.message) || exc);
+  }
+}
+
 const _NOTIFY_MAX_SEEN = 200;
 let _notifySeen = new Set();
 let _notifyPrimed = false;
@@ -3536,11 +3597,17 @@ async function refreshAlerts() {
       _notifySeen = new Set([..._notifySeen].slice(-_NOTIFY_MAX_SEEN));
     }
     for (const alert of fresh) {
+      // Alerts a job raised are also in the attention feed (plan 1.8), which notifies for them once with its own rules.
+      if (typeof alert.link === "string" && alert.link.startsWith("#/goal/")) continue;
       if (Notification.isSupported()) {
-        new Notification({
+        const note = new Notification({
           title: (alert.title || "DourMouse alert").toString().slice(0, 80),
           body: (alert.detail || "").toString().slice(0, 200),
-        }).show();
+        });
+        // A click only brings the window forward and opens the alert's own place (finding 204).
+        note.on("click", () => openFromNotification(alert.link));
+        keepNotification(note);
+        note.show();
       }
     }
   } catch (exc) {
@@ -3580,6 +3647,7 @@ function startAlertNotifications() {
     if (timer && typeof timer.unref === "function") timer.unref();
   };
   const req = http.get(`${BASE_URL}/api/events`, (res) => {
+    refreshDockBadge();
     let buffer = "";
     res.on("data", (chunk) => {
       buffer += chunk.toString("utf8");
@@ -3592,6 +3660,8 @@ function startAlertNotifications() {
           const payload = JSON.parse(line.slice(6));
           if (payload.type === "state_change" && payload.section === "alerts") {
             refreshAlerts();
+          } else if (payload.type === "attention") {
+            handleAttentionEvent(payload);
           }
         } catch {
           /* a malformed line is skipped, never crashes the listener */

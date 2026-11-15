@@ -89,7 +89,7 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
 def test_parse_valid_bare_destinations():
     assert parse_deeplink("atlas") == {
-        "ok": True, "dest": "atlas", "segments": [], "href": "#/atlas"}
+        "ok": True, "dest": "atlas", "segments": [], "params": {}, "href": "#/atlas"}
     assert parse_deeplink("world")["href"] == "#/world"
     assert parse_deeplink("portfolio")["href"] == "#/portfolio"
     assert parse_deeplink("markets")["href"] == "#/markets"
@@ -180,7 +180,7 @@ def test_route_redirects_to_validated_href(server):
 def test_route_json_format(server):
     with urllib.request.urlopen(server + "/api/deeplink?to=alerts&format=json") as resp:
         body = json.loads(resp.read().decode())
-    assert body == {"ok": True, "dest": "alerts", "segments": [], "href": "#/alerts"}
+    assert body == {"ok": True, "dest": "alerts", "segments": [], "params": {}, "href": "#/alerts"}
 
 
 def test_route_rejects_off_allowlist(server):

@@ -166,3 +166,24 @@ def test_quick_ask_tab_keeps_no_memory_and_writes_to_the_pruned_helper_folder(se
     assert quick.memory is None and plain.memory is server.memory
     assert "helper" in str(quick.session_file.parent).lower()
     assert "helper" not in str(plain.session_file.parent).lower()
+
+
+def test_the_new_feed_joins_needs_you_without_repeating_jobs(server):
+    from dourmouse import attention
+
+    attention.set_attention_store(attention.AttentionStore(server_ws(server)))
+    try:
+        attention.notify("needs_you", "A step needs your approval", screen="home", source="approvals")
+        attention.notify("needs_you", "Needs you: tidy", screen="goals", params={"goal": "g1"}, source="jobs")
+        attention.notify("finished", "Done: x", screen="goals")
+        status, d = call(server, "GET", "/api/os/today")
+        assert [n["title"] for n in d["needs_you"]] == ["A step needs your approval"]
+        assert d["needs_you"][0]["kind"] == "feed" and d["needs_you"][0]["target"] == "home"
+    finally:
+        attention.set_attention_store(None)
+
+
+def server_ws(srv):
+    from dourmouse.config import workspace_dir
+
+    return workspace_dir()

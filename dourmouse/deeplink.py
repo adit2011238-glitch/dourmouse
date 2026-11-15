@@ -40,8 +40,33 @@ ALLOWED_DESTINATIONS = frozenset(
         "alerts",
         "settings",
         "command",
+        # the places and screens of the current shell (plan 1.8)
+        "projects",
+        "office",
+        "research",
+        "library",
+        "browser",
+        "security",
+        "goals",
+        "news",
+        "voice",
+        "code",
+        "comms",
+        "media",
+        "wiki",
+        "apps",
+        "orchestration",
+        "timetable",
+        "agentsmith",
+        "command_center",
     }
 )
+
+#: Link arguments (plan 1.8, USE1-37): ``dourmouse://office?goal=g12&anchor=steps``. A few simple keys, short
+#: values, and nothing else survives. ``anchor`` names a spot on the screen.
+_PARAM_KEY_RE = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
+_PARAM_VALUE_RE = re.compile(r"^[A-Za-z0-9_.:@-]{1,80}$")
+_MAX_PARAMS = 6
 
 #: One extra path segment: letters/digits/underscore/dash, 1-64 chars.
 #: This is the ONLY charset that may ever appear in a deep-link id, so the
@@ -99,6 +124,9 @@ def parse_deeplink(raw: str | None) -> dict[str, Any]:
         value = value[len(_SCHEME):]
     elif value.startswith("dourmouse:"):
         return {"ok": False, "reason": "only the dourmouse:// scheme is valid"}
+    query = ""
+    if "?" in value:
+        value, _, query = value.partition("?")
     value = value.strip("/")
     parts = [p for p in value.split("/") if p]
     if not parts:
@@ -112,12 +140,23 @@ def parse_deeplink(raw: str | None) -> dict[str, Any]:
     for segment in segments:
         if not _ID_RE.match(segment):
             return {"ok": False, "reason": f"invalid segment {segment!r}"}
-    href = _DEST_HREFS[dest]
+    pairs: list[tuple[str, str]] = []
+    if query:
+        for chunk in query.split("&"):
+            key, sep, val = chunk.partition("=")
+            if not sep or not _PARAM_KEY_RE.match(key) or not _PARAM_VALUE_RE.match(val):
+                return {"ok": False, "reason": f"invalid link argument {chunk!r}"}
+            pairs.append((key, val))
+        if len(pairs) > _MAX_PARAMS or len({k for k, _ in pairs}) != len(pairs):
+            return {"ok": False, "reason": "too many or repeated link arguments"}
+    href = _DEST_HREFS.get(dest) or f"#/{dest}"
     if segments:
         href = f"#/{dest}/{'/'.join(segments)}"
+    if pairs:
+        href += "?" + "&".join(f"{k}={v}" for k, v in pairs)
     if len(href) > _MAX_HREF_LEN:
         return {"ok": False, "reason": "deep link too long"}
-    return {"ok": True, "dest": dest, "segments": segments, "href": href}
+    return {"ok": True, "dest": dest, "segments": segments, "params": dict(pairs), "href": href}
 
 
 def deep_link_from_argv(argv: list[str] | None) -> str | None:

@@ -82,6 +82,22 @@ def needs_you(columns: dict[str, list[dict[str, Any]]], attention: list[dict[str
     return items
 
 
+def feed_needs_you() -> list[dict[str, Any]]:
+    """Items from the attention feed (plan 1.8) that wait on the owner. Jobs are skipped: the board already lists them.
+    ``target`` carries the item's own link, arguments included, so Review opens exactly the place it is about."""
+    from dourmouse import attention
+
+    out = []
+    for it in attention.get_attention_store().items():
+        if it["kind"] != "needs_you" or it["source"] == "jobs":
+            continue
+        out.append({
+            "kind": "feed", "id": f"f{it['id']}", "title": it["title"], "owner": "", "note": it["detail"],
+            "since": it["created"], "target": it["href"][2:],
+        })
+    return out
+
+
 def office(columns: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
     from dourmouse.agent_profiles import PROFILES
 
@@ -174,7 +190,7 @@ def today(req: Request) -> tuple[int, dict[str, Any]]:
     queue = getattr(req.server, "attention", None)
     if queue is not None:
         attention = queue.snapshot()
-    needs = needs_you(columns, attention)
+    needs = needs_you(columns, attention) + feed_needs_you()
     off = office(columns)
     return 200, {
         "ok": True, "at": time.time(), "greeting": greeting(),

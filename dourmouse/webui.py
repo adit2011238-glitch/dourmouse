@@ -449,7 +449,7 @@ _AUTONOMOUS_MAX_TURNS = 24
 
 
 class _PendingConfirmation:
-    __slots__ = ("confirm_id", "prompt_text", "_event", "_approved", "answered", "kind")
+    __slots__ = ("confirm_id", "prompt_text", "_event", "_approved", "answered", "kind", "window_gone")
 
     def __init__(self, confirm_id: str, prompt_text: str) -> None:
         self.confirm_id = confirm_id
@@ -461,6 +461,8 @@ class _PendingConfirmation:
         self.answered = False
         #: "privacy_consent" for a consent question: only a click answers it (R5-20)
         self.kind = "action"
+        #: True when the card was declined because the window that showed it had gone (plan 1.8 tells the owner)
+        self.window_gone = False
 
     def resolve(self, approved: bool, answered: bool = True) -> None:
         self._approved = approved
@@ -486,6 +488,7 @@ class _PendingConfirmation:
                     gone = False
                 if gone:
                     self.answered = False
+                    self.window_gone = True
                     self._approved = False
                     return False
         return self._approved
@@ -558,6 +561,9 @@ class WebConfirmationGate:
         }
         if details_id:
             event["details_id"] = details_id
+        from dourmouse import attention
+
+        attention.approval_requested(confirm_id)
         try:
             self._emit(event)
             approved = pending.wait(getattr(self, "_should_stop", None))
@@ -565,6 +571,7 @@ class WebConfirmationGate:
             _drop_confirmation_details(details_id)
         with self._lock:
             self._pending.pop(confirm_id, None)
+        attention.approval_settled(confirm_id, pending.answered, pending.window_gone, approved)
         return approved
 
     def ask_owner(self, prompt_text: str) -> bool | None:
@@ -8950,6 +8957,10 @@ def run_server(
     # connected HUD stream.
     events_hub = _SSEBroadcast()
     server.events_broadcast = events_hub
+    # Plan 1.8: items raised by runtimes (jobs, the confirmation gate) reach every open window through this hub.
+    from dourmouse import attention as _attention
+
+    _attention.get_attention_store().bind_hub(events_hub)
     # COMMAND CENTER (#186): see _LIVE_EVENTS_HUB's own module-level comment.
     global _LIVE_EVENTS_HUB
     _LIVE_EVENTS_HUB = events_hub

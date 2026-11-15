@@ -32,6 +32,8 @@ import { createStage } from './chrome/stage.js';
 import { createComposer } from './chrome/composer.js';
 import { createSpecOverlay } from './chrome/spec-overlay.js';
 import { createNotifCentre } from './chrome/notif-centre.js';
+import { createAttention } from './core/attention.js';
+import { createAttentionList } from './chrome/attention-list.js';
 import { createInspector } from './chrome/inspector.js';
 import { createSheets } from './chrome/sheet.js';
 import { createStartupCheck } from './chrome/startup-check.js';
@@ -115,6 +117,12 @@ function boot() {
     root: inspector.alertsRoot, api, events, toasts, prefs, timers,
     dock: { setBadge: (n) => { inspector.setAlertCount(n); } },
   });
+  /* plan 1.8: one feed of needs-you, finished and heads-up items, shown above the alerts, as toasts with Go, and as badges */
+  const attention = createAttention({ api, events, toasts, go: (href) => { window.location.hash = href; } });
+  const attentionRoot = document.createElement('div');
+  attentionRoot.id = 'attnlist';
+  inspector.alertsRoot.prepend(attentionRoot);
+  createAttentionList({ root: attentionRoot, attention });
   let alertsOpen = false;
   inspector.onTab((tab) => {
     const want = tab === 'alerts';
@@ -257,13 +265,30 @@ function boot() {
   });
 
   /* badges: real current values only. Office: agents in a run now (feed polls do not count). Security: open high and medium findings. */
+  /* Items that wait on the owner (plan 1.8) badge the place their screen lives in. Office and Security already
+     count running agents and findings, so there the waiting items are added and the words say both. */
+  const waitingByPlace = () => {
+    const out = {};
+    const screens = (attention.state.counts && attention.state.counts.screens) || {};
+    Object.keys(screens).forEach((slug) => {
+      const entry = registry.bySlug(slug);
+      const place = entry ? registry.placeOf(entry.id) : registry.placeBySlug(slug);
+      if (place) out[place.id] = (out[place.id] || 0) + screens[slug];
+    });
+    return out;
+  };
   function paintBadges(s) {
-    sidebar.setBadge('OFFICE', s.agents && s.agents.known ? s.agents.working || 0 : 0, 'agents working');
+    const wait = waitingByPlace();
+    const agents = s.agents && s.agents.known ? s.agents.working || 0 : 0;
+    sidebar.setBadge('OFFICE', agents + (wait.OFFICE || 0), wait.OFFICE ? 'agents working or items waiting for you' : 'agents working');
     const sec = s.security || {};
-    sidebar.setBadge('SECURITY', sec.known && sec.scanned ? (sec.high || 0) + (sec.med || 0) : 0, 'findings to look at');
+    const findings = sec.known && sec.scanned ? (sec.high || 0) + (sec.med || 0) : 0;
+    sidebar.setBadge('SECURITY', findings + (wait.SECURITY || 0), wait.SECURITY ? 'findings or items waiting for you' : 'findings to look at');
+    ['HOME', 'PROJECTS', 'RESEARCH', 'LIBRARY', 'BROWSER', 'SETTINGS'].forEach((id) => sidebar.setBadge(id, wait[id] || 0, 'waiting for you'));
   }
   status.onChange(paintBadges);
   paintBadges(status.state);
+  attention.onChange(() => paintBadges(status.state));
 
   /* the highlight and running dots live on the sidebar's places */
   const nav = {
@@ -344,10 +369,11 @@ function boot() {
     events,
     kit,
     getBuilt: () => api.get('/api/os/screens').then((d) => new Set(d.built || [])),
-    ctxFactory: ({ id, root }) =>
+    ctxFactory: ({ id, root, params }) =>
       createScreenCtx({
         id,
         root,
+        params,
         deps: { api, events, chat, approvals, scope, host, prefs, wallpaper, keymap, timers, toasts, chrome: makeChrome(id), overlays, kit, renderApproval },
       }),
   });
@@ -403,6 +429,7 @@ function boot() {
     commands,
     toasts,
     chat,
+    attention,
   };
 
   /* service worker: the path is the data-sw attribute of THIS script tag */
@@ -412,6 +439,7 @@ function boot() {
   }
 
   events.start();
+  attention.load();
   status.start();
   drivingStrip.read();
   loadPins();

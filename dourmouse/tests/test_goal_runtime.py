@@ -688,7 +688,8 @@ class TestNotifications:
         assert len(bus_calls) == 1
         assert "Notify me" in bus_calls[0]["body"]
         assert len(alert_calls) == 1
-        assert broadcast_calls == [{"type": "state_change", "section": "alerts", "owner": "*"}]
+        # the same hub also carries the attention event (plan 1.8); the alert's own broadcast is unchanged
+        assert [c for c in broadcast_calls if c["type"] != "attention"] == [{"type": "state_change", "section": "alerts", "owner": "*"}]
 
     def test_a_broken_notifier_never_breaks_the_runtime(self, monkeypatch):
         _install_fake(monkeypatch, {"one step": {"final_text": "done"}})
