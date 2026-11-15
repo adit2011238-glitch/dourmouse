@@ -40,6 +40,7 @@ import { putPaneRequest } from './core/pane-inbox.js';
 import { createPalette } from './chrome/palette.js';
 import { shortcutList, bindable } from './core/shortcuts.js';
 import { createAppearance } from './core/appearance.js';
+import { createWallpaper } from './core/wallpaper.js';
 import { createCommands } from './core/commands.js';
 
 const $ = (id) => document.getElementById(id);
@@ -54,6 +55,7 @@ function boot() {
   const api = createApi();
   const prefs = createPrefs({ api });
   prefs.applyAll();
+  const wallpaper = createWallpaper({ api, appearance });
   const scope = createScope();
   scope.applyQuery(window.location.search);
   const events = createEvents();
@@ -346,7 +348,7 @@ function boot() {
       createScreenCtx({
         id,
         root,
-        deps: { api, events, chat, approvals, scope, host, prefs, keymap, timers, toasts, chrome: makeChrome(id), overlays, kit, renderApproval },
+        deps: { api, events, chat, approvals, scope, host, prefs, wallpaper, keymap, timers, toasts, chrome: makeChrome(id), overlays, kit, renderApproval },
       }),
   });
 
@@ -393,6 +395,7 @@ function boot() {
     },
     panels: defs,
     prefs,
+    wallpaper,
     appearance,
     appearanceReady,
     inspector,
@@ -412,6 +415,7 @@ function boot() {
   status.start();
   drivingStrip.read();
   loadPins();
+  wallpaper.start();
   prefs.hydrate().catch((err) => console.warn('prefs hydrate', err && err.message));
   /* after the first screen is up: a real sign-in check, a dialog only if something is missing */
   const started = router.start();

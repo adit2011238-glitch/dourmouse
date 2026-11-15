@@ -15,6 +15,7 @@ import { states } from '../../kit/states.js';
 import { confirmHere } from '../../kit/confirm-card.js';
 import { isAbort } from '../../core/api.js';
 import { TEXT_SIZES } from '../../core/prefs.js';
+import { wallpaperRows } from './wallpaper.js';
 import {
   groupFeatures, featurePrompt, foldersPrompt, parseFolders, togglePrompt, shellPrompt, resetPrompt, shellChoices,
   keyTag, tokenTag, bindLine, orchestratorSource, localModelRow, backendRow, osReducedMotion, SHELL_WORD,
@@ -30,7 +31,7 @@ export default {
   thread: false,
 
   async mount(root, ctx) {
-    const st = { sum: null, sumError: null, staleMsg: '', orch: null, orchError: null, orchLoading: true, test: null, testing: false, priv: null };
+    const st = { wp: null, wpThumbs: {}, sum: null, sumError: null, staleMsg: '', orch: null, orchError: null, orchLoading: true, test: null, testing: false, priv: null };
 
     root.dataset.state = 'loading';
     setHtml(root, html`
@@ -125,7 +126,49 @@ export default {
     function paintLook() {
       const cur = ctx.appearance.textSize();
       lookEl.dataset.state = 'populated';
-      setHtml(lookEl, html`<div class="kv"><span>Text size</span><span class="os-seg" role="group" aria-label="Text size">${TEXT_SIZES.map((t) => html`<button type="button" aria-selected="${String(t.id === cur)}" data-textsize="${t.id}" data-spec="Sets the size of the text across the whole app to ${t.name.toLowerCase()}. It applies at once and is remembered.">${t.name}</button>`)}</span></div>`);
+      setHtml(lookEl, html`<div class="kv"><span>Text size</span><span class="os-seg" role="group" aria-label="Text size">${TEXT_SIZES.map((t) => html`<button type="button" aria-selected="${String(t.id === cur)}" data-textsize="${t.id}" data-spec="Sets the size of the text across the whole app to ${t.name.toLowerCase()}. It applies at once and is remembered.">${t.name}</button>`)}</span></div>${wallpaperRows(st.wp, st.wpThumbs)}`);
+    }
+
+    /* ---------------- wallpaper (plan 1.2) ---------------- */
+    async function loadThumbs() {
+      const sum = st.wp;
+      st.wpThumbs = {};
+      if (!sum) return;
+      for (const slot of ['light', 'dark']) {
+        if (!sum[slot]) continue;
+        try {
+          st.wpThumbs[slot] = await ctx.wallpaper.preview(slot);
+        } catch (_err) {
+          st.wpThumbs[slot] = null;
+        }
+        if (ctx.signal.aborted) return;
+      }
+    }
+
+    async function wpDo(fn, okText) {
+      try {
+        st.wp = await fn();
+        await loadThumbs();
+        if (okText) note(okText, 'ok');
+      } catch (err) {
+        if (isAbort(err)) return;
+        note('Wallpaper not changed: ' + (err && err.message ? err.message : String(err)), 'error');
+      }
+      if (!ctx.signal.aborted) paintLook();
+    }
+
+    function pickPhotos(slot) {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'image/jpeg,image/png,image/webp';
+      input.multiple = slot === 'rotation';
+      input.addEventListener('change', async () => {
+        const files = Array.from(input.files || []);
+        for (const file of files) {
+          await wpDo(() => ctx.wallpaper.upload(slot, file), files.length > 1 ? '' : 'Wallpaper set.');
+        }
+      });
+      input.click();
     }
 
     async function chooseTextSize(sizeId) {
@@ -436,6 +479,12 @@ export default {
       if (f) return flipFeature(f.dataset.feature);
       const s = e.target.closest('[data-shell]');
       if (s) return chooseShell(s.dataset.shell);
+      const wm = e.target.closest('[data-wp-mode]');
+      if (wm) return wpDo(() => ctx.wallpaper.setMode(wm.dataset.wpMode));
+      const wk = e.target.closest('[data-wp-pick]');
+      if (wk) return pickPhotos(wk.dataset.wpPick);
+      const wr = e.target.closest('[data-wp-remove]');
+      if (wr) return wpDo(() => ctx.wallpaper.remove(wr.dataset.wpRemove), 'Photo removed.');
       const ts = e.target.closest('[data-textsize]');
       if (ts) return chooseTextSize(ts.dataset.textsize);
       const fs = e.target.closest('[data-folders-save]');
@@ -449,8 +498,22 @@ export default {
       return undefined;
     });
 
+    root.addEventListener('change', (e) => {
+      const pl = e.target.closest('[data-wp-place]');
+      if (!pl || !st.wp) return;
+      const on = new Set(st.wp.config.places);
+      if (pl.checked) on.add(pl.dataset.wpPlace);
+      else on.delete(pl.dataset.wpPlace);
+      wpDo(() => ctx.wallpaper.setPlaces(Array.from(on)));
+    });
+
     reloaders.set(ctx, reload);
     paintLook();
+    if (ctx.wallpaper) {
+      st.wp = ctx.wallpaper.summary();
+      if (st.wp) loadThumbs().then(() => { if (!ctx.signal.aborted) paintLook(); });
+      else ctx.wallpaper.load().then((s) => { st.wp = s; return loadThumbs(); }).then(() => { if (!ctx.signal.aborted) paintLook(); }, () => {});
+    }
     paintActions();
     regions.forEach((el) => states.loading(el, 'Reading the settings'));
     states.loading(privEl, 'Reading the privacy settings');

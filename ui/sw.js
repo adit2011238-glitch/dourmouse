@@ -21,7 +21,7 @@
  * user) ever enter the cache. A signed-in user going offline sees the
  * shared bucket — honestly marked stale — never someone's personal data.
  */
-const CACHE = 'dourmouse-shell-v6';  // finding #194: the shell is a Mac window now; v6 drops the retired chrome modules
+const CACHE = 'dourmouse-shell-v7';  // finding #194: the shell is a Mac window now; v6 drops the retired chrome modules
 // v5.22.3: the PWA manifest + icons join the shell so the INSTALLED app
 // opens instantly with its icon even offline.
 // finding #154: the OS shell is the default page. Its page, its two design
@@ -50,6 +50,7 @@ const SHELL = ['/', '/shell', '/console', '/index.html', '/login.html', '/map', 
   '/assets/os/chrome/toasts.js',
   '/assets/os/core/api.js',
   '/assets/os/core/appearance.js',
+  '/assets/os/core/wallpaper.js',
   '/assets/os/core/approvals.js',
   '/assets/os/core/chat.js',
   '/assets/os/core/commands.js',

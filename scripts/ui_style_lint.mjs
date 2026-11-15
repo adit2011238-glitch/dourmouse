@@ -43,7 +43,9 @@ export function lintCss(text, file) {
     if (/text-transform\s*:\s*uppercase/i.test(line)) add("uppercase");
     const ls = /letter-spacing\s*:\s*([^;]+)/i.exec(line);
     if (ls && !/^\s*(0|normal)\s*$/.test(ls[1])) add("letter-spacing");
-    if (/backdrop-filter\s*:/i.test(line) && !/:\s*none/.test(line)) add("backdrop blur");
+    /* the one blur the owner approved (2026-11-14): the sidebar over the owner's own wallpaper photo */
+    const wallpaperBlur = /\[data-wallpaper="on"\] #sidebar/.test(line);
+    if (/backdrop-filter\s*:/i.test(line) && !/:\s*none/.test(line) && !wallpaperBlur) add("backdrop blur");
     if (/(^|[^-])filter\s*:\s*[^;]*blur\(/i.test(line)) add("blur");
     const sh = /(^|[^-])box-shadow\s*:\s*([^;]+)/i.exec(line);
     if (sh && !SHADOW_OK.test(sh[2])) add("decorative shadow");

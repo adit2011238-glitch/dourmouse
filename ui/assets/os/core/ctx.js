@@ -154,6 +154,8 @@ export function createScreenCtx({ id, root, deps }) {
         return deps.prefs.save('textSize', sizeId);
       },
     },
+    /* the wallpaper setting: the one narrow door the Appearance settings use */
+    wallpaper: deps.wallpaper,
     kit: deps.kit,
   };
 

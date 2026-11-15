@@ -24,8 +24,14 @@ html, body {
 button, input, select, textarea { font-family: inherit; }
 [hidden] { display: none !important; }
 
-/* reserved for the owner's wallpaper (thread 1.2): a layer behind everything, empty today */
-#wall { position: fixed; inset: 0; z-index: 0; pointer-events: none; }
+/* the owner's wallpaper (core/wallpaper.js, finding 197): a photo layer behind everything. It is empty
+   until a photo is chosen. With a photo on, the sidebar blurs it, and the content and inspector are the
+   theme colour at the opacity wallpaper.js worked out (--tk-wall-*), so text keeps 4.5:1 over any photo. */
+#wall { position: fixed; inset: 0; z-index: 0; pointer-events: none; background-size: cover; background-position: center; }
+:root[data-wallpaper="on"] body { background: transparent; }
+:root[data-wallpaper="on"] #sidebar { background: var(--tk-wall-sidebar); -webkit-backdrop-filter: blur(32px) saturate(1.4); backdrop-filter: blur(32px) saturate(1.4); }
+:root[data-wallpaper="on"] #stage { background: var(--tk-wall-content); }
+:root[data-wallpaper="on"] #inspector { background: var(--tk-wall-inspector); }
 
 [data-drag] { -webkit-app-region: drag; }
 [data-drag] button, [data-drag] input, [data-drag] a, [data-drag] [role="tab"], [data-drag] kbd, [data-drag] .segs, [data-drag] #stageactions { -webkit-app-region: no-drag; }

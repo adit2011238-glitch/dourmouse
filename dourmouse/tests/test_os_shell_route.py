@@ -203,7 +203,7 @@ class TestServiceWorkerServesTheShellOffline:
 
     def test_the_cache_name_moved_so_every_client_drops_the_old_console_at_root(self):
         src = (_UI / "sw.js").read_text(encoding="utf-8")
-        assert "dourmouse-shell-v6" in src and "dourmouse-shell-v5" not in src
+        assert "dourmouse-shell-v7" in src and "dourmouse-shell-v6" not in src
 
     def test_the_shell_and_the_classic_console_are_precached_and_every_asset_named_exists(self):
         listed = self._shell_list()
