@@ -17,7 +17,7 @@ export function SourceWidget(claim, { openExternal } = {}) {
   const head = el('div', 'srcw-head');
   head.append(el('span', 'lbl', 'Source'));
   if (url) {
-    const open = el('button', 'os-btn srcw-open', 'OPEN ' + hostOf(url));
+    const open = el('button', 'os-btn srcw-open', 'Open ' + hostOf(url));
     open.type = 'button';
     open.dataset.spec = 'Opens the source page from which this claim was quoted, in the browser. It only opens the page.';
     open.addEventListener('click', () => {

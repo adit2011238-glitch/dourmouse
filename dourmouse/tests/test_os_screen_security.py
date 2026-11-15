@@ -215,9 +215,10 @@ class TestOwnerFacingBehaviour:
         css = (_SEC / "security.css").read_text(encoding="utf-8")
         assert "white-space: nowrap" in css and ".kv b .tag" in css
 
-    def test_findings_are_counted_up_front_with_a_jump(self):
+    def test_findings_are_counted_in_their_own_heading_right_under_the_areas(self):
         src = (_SEC / "index.js").read_text(encoding="utf-8")
-        assert "SHOW FINDINGS" in src and "secFindLbl" in src
+        assert "'Findings (' + fs.length + ')'" in src and "secFindLbl" in src
+        assert src.index('id="secAreas"') < src.index('id="secFindings"') < src.index('id="secWifi"') < src.index('id="secMac"')
 
     def test_a_second_click_on_scan_or_report_before_the_bar_repaints_starts_nothing(self):
         src = (_SEC / "index.js").read_text(encoding="utf-8")

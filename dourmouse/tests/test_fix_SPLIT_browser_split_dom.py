@@ -591,11 +591,11 @@ class TestTheChatColumn:
         page.locator(".bw-chat-input").fill("go to the cart")
         page.keyboard.press("Enter")
         settle(page)
-        assert stop.is_visible() and page.locator(".bw-chat-send").text_content() == "QUEUE"
+        assert stop.is_visible() and page.locator(".bw-chat-send").text_content() == "Queue"
         stop.click()
         settle(page)
         assert page.evaluate("window.H.stream.runs[0].aborted") is True
-        assert stop.is_hidden() and page.locator(".bw-chat-send").text_content() == "SEND"
+        assert stop.is_hidden() and page.locator(".bw-chat-send").text_content() == "Send"
         page.close()
 
     def test_a_message_typed_while_the_model_works_waits_and_still_goes_to_the_browser_agent(self, browser, server):

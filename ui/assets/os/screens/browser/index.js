@@ -447,7 +447,7 @@ export default {
       const proxied = surface === 'frame' && frameProxied && Boolean(v.url);
       proxyEl.hidden = !proxied;
       if (proxied) {
-        proxyEl.textContent = 'Proxied view: this server fetched the page for you and shows it in a sandbox. No cookies or logins reach it, only this exact address is fetched, and links clicked inside it do not open here. Type an address in the bar, or use OPEN EXTERNALLY.';
+        proxyEl.textContent = 'Proxied view: this server fetched the page for you and shows it in a sandbox. No cookies or logins reach it, only this exact address is fetched, and links clicked inside it do not open here. Type an address in the bar, or use Open EXTERNALLY.';
       }
       split.setContext(v);
       paintRegion(v);
@@ -459,7 +459,7 @@ export default {
         actionKey = key;
         ctx.chrome.setActions([
           {
-            id: 'ext', label: 'OPEN EXTERNALLY', disabled: !web,
+            id: 'ext', label: 'Open externally', disabled: !web,
             spec: 'Opens the address this pane is showing in the system browser. It changes nothing here.',
             onClick: () => openExternally(),
           },
@@ -988,10 +988,10 @@ export default {
       if (panel === 'history') buildHistoryPanel();
       else if (panel === 'downloads') buildDownloadsPanel();
       else if (privacyUi && (panel === 'sites' || panel === 'passwords')) {
-        const close = panelButton('CLOSE', () => closePanel(), 'Goes back to the page.');
+        const close = panelButton('Close', () => closePanel(), 'Goes back to the page.');
         panelHandle = privacyUi.panels[panel](panelRoot, { head: panelHead, button: panelButton, close });
       } else if (manageUi && (panel === 'extensions' || panel === 'profiles')) {
-        const close = panelButton('CLOSE', () => closePanel(), 'Goes back to the page.');
+        const close = panelButton('Close', () => closePanel(), 'Goes back to the page.');
         panelHandle = manageUi.panels[panel](panelRoot, { head: panelHead, button: panelButton, close });
       }
     }
@@ -1012,8 +1012,8 @@ export default {
           loadHistory();
         }, 250);
       });
-      const clear = panelButton('CLEAR ALL', () => askClearHistory(), 'Removes every recorded visit from this Mac after you confirm. Bookmarks and downloads are not touched.');
-      const close = panelButton('CLOSE', () => closePanel(), 'Goes back to the page.');
+      const clear = panelButton('Clear all', () => askClearHistory(), 'Removes every recorded visit from this Mac after you confirm. Bookmarks and downloads are not touched.');
+      const close = panelButton('Close', () => closePanel(), 'Goes back to the page.');
       histConfirm = el('div', 'bw-pc');
       histBody = el('div', 'bw-pb');
       panelRoot.dataset.panel = 'history';
@@ -1091,10 +1091,10 @@ export default {
     }
 
     function buildDownloadsPanel() {
-      const clear = panelButton('CLEAR FINISHED', () => {
+      const clear = panelButton('Clear finished', () => {
         if (pane) safe(pane.clearDownloads());
       }, 'Removes finished, cancelled and failed downloads from this list. The files themselves stay where they are.');
-      const close = panelButton('CLOSE', () => closePanel(), 'Goes back to the page.');
+      const close = panelButton('Close', () => closePanel(), 'Goes back to the page.');
       dlBody = el('div', 'bw-pb');
       panelRoot.dataset.panel = 'downloads';
       panelRoot.replaceChildren(
@@ -1135,14 +1135,14 @@ export default {
         acts.append(b);
       };
       if (d.state === 'progressing') {
-        btn(d.paused ? 'RESUME' : 'PAUSE', d.paused ? 'resume' : 'pause');
-        btn('CANCEL', 'cancel');
+        btn(d.paused ? 'Resume' : 'Pause', d.paused ? 'resume' : 'pause');
+        btn('Cancel', 'cancel');
       } else {
         if (d.state === 'completed') {
-          btn('OPEN', 'open', d.openable ? null : { disabled: true, title: 'This kind of file can run code, so it is not opened from here. Use Show in folder.' });
-          btn('SHOW IN FOLDER', 'reveal');
+          btn('Open', 'open', d.openable ? null : { disabled: true, title: 'This kind of file can run code, so it is not opened from here. Use Show in folder.' });
+          btn('Show in folder', 'reveal');
         }
-        btn('REMOVE', 'remove');
+        btn('Remove', 'remove');
       }
       row.append(name, line, bar, acts);
       dlLive.set(d.id, { line, fill, bar });

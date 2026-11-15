@@ -60,8 +60,8 @@ export default {
     input.placeholder = 'Search by from:, subject:, or plain words. Empty shows the inbox.';
     input.setAttribute('aria-label', 'Search mail');
     input.dataset.spec = 'Searches your mailbox with Gmail search words (from:, subject:, newer_than:3d, or plain text). An empty box shows the inbox. Reading is not gated.';
-    const searchBtn = button('SEARCH', 'Runs the search against Gmail now. Empty shows the inbox.');
-    const clearBtn = button('CLEAR', 'Clears the search and shows the inbox again.');
+    const searchBtn = button('Search', 'Runs the search against Gmail now. Empty shows the inbox.');
+    const clearBtn = button('Clear', 'Clears the search and shows the inbox again.');
     clearBtn.hidden = true;
     const ageEl = el('span', 'muted cm-age');
     barEl.append(input, searchBtn, clearBtn, ageEl);
@@ -96,15 +96,15 @@ export default {
       autonomous: false,
       placeholder: 'Ask about your mail. Sending always asks first.',
       emptyMessage: 'No mail directives yet.',
-      emptyHint: 'Use COMPOSE to write a message. It goes to the mail agent, and an approval card shows who it goes to before anything is sent.',
+      emptyHint: 'Use Compose to write a message. It goes to the mail agent, and an approval card shows who it goes to before anything is sent.',
       actions: () => [
         {
-          id: 'refresh', label: st.refreshing ? 'READING' : 'REFRESH', disabled: st.refreshing,
+          id: 'refresh', label: st.refreshing ? 'Reading' : 'Refresh', disabled: st.refreshing,
           spec: 'Reads Gmail again now, skipping the short cache the inbox is normally served from.',
           onClick: () => load('manual', { fresh: true }),
         },
         {
-          id: 'compose', label: 'COMPOSE', kind: composeBlocked() ? '' : 'primary', pressed: st.composing, disabled: composeBlocked(),
+          id: 'compose', label: 'Compose', kind: composeBlocked() ? '' : 'primary', pressed: st.composing, disabled: composeBlocked(),
           title: composeBlocked() ? 'Gmail is not connected, so there is nothing to send with.' : '',
           spec: 'Opens a message form. Sending is not done here: it goes to the mail agent, and a real approval card shows the recipient before anything leaves.',
           onClick: () => (st.composing ? closeCompose() : openCompose({})),
@@ -133,15 +133,15 @@ export default {
       const when = el('span', 'muted cm-when', whenLabel(row));
       open.append(who, subj, when);
       const actions = el('span', 'os-row-actions');
-      const flag = button(row.flagged ? 'UNFLAG' : 'FLAG', row.flagged
+      const flag = button(row.flagged ? 'Unflag' : 'Flag', row.flagged
         ? 'Removes the star in Gmail after asking. Nothing moves.'
         : 'Stars this message in Gmail after asking. Nothing moves.');
       flag.dataset.act = row.flagged ? 'unflag' : 'flag';
       flag.dataset.id = row.id;
-      const arch = button('ARCHIVE', 'Takes this message out of the inbox after asking. It stays in All Mail and stays searchable. Nothing is deleted.');
+      const arch = button('Archive', 'Takes this message out of the inbox after asking. It stays in All Mail and stays searchable. Nothing is deleted.');
       arch.dataset.act = 'archive';
       arch.dataset.id = row.id;
-      const trash = button('TRASH', 'Moves this message to Gmail Trash after asking. Gmail keeps it for 30 days. It is never a permanent delete.', 'os-btn--danger');
+      const trash = button('Trash', 'Moves this message to Gmail Trash after asking. Gmail keeps it for 30 days. It is never a permanent delete.', 'os-btn--danger');
       trash.dataset.act = 'trash';
       trash.dataset.id = row.id;
       actions.append(flag, arch, trash);
@@ -267,18 +267,18 @@ export default {
       body.tabIndex = 0;
       body.setAttribute('aria-label', 'Message text');
       const acts = el('div', 'cm-dacts');
-      const reply = button('REPLY', 'Opens the message form filled with this sender and a Re: subject. Nothing is sent from the form: it goes to the mail agent and asks first.', 'os-btn--primary');
+      const reply = button('Reply', 'Opens the message form filled with this sender and a Re: subject. Nothing is sent from the form: it goes to the mail agent and asks first.', 'os-btn--primary');
       reply.dataset.reply = row.id;
-      const flag = button(row.flagged ? 'UNFLAG' : 'FLAG', 'Stars or un-stars this message in Gmail after asking. Nothing moves.');
+      const flag = button(row.flagged ? 'Unflag' : 'Flag', 'Stars or un-stars this message in Gmail after asking. Nothing moves.');
       flag.dataset.act = row.flagged ? 'unflag' : 'flag';
       flag.dataset.id = row.id;
-      const arch = button('ARCHIVE', 'Takes this message out of the inbox after asking. It stays in All Mail.');
+      const arch = button('Archive', 'Takes this message out of the inbox after asking. It stays in All Mail.');
       arch.dataset.act = 'archive';
       arch.dataset.id = row.id;
-      const trash = button('TRASH', 'Moves this message to Gmail Trash after asking. Recoverable for 30 days.', 'os-btn--danger');
+      const trash = button('Trash', 'Moves this message to Gmail Trash after asking. Recoverable for 30 days.', 'os-btn--danger');
       trash.dataset.act = 'trash';
       trash.dataset.id = row.id;
-      const close = button('CLOSE', 'Closes the message. Esc does the same.');
+      const close = button('Close', 'Closes the message. Esc does the same.');
       close.dataset.closeDetail = '1';
       acts.append(reply, flag, arch, trash, close);
       card.append(head, body, acts);
@@ -346,8 +346,8 @@ export default {
       status.setAttribute('role', 'alert');
       f.status = status;
       const row = el('div', 'cm-dacts');
-      const cancel = button('CANCEL', 'Closes the form and keeps nothing. Esc does the same.');
-      const send = button('SEND TO MAIL AGENT', 'Hands this message to the mail agent. It stops at the real approval gate: a card shows the recipient and the start of the body, and nothing leaves until you type "send it".', 'os-btn--primary');
+      const cancel = button('Cancel', 'Closes the form and keeps nothing. Esc does the same.');
+      const send = button('Send to mail agent', 'Hands this message to the mail agent. It stops at the real approval gate: a card shows the recipient and the start of the body, and nothing leaves until you type "send it".', 'os-btn--primary');
       f.send = send;
       cancel.addEventListener('click', () => closeCompose());
       send.addEventListener('click', () => sendCompose());
@@ -385,7 +385,7 @@ export default {
         return;
       }
       if (ctx.chat.busy()) {
-        f.status.textContent = 'The conversation is still busy. Wait for it, or press STOP in the directive box, then send.';
+        f.status.textContent = 'The conversation is still busy. Wait for it, or press Stop in the directive box, then send.';
         return;
       }
       f.status.textContent = '';
@@ -447,6 +447,6 @@ export default {
 
   async refresh(ctx, reason) {
     /* the shell's refresh shortcut: the stage bar's REFRESH owns the read */
-    if (reason === 'manual') ctx.notify({ level: 'info', title: 'COMMS', detail: 'Use REFRESH to read Gmail again now.', ttl: 2500 });
+    if (reason === 'manual') ctx.notify({ level: 'info', title: 'Comms', detail: 'Use Refresh to read Gmail again now.', ttl: 2500 });
   },
 };

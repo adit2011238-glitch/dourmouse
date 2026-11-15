@@ -77,10 +77,10 @@ export function mountJobsPanel(listEl, detailEl, confirmEl, ctx) {
     pause.checked = true;
     pause.dataset.spec = 'When ticked, the job stops after the context brief so you can check and correct it.';
     pauseWrap.append(pause, document.createTextNode(' Stop so I can check the brief'));
-    const go = el('button', 'os-btn os-btn--primary', 'CONTINUE');
+    const go = el('button', 'os-btn os-btn--primary', 'Continue');
     go.type = 'submit';
     go.dataset.spec = 'Shows what will start and waits for your approval before anything starts.';
-    const cancel = button('CANCEL', 'Closes this form without starting anything.', () => close());
+    const cancel = button('Cancel', 'Closes this form without starting anything.', () => close());
     const row = el('div', 'rs-newrow');
     row.append(input, style, go, cancel);
     form.append(label, row, pauseWrap);
@@ -111,7 +111,7 @@ export function mountJobsPanel(listEl, detailEl, confirmEl, ctx) {
   function paintList() {
     const jobs = (st.jobs || []);
     if (!jobs.length) {
-      states.empty(listEl, 'No research jobs yet.', { hint: 'Press NEW RESEARCH JOB to start one in the background.' });
+      states.empty(listEl, 'No research jobs yet.', { hint: 'Press New research job to start one in the background.' });
       return;
     }
     const wrap = el('div', 'rs-qs');
@@ -156,8 +156,8 @@ export function mountJobsPanel(listEl, detailEl, confirmEl, ctx) {
     notes.setAttribute('aria-label', 'Corrections to the brief');
     const row = el('div', 'rs-newrow');
     row.append(
-      button('SAVE CORRECTIONS', 'Saves your corrections to the brief. Nothing else happens.', () => post('/api/os/research/job/brief', { id: job.id, owner_notes: notes.value }, 'Corrections saved')),
-      button('CONTINUE', 'Saves your corrections, then lets the job search for and read papers.', async () => {
+      button('Save corrections', 'Saves your corrections to the brief. Nothing else happens.', () => post('/api/os/research/job/brief', { id: job.id, owner_notes: notes.value }, 'Corrections saved')),
+      button('Continue', 'Saves your corrections, then lets the job search for and read papers.', async () => {
         if (await post('/api/os/research/job/brief', { id: job.id, owner_notes: notes.value })) post('/api/os/research/job/continue', { id: job.id }, 'Paper search started');
       }, true),
     );
@@ -196,8 +196,8 @@ export function mountJobsPanel(listEl, detailEl, confirmEl, ctx) {
     q.sub_questions.forEach((x) => { if (x.why) why.append(el('li', '', x.text + ': ' + x.why)); });
     const row = el('div', 'rs-newrow');
     row.append(
-      button('SAVE EDITS', 'Saves your version of the question, goals (one per line) and sub-questions (one per line). Nothing runs.', () => post('/api/os/research/job/questions', payload(), 'Questions saved')),
-      button('APPROVE', 'Saves your version, then lets the job answer these sub-questions with cited evidence.', async () => {
+      button('Save edits', 'Saves your version of the question, goals (one per line) and sub-questions (one per line). Nothing runs.', () => post('/api/os/research/job/questions', payload(), 'Questions saved')),
+      button('Approve', 'Saves your version, then lets the job answer these sub-questions with cited evidence.', async () => {
         if (await post('/api/os/research/job/questions', payload())) post('/api/os/research/job/approve', { id: job.id }, 'Answer rounds started');
       }, true),
     );
@@ -279,7 +279,7 @@ export function mountJobsPanel(listEl, detailEl, confirmEl, ctx) {
       if (v === r.style) o.selected = true;
       style.append(o);
     });
-    exp.append(style, button('EXPORT', 'Saves the answers, disagreements, references and the quote behind every claim as a markdown file.', () => exportJob(job.id, style.value)));
+    exp.append(style, button('Export', 'Saves the answers, disagreements, references and the quote behind every claim as a markdown file.', () => exportJob(job.id, style.value)));
     const out = el('div');
     out.append(s, dis, refs, how, exp);
     return out;

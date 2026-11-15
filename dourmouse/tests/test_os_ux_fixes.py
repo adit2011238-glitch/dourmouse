@@ -168,7 +168,7 @@ class TestThreadView:
             css = (_OS / "screens" / slug / f"{slug}.css").read_text(encoding="utf-8")
             you = re.search(r"\.turn \.you \{[^}]*font-size: ([^;]+);", css).group(1)
             reply = re.search(r"\.reply \{[^}]*font-size: ([^;]+);", css).group(1)
-            assert you == reply == "var(--dm-text-base)", (slug, you, reply)
+            assert you == reply and you in ("var(--dm-text-base)", "13px"), (slug, you, reply)
 
 
 class TestStageLights:

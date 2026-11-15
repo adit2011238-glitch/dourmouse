@@ -92,11 +92,11 @@ export function createChatColumn({ ctx, control, note, shared, onHide, onSwapSid
   const row = el('div', 'bw-chat-row');
   const queued = el('span', 'bw-chat-q');
   queued.hidden = true;
-  const stopBtn = el('button', 'os-btn os-btn--danger bw-chat-stop', 'STOP');
+  const stopBtn = el('button', 'os-btn os-btn--danger bw-chat-stop', 'Stop');
   stopBtn.type = 'button';
   stopBtn.hidden = true;
   stopBtn.dataset.spec = 'Stops the AI: it ends the run and declines any question waiting for you, so nothing is left hanging.';
-  const sendBtn = el('button', 'os-btn os-btn--primary bw-chat-send', 'SEND');
+  const sendBtn = el('button', 'os-btn os-btn--primary bw-chat-send', 'Send');
   sendBtn.type = 'submit';
   sendBtn.dataset.spec = 'Sends this to the AI. While it is still working, your message waits in line instead.';
   row.append(queued, stopBtn, sendBtn);
@@ -111,7 +111,7 @@ export function createChatColumn({ ctx, control, note, shared, onHide, onSwapSid
   const waiting = [];
   function paintComposer() {
     const c = comp || {};
-    sendBtn.textContent = c.busy ? 'QUEUE' : 'SEND';
+    sendBtn.textContent = c.busy ? 'Queue' : 'Send';
     stopBtn.hidden = !c.busy;
     const q = (c.queued || 0) + waiting.length;
     queued.hidden = !q;

@@ -53,7 +53,7 @@ export function createManage({ manage, note, onChange }) {
     const body = el('div', 'bw-pb');
     const slot = el('div', 'bw-pc');
     const noteEl = el('p', 'bw-pnote', 'Extensions are loaded with Electron\'s own extension support.');
-    const add = button('ADD EXTENSION', async () => {
+    const add = button('Add extension', async () => {
       add.disabled = true;
       const r = await call(() => manage.extensions.add(), 'The extension was not added');
       add.disabled = false;
@@ -104,7 +104,7 @@ export function createManage({ manage, note, onChange }) {
       }
       const acts = el('div', 'ac');
       const rowSlot = el('div', 'bw-pc');
-      const toggle = el('button', 'os-btn', r.enabled ? 'DISABLE' : 'ENABLE');
+      const toggle = el('button', 'os-btn', r.enabled ? 'Disable' : 'Enable');
       toggle.type = 'button';
       toggle.dataset.spec = r.enabled
         ? 'Turns this extension off and unloads it. Its files stay, so it can be turned on again.'
@@ -114,7 +114,7 @@ export function createManage({ manage, note, onChange }) {
         await call(() => (r.enabled ? manage.extensions.disable(r.id) : manage.extensions.enable(r.id)), 'The extension was not changed');
         if (alive) load();
       });
-      const del = el('button', 'os-btn', 'REMOVE');
+      const del = el('button', 'os-btn', 'Remove');
       del.type = 'button';
       del.dataset.spec = 'Unloads this extension and deletes its copy from this Mac after you confirm.';
       del.addEventListener('click', () => {
@@ -172,7 +172,7 @@ export function createManage({ manage, note, onChange }) {
       const acts = el('div', 'ac');
       const rowSlot = el('div', 'bw-pc');
       if (!p.active) {
-        const sw = el('button', 'os-btn', 'SWITCH');
+        const sw = el('button', 'os-btn', 'Switch');
         sw.type = 'button';
         sw.dataset.spec = 'Closes the open tabs and opens this profile, with its own logins, history and bookmarks.';
         sw.addEventListener('click', () => {
@@ -182,7 +182,7 @@ export function createManage({ manage, note, onChange }) {
         });
         acts.append(sw);
         if (!p.isDefault) {
-          const del = el('button', 'os-btn', 'REMOVE');
+          const del = el('button', 'os-btn', 'Remove');
           del.type = 'button';
           del.dataset.spec = 'Deletes this profile and everything in it, after a macOS confirmation.';
           del.addEventListener('click', async () => {
@@ -210,7 +210,7 @@ export function createManage({ manage, note, onChange }) {
       inp.placeholder = 'work';
       lab.append(inp);
       const msg = el('div', 'bw-pnote');
-      const go = el('button', 'os-btn', 'CREATE PROFILE');
+      const go = el('button', 'os-btn', 'Create profile');
       go.type = 'submit';
       form.append(lab, msg, go);
       form.addEventListener('submit', async (e) => {
@@ -258,7 +258,7 @@ export function createManage({ manage, note, onChange }) {
       l.append(input, el('span', '', text));
       return l;
     };
-    const chromeBtn = el('button', 'os-btn', 'IMPORT BOOKMARKS AND HISTORY');
+    const chromeBtn = el('button', 'os-btn', 'Import bookmarks and history');
     chromeBtn.type = 'button';
     chromeBtn.dataset.spec = 'Opens a macOS folder picker for a Chrome profile folder, then a macOS confirmation with the counts. Only its Bookmarks and History files are read, as copies. Passwords, cookies and the rest are never touched, and Chrome is not changed.';
     chromeBtn.addEventListener('click', async () => {
@@ -268,7 +268,7 @@ export function createManage({ manage, note, onChange }) {
       showResult(r, 'Nothing was imported');
       if (r && r.ok && onChange) onChange();
     });
-    const pwBtn = el('button', 'os-btn', 'IMPORT PASSWORDS FROM A CSV');
+    const pwBtn = el('button', 'os-btn', 'Import passwords from a csv');
     pwBtn.type = 'button';
     pwBtn.dataset.spec = 'Opens a macOS file picker for the CSV you exported from Chrome, then a macOS confirmation with the count. The passwords are encrypted into this Mac\'s Keychain-protected vault. The file is not copied or changed, and Dourmouse never reads Chrome\'s own password store.';
     pwBtn.addEventListener('click', async () => {

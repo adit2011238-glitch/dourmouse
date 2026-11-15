@@ -145,7 +145,7 @@ class TestTheScreenKeepsItsPromises:
     def test_the_one_call_that_returns_a_password_sits_behind_a_confirmation_card_and_a_timeout(self):
         ui = source("privacy-ui.js")
         assert ui.count("pwReveal(") == 1
-        reveal = ui[ui.index("show.addEventListener"):ui.index("const del = el('button', 'os-btn', 'DELETE');")]
+        reveal = ui[ui.index("show.addEventListener"):ui.index("const del = el('button', 'os-btn', 'Delete');")]
         assert "confirmHere(" in reveal and "privacy.pwReveal(r.id)" in reveal and "REVEAL_MS" in reveal
         assert "setTimeout" in reveal and "textContent = ''" in reveal
         assert "export const REVEAL_MS = 10000;" in ui

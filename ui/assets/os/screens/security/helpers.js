@@ -49,10 +49,10 @@ export function flowLegend(d) {
   return {
     title: 'severity on the last scan',
     items: [
-      { label: 'high ' + (c.high || 0), color: 'var(--dm-error)' },
-      { label: 'medium ' + (c.med || 0), color: 'var(--os-warn)' },
-      { label: 'low ' + (c.low || 0), color: 'var(--dm-ok)' },
-      { label: 'not checked: see posture', color: 'var(--dm-fg-dim)' },
+      { label: 'high ' + (c.high || 0), color: 'var(--tk-critical-text)' },
+      { label: 'medium ' + (c.med || 0), color: 'var(--tk-warning-text)' },
+      { label: 'low ' + (c.low || 0), color: 'var(--tk-good-text)' },
+      { label: 'not checked: see posture', color: 'var(--tk-text-2)' },
     ],
   };
 }
@@ -164,4 +164,47 @@ export function egressSummary(d) {
     + s.with_sensitive + ' carried sensitive content the owner allowed.';
   if (s.write_failures) text += ' ' + s.write_failures + ' could not be written to the ledger (see the server log).';
   return text;
+}
+
+/* ---------------- plan 1.9: the status page ---------------- */
+/* One word per area, from the rating the server already computes. A collector that could not answer
+   reads "Not checked", never "Protected". */
+export const STATUS = {
+  good: { word: 'Protected', tone: 'ok' },
+  attention: { word: 'Needs attention', tone: 'warn' },
+  at_risk: { word: 'At risk', tone: 'bad' },
+  unknown: { word: 'Not checked', tone: '' },
+};
+
+const NOT_CHECKED_WORDS = { host_protections: 'Mac settings', firewall: 'the firewall', listening_ports: 'open ports', wifi: 'the Wi-Fi link', arp_neighbors: 'other devices', dns: 'name lookups', persistence: 'background items', downloads_assessed: 'downloads', 'monitoring indicators': 'signs of monitoring' };
+
+/* one row per area of the posture list: label, status, and one short line saying why */
+export function areaRows(d) {
+  const posture = d && Array.isArray(d.posture) ? d.posture : [];
+  return posture.map((p) => {
+    const st = STATUS[p.rating] || STATUS.unknown;
+    const ev = Array.isArray(p.evidence) ? p.evidence : [];
+    const missing = Array.isArray(p.not_checked) ? p.not_checked.map((x) => NOT_CHECKED_WORDS[x] || String(x).replace(/_/g, ' ')) : [];
+    let note = '';
+    if (ev.length) note = plural(ev.length, 'finding') + (missing.length ? '. Not checked: ' + missing.join(', ') : '');
+    else if (missing.length) note = 'Not checked: ' + missing.join(', ');
+    return { key: p.dimension || p.label, label: p.label, word: st.word, tone: st.tone, note };
+  });
+}
+
+/* the sentence at the top. It counts the last scan's findings and says what was not covered. */
+export function headline(d) {
+  if (!d || !d.scanned) return { text: 'No scan has finished yet', sub: 'Press Scan now, or wait for the next automatic scan. This is not an all-clear.', tone: '' };
+  const c = d.findings_by_severity || {};
+  const needs = (c.high || 0) + (c.med || 0);
+  const gaps = areaRows(d).filter((r) => r.word === 'Not checked').length;
+  const cover = gaps ? ' ' + plural(gaps, 'area') + (gaps === 1 ? ' was' : ' were') + ' not checked.' : '';
+  if (needs) return { text: needs === 1 ? '1 thing needs attention' : needs + ' things need attention', sub: (c.high ? plural(c.high, 'high finding') + '. ' : '') + 'Last scan ' + (d.last_scan_at ? agoLabel(d.last_scan_at) : '') + '.' + cover, tone: c.high ? 'bad' : 'warn' };
+  if (c.low) return { text: 'Only minor notes on the last scan', sub: plural(c.low, 'low finding') + '.' + cover, tone: '' };
+  return { text: 'Nothing found on the last scan', sub: 'Only what could be checked is covered.' + cover, tone: gaps ? '' : 'ok' };
+}
+
+/* the view the owner last chose; a storage that cannot be read gives the simple view */
+export function cleanView(v) {
+  return v === 'detailed' ? 'detailed' : 'simple';
 }

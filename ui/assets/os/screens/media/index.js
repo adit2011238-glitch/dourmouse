@@ -64,7 +64,7 @@ export default {
     pathIn.autocomplete = 'off';
     pathIn.spellcheck = false;
     spec(pathIn, 'The full path of an audio, video or image file. MEDIA only plays files inside the workspace, uploads, Movies, Music, Downloads, Desktop and Documents folders.');
-    const goBtn = el('button', 'os-btn os-btn--primary', 'OPEN');
+    const goBtn = el('button', 'os-btn os-btn--primary', 'Open');
     goBtn.type = 'button';
     spec(goBtn, 'Checks the path on the server, records it in the recent list and loads it into the player. It reads the file; it changes nothing.');
     pathRow.append(pathIn, goBtn);
@@ -107,7 +107,7 @@ export default {
     seek.setAttribute('aria-label', 'Position');
     spec(seek, 'Scrubber. Releasing it seeks the media element, and the browser asks the server for a byte range from that point; the server answers 206 with exactly those bytes.');
     const durEl = el('span', 'muted', '');
-    const muteBtn = el('button', 'os-btn med-skip', 'MUTE');
+    const muteBtn = el('button', 'os-btn med-skip', 'Mute');
     muteBtn.type = 'button';
     muteBtn.setAttribute('aria-label', 'Mute');
     spec(muteBtn, 'Mutes and unmutes the player. Shortcut: M.');
@@ -125,11 +125,11 @@ export default {
     speedBtn.type = 'button';
     speedBtn.setAttribute('aria-label', 'Playback speed 1x');
     spec(speedBtn, 'Cycles the playback speed: 1x, 1.25x, 1.5x, 2x, 0.75x. It stays until you change it.');
-    const fsBtn = el('button', 'os-btn med-skip', 'FULL SCREEN');
+    const fsBtn = el('button', 'os-btn med-skip', 'Full screen');
     fsBtn.type = 'button';
     fsBtn.hidden = true;
     spec(fsBtn, 'Shows the video full screen. Esc leaves it. Shortcut: F.');
-    const queueAddBtn = el('button', 'os-btn med-skip', '+ QUEUE');
+    const queueAddBtn = el('button', 'os-btn med-skip', 'Add to queue');
     queueAddBtn.type = 'button';
     queueAddBtn.disabled = true;
     spec(queueAddBtn, 'Adds the open audio or video file to the end of the queue. The queue is saved, so it survives a restart.');
@@ -143,7 +143,7 @@ export default {
     const queueEl = el('div', 'card med-queue');
     const queueHead = el('div', 'med-qhead');
     queueHead.append(el('div', 'lbl', 'Queue'));
-    const queueClear = el('button', 'os-btn', 'CLEAR');
+    const queueClear = el('button', 'os-btn', 'Clear');
     queueClear.type = 'button';
     spec(queueClear, 'Empties the queue. The files themselves are not touched.');
     queueHead.append(queueClear);
@@ -161,10 +161,10 @@ export default {
     webIn.autocomplete = 'off';
     webIn.spellcheck = false;
     spec(webIn, 'A YouTube or Spotify link, or words to search for. Only https links on those two services are opened; the page opens in the shared browser pane (or the system browser outside the desktop app), because this window cannot frame another site.');
-    const ytBtn = el('button', 'os-btn os-btn--primary', 'YOUTUBE');
+    const ytBtn = el('button', 'os-btn os-btn--primary', 'YouTube');
     ytBtn.type = 'button';
     spec(ytBtn, 'Opens the link or search on YouTube in the browser pane. Empty opens the YouTube home page.');
-    const spBtn = el('button', 'os-btn os-btn--primary', 'SPOTIFY');
+    const spBtn = el('button', 'os-btn os-btn--primary', 'Spotify');
     spBtn.type = 'button';
     spec(spBtn, 'Opens the link or search on Spotify Web in the browser pane. Spotify asks you to sign in there; this app never sees that login.');
     webRow.append(webIn, ytBtn, spBtn);
@@ -185,7 +185,7 @@ export default {
 
     /* ---------------- stage bar ---------------- */
     const actions = () => [{
-      id: 'open', label: 'OPEN FILE', kind: 'primary', pressed: st.openPanel,
+      id: 'open', label: 'Open file', kind: 'primary', pressed: st.openPanel,
       spec: 'Shows the path field and the folders MEDIA may read. It plays audio, video and images; anything ffmpeg cannot read is refused with the reason.',
       onClick: () => togglePanel(),
     }];
@@ -243,7 +243,7 @@ export default {
       const rows = st.queue;
       queueClear.disabled = !rows.length;
       if (!rows.length) {
-        states.empty(queueList, 'The queue is empty.', { hint: 'Open an audio or video file and press + QUEUE.' });
+        states.empty(queueList, 'The queue is empty.', { hint: 'Open an audio or video file and press Add to queue.' });
       } else {
         const wrap = el('div');
         rows.forEach((r, i) => {
@@ -265,7 +265,7 @@ export default {
           down.disabled = reorderTarget(i, 1, rows.length) < 0;
           spec(down, 'Moves ' + r.name + ' one place later in the queue.');
           down.addEventListener('click', () => queueOp({ op: 'move', path: r.path, to: i + 1 }));
-          const del = el('button', 'os-btn med-skip', '✕');
+          const del = el('button', 'os-btn med-skip', 'Remove');
           del.type = 'button';
           del.setAttribute('aria-label', 'Remove ' + r.name);
           spec(del, 'Takes ' + r.name + ' out of the queue. The file is not touched.');
@@ -505,7 +505,7 @@ export default {
         if (!st.dragging) seek.value = String(media.currentTime);
       });
       media.addEventListener('play', () => {
-        playBtn.textContent = '❚❚';
+        playBtn.textContent = '‖';
         playBtn.setAttribute('aria-label', 'Pause');
         report(true);
       });
@@ -575,7 +575,7 @@ export default {
           playerError(job.error || 'ffmpeg could not make this file playable.');
         } else if (polls >= CONVERT_POLL_MAX || Date.now() - started > CONVERT_POLL_MAX * CONVERT_POLL_MS) {
           stopPoll();
-          playerError('Still converting after a long wait. Press OPEN again later to check.');
+          playerError('Still converting after a long wait. Press Open again later to check.');
         } else {
           stageEl.replaceChildren(el('div', 'med-msg', convertLabel(job)));
         }
@@ -658,7 +658,7 @@ export default {
     queueAddBtn.addEventListener('click', () => st.row && queueOp({ op: 'add', path: st.row.path }));
     queueClear.addEventListener('click', () => queueOp({ op: 'clear' }));
     function applyAudio() {
-      muteBtn.textContent = st.muted ? 'UNMUTE' : 'MUTE';
+      muteBtn.textContent = st.muted ? 'Unmute' : 'Mute';
       muteBtn.setAttribute('aria-label', st.muted ? 'Unmute' : 'Mute');
       if (st.media) {
         st.media.volume = st.volume;
@@ -716,7 +716,7 @@ export default {
       try {
         if (ctx.host.pane) {
           await ctx.api.post('/api/browser-pane/open', { url: r.url });
-          note('Sent to the browser pane. Open BROWSER to see it.');
+          note('Sent to the browser pane. Open Browser to see it.');
         } else if (ctx.host.openExternal(r.url)) {
           note('Opened in the system browser.');
         } else {
@@ -815,7 +815,7 @@ export default {
     });
 
     /* ---------------- start ---------------- */
-    states.empty(stageEl, 'No file is open.', { hint: 'Press OPEN FILE, then type a path or pick a folder.' });
+    states.empty(stageEl, 'No file is open.', { hint: 'Press Open file, then type a path or pick a folder.' });
     states.loading(fmtEl, 'Reading the supported formats');
     await view.start();
     await loadLibrary();
@@ -824,7 +824,7 @@ export default {
   },
 
   async refresh(ctx, reason) {
-    if (reason === 'manual') ctx.notify({ level: 'info', title: 'MEDIA', detail: 'The player and the thread are live; nothing to refresh.', ttl: 2500 });
+    if (reason === 'manual') ctx.notify({ level: 'info', title: 'Media', detail: 'The player and the thread are live; nothing to refresh.', ttl: 2500 });
   },
 
   unmount() {},

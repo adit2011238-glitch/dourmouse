@@ -48,7 +48,7 @@ export default {
       const roots = st.data ? st.data.configured_roots || [] : [];
       ctx.chrome.setActions([
         {
-          id: 'scan', label: 'SCAN', kind: 'primary', disabled: !st.data || !roots.length,
+          id: 'scan', label: 'Scan', kind: 'primary', disabled: !st.data || !roots.length,
           title: st.data && !roots.length ? 'No folders are configured for the wiki' : '',
           spec: 'Asks first, then hands a scan request to the device wiki agent in HOME. The agent reads only the configured folders and a cloud model summarizes changed files, which uses credits. Every model call shows in the HOME conversation.',
           onClick: () => askScan(),
@@ -91,7 +91,7 @@ export default {
       const size = fmtSize(e.size_bytes);
       if (size) row.append(el('span', 'muted', size));
       const open = st.open.has(e.path);
-      const b = el('button', 'os-btn', open ? 'CLOSE' : 'OPEN');
+      const b = el('button', 'os-btn', open ? 'Close' : 'Open');
       b.type = 'button';
       b.setAttribute('aria-expanded', String(open));
       b.dataset.spec = 'Shows what the wiki stored about this file: its summary, size, checksum and when it was last seen. It does not read the file itself.';
@@ -133,7 +133,7 @@ export default {
       if (!entries.length) {
         root.dataset.state = 'empty';
         states.empty(listEl, 'Nothing has been scanned yet.', {
-          hint: 'Watching ' + plural(roots.length, 'folder', 'folders') + ': ' + roots.join(', ') + '. Press SCAN to ask the device wiki agent to scan them.',
+          hint: 'Watching ' + plural(roots.length, 'folder', 'folders') + ': ' + roots.join(', ') + '. Press Scan to ask the device wiki agent to scan them.',
         });
         return;
       }
@@ -246,6 +246,6 @@ export default {
   },
 
   async refresh(ctx, reason) {
-    if (reason === 'manual') ctx.notify({ level: 'info', title: 'WIKI', detail: 'The list re-reads every 15 seconds while this screen is open.', ttl: 2500 });
+    if (reason === 'manual') ctx.notify({ level: 'info', title: 'Wiki', detail: 'The list re-reads every 15 seconds while this screen is open.', ttl: 2500 });
   },
 };

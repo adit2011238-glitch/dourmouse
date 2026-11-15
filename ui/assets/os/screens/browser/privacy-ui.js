@@ -243,7 +243,7 @@ export function createPrivacy({ ctx, privacy, note }) {
     const drmEl = el('p', 'bw-pnote bw-drm');
     drmEl.dataset.role = 'drm-status';
     let alive = true;
-    const clearAll = button('RESET ALL', () => {
+    const clearAll = button('Reset all', () => {
       confirmHere(
         confirm,
         'Reset every site permission? All remembered Allow and Block answers are removed, and sites will ask again.',
@@ -298,7 +298,7 @@ export function createPrivacy({ ctx, privacy, note }) {
     const box = el('div', 'bw-site');
     const top = el('div', 'bw-sitehead');
     top.append(el('span', 'bw-sitename', g.host));
-    const forget = el('button', 'os-btn', 'FORGET SITE');
+    const forget = el('button', 'os-btn', 'Forget site');
     forget.type = 'button';
     forget.dataset.spec = 'Removes every saved answer for this site, so it asks again.';
     forget.addEventListener('click', async () => {
@@ -379,7 +379,7 @@ export function createPrivacy({ ctx, privacy, note }) {
       shown.hidden = true;
       const acts = el('div', 'ac');
       const slot = el('div', 'bw-pc');
-      const show = el('button', 'os-btn', 'SHOW');
+      const show = el('button', 'os-btn', 'Show');
       show.type = 'button';
       show.disabled = !r.readable;
       show.dataset.spec = 'Shows this password on screen for ten seconds, after you confirm here and in a macOS dialog. The AI cannot press that dialog.';
@@ -402,7 +402,7 @@ export function createPrivacy({ ctx, privacy, note }) {
           { onDone: () => slot.replaceChildren() },
         );
       });
-      const del = el('button', 'os-btn', 'DELETE');
+      const del = el('button', 'os-btn', 'Delete');
       del.type = 'button';
       del.dataset.spec = 'Removes this saved login from this Mac after you confirm.';
       del.addEventListener('click', () => {
@@ -421,7 +421,7 @@ export function createPrivacy({ ctx, privacy, note }) {
     function neverRow(origin) {
       const row = el('div', 'bw-pwrow');
       row.append(el('span', 'bw-pwhost', siteHost(origin)));
-      const undo = el('button', 'os-btn', 'ASK AGAIN');
+      const undo = el('button', 'os-btn', 'Ask again');
       undo.type = 'button';
       undo.dataset.spec = 'Lets Dourmouse offer to save passwords on this site again.';
       undo.addEventListener('click', async () => {
@@ -455,10 +455,10 @@ export function createPrivacy({ ctx, privacy, note }) {
       info.append(el('span', 'bw-pwhost', p.label || 'Address'), el('span', 'bw-pwuser', [p.name, p.line1, p.city].filter(Boolean).join(', ')));
       const acts = el('div', 'ac');
       const slot = el('div', 'bw-pc');
-      const edit = el('button', 'os-btn', 'EDIT');
+      const edit = el('button', 'os-btn', 'Edit');
       edit.type = 'button';
       edit.addEventListener('click', () => slot.replaceChildren(profileForm(p)));
-      const del = el('button', 'os-btn', 'DELETE');
+      const del = el('button', 'os-btn', 'Delete');
       del.type = 'button';
       del.addEventListener('click', () => {
         confirmHere(slot, 'Delete the address "' + (p.label || 'Address') + '"? This cannot be undone.', () => privacy.addrDelete(p.id), {
@@ -488,7 +488,7 @@ export function createPrivacy({ ctx, privacy, note }) {
         form.append(lab);
       });
       const msg = el('div', 'bw-pnote');
-      const save = el('button', 'os-btn', existing ? 'SAVE CHANGES' : 'ADD ADDRESS');
+      const save = el('button', 'os-btn', existing ? 'Save changes' : 'Add address');
       save.type = 'submit';
       form.append(msg, save);
       form.addEventListener('submit', async (e) => {

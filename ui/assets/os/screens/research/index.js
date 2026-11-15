@@ -67,18 +67,18 @@ export default {
     /* ---------------- stage bar ---------------- */
     const actions = () => [
       {
-        id: 'new-job', label: 'NEW RESEARCH JOB', kind: 'primary',
+        id: 'new-job', label: 'New research job', kind: 'primary',
         spec: 'Starts a background research job after a confirm: a context brief, papers from OpenAlex, Semantic Scholar and arXiv, one graded card per paper, research questions you approve, then cited answers and references. It stops for you twice and never in this thread.',
         onClick: () => jobs.startForm(),
       },
       {
-        id: 'new-question', label: 'NEW QUESTION', disabled: ctx.chat.busy(),
+        id: 'new-question', label: 'New question', disabled: ctx.chat.busy(),
         title: ctx.chat.busy() ? 'Stop the run first' : '',
         spec: 'Asks the research agent to plan a new question. It opens a small form, asks you to confirm, then sends ONE message to the model in this thread: the agent decomposes the question and may fetch web pages.',
         onClick: () => newQuestion(),
       },
       {
-        id: 'export', label: 'EXPORT', disabled: !st.sel,
+        id: 'export', label: 'Export', disabled: !st.sel,
         title: st.sel ? '' : 'Choose a question first',
         spec: 'Saves the chosen question as a markdown file: its sub-questions, every stored claim with the passage it was quoted from and its source URL, and its contradictions. The server renders the text; your browser saves it.',
         onClick: () => exportQuestion(),
@@ -96,10 +96,10 @@ export default {
       input.maxLength = 500;
       input.placeholder = 'What do you want researched?';
       input.dataset.spec = 'The research question to send to the research agent.';
-      const go = el('button', 'os-btn os-btn--primary', 'CONTINUE');
+      const go = el('button', 'os-btn os-btn--primary', 'Continue');
       go.type = 'submit';
       go.dataset.spec = 'Shows what will be sent and waits for your approval before anything is sent.';
-      const cancel = el('button', 'os-btn', 'CANCEL');
+      const cancel = el('button', 'os-btn', 'Cancel');
       cancel.type = 'button';
       cancel.dataset.spec = 'Closes this form without sending anything.';
       const row = el('div', 'rs-newrow');
@@ -159,7 +159,7 @@ export default {
       const d = st.qs;
       if (!d) return;
       if (!d.questions.length) {
-        states.empty(qsEl, 'Nothing researched yet.', { hint: 'Press NEW QUESTION, or ask the research agent in the thread below.' });
+        states.empty(qsEl, 'Nothing researched yet.', { hint: 'Press New question, or ask the research agent in the thread below.' });
         return;
       }
       const wrap = el('div', 'rs-qs');
@@ -426,6 +426,6 @@ export default {
   },
 
   async refresh(ctx, reason) {
-    if (reason === 'manual') ctx.notify({ level: 'info', title: 'RESEARCH', detail: 'This screen re-reads when the research graph changes.', ttl: 2000 });
+    if (reason === 'manual') ctx.notify({ level: 'info', title: 'Research', detail: 'This screen re-reads when the research graph changes.', ttl: 2000 });
   },
 };

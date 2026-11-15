@@ -117,11 +117,11 @@ export function createPdfReader(ctx, host) {
       .forEach((h) => {
         const row = el('div', 'os-row med-hlrow');
         const sw = el('span', 'med-swatch med-hl--' + h.color);
-        const go = el('button', 'os-btn', 'PAGE ' + (h.page + 1));
+        const go = el('button', 'os-btn', 'Page ' + (h.page + 1));
         go.type = 'button';
         go.dataset.spec = 'Goes to page ' + (h.page + 1) + ' where this highlight is.';
         go.addEventListener('click', () => goTo(h.page));
-        const del = el('button', 'os-btn', 'REMOVE');
+        const del = el('button', 'os-btn', 'Remove');
         del.type = 'button';
         del.dataset.spec = 'Deletes this highlight from the saved list. The PDF file itself is never changed.';
         del.addEventListener('click', () => remove(h.id));
