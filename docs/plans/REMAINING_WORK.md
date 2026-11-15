@@ -2105,3 +2105,7 @@ Code still open: calendar, files and notes screens (need backend routes); 13 ope
 ### 2026-11-14 -- UI rebuild, what is left after the foundation (finding #194)
 
 Done: window, tokens, menus, eight places, pins, inspector, sheets, style lint, Settings (see CURRENT_STATUS.md and EVIDENCE/194_*). Open, in the order of MASTER_FEATURE_AND_UI_PLAN section 5: Home (greeting, ask box, needs you, in the office, continue a project), Projects screens, Office floor (1.5 to 1.7); wallpapers and appearance settings (1.2); notifications and deep links (1.8); restyle of Research, Security, Library, Browser and the other screens on the tokens, with their uppercase labels and old stylesheets (1.9, T6 milestone 2); SF Symbols for the sidebar; approvals as sheets (PL-01 S1-8). The ui_style_lint covers only the shell's own files until those screens join it.
+
+### 2026-11-15 -- Projects screens, what is left (finding #202)
+
+Done: list, project page, thread view (see CURRENT_STATUS.md, EVIDENCE/202_*). Open: edit assigned agents on the project page; a button for thread summary and for saving an answer as an output; sidebar pinned projects still read the old folder list (chrome); a reopened thread after a server restart is shown from the store but the model does not remember its earlier turns; not seen inside Electron.

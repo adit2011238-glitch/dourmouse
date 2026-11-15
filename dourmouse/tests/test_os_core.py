@@ -357,8 +357,9 @@ class TestRegistry:
         assert m
         console_threads = set(re.findall(r'"([A-Z0-9]+)"', m.group(1)))
         out = run(tmp_path, "R.threads = THREAD_SCREENS;", self.IMPORTS)
-        # DESIGN3D is not one of the eighteen (it stays in the console)
-        assert set(out["threads"]) == console_threads - {"DESIGN3D"}
+        # DESIGN3D is not one of the eighteen (it stays in the console). PROJECTS (plan 1.6) is new in the shell: each
+        # project thread is shown in the PROJECTS screen and must not share HOME's conversation.
+        assert set(out["threads"]) == (console_threads - {"DESIGN3D"}) | {"PROJECTS"}
 
 
 class TestRouterRules:

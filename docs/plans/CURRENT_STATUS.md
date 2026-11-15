@@ -514,3 +514,7 @@ All four waves built, reviewed and pushed (commit e74001a). Suite 8071 passed, 1
 ## 2026-11-14 -- UI foundation (finding #194)
 
 The app window is now a real Mac window: macOS draws the frame, traffic lights and menu bar, and the page reads the accent, light or dark and system colours from macOS (electron/appearance.js, ui/assets/os/core/appearance.js, with a 4.5:1 contrast guard). The sidebar has the eight approved places (Home, Projects, Office, Research, Library, Browser, Security, Settings, Cmd 1 to 8) with pinned projects under them; every earlier screen is a view inside a place. New inspector, sheets and one shared command table. Settings is restyled in the System Settings way. Evidence: EVIDENCE/194_*.png. Not built yet: the new Home, Projects and Office designs, wallpapers, SF Symbols.
+
+## 2026-11-15 -- Projects screens (finding #202)
+
+Projects is now a Claude-style projects screen: a list with covers, a project page (threads, instructions, work items that run as jobs, files, what the project knows with search, agents, outputs, activity) and a thread view that follows the project's instructions and files, saves each finished answer into the thread and restores it on reopen. Quick asks are not stored. Evidence: EVIDENCE/202_*.png. Not built: agent editing, thread summaries, saving an answer as an output, sidebar pins on the new store.

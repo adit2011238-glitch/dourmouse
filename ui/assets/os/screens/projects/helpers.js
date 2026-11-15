@@ -1,91 +1,92 @@
-/* Pure helpers for PROJECTS (no DOM at import time, so node can test them). */
+/* Pure helpers for PROJECTS (no DOM at import time, so node can test them). Every line of text the screen shows
+   about a project is built here from what /api/os/project/* sent; nothing is a sample. */
 
-import { toMs, plural } from '../../kit/format.js';
+import { plural } from '../../kit/format.js';
 
-export const STALE_DAYS = 14;
-export const ACTIVE_CAP = 60;
-export const ARCHIVED_CAP = 200;
 export const NAME_MAX = 120;
-export const DESCRIPTION_MAX = 2000;
-const DAY = 86400000;
+export const GOAL_MAX = 300;
+export const INSTRUCTIONS_MAX = 8000;
+export const NOTE_MAX = 4000;
+export const TITLE_MAX = 60;
+export const FILE_MAX_BYTES = 5000000;
+export const TEXT_SUFFIXES = ['.txt', '.md', '.markdown', '.csv', '.tsv', '.json', '.py', '.js', '.ts', '.html', '.css', '.yaml',
+  '.yml', '.toml', '.rst', '.tex', '.sql', '.sh', '.swift', '.c', '.h', '.cpp', '.java', '.log'];
 
-/* A project with no last_active, or none for two weeks, goes to the archived
-   list. Same rule and same 14 days as the console's bookshelf. */
-export function isStale(project, now = Date.now()) {
-  const ms = toMs(project && project.last_active);
-  return !Number.isFinite(ms) || now - ms > STALE_DAYS * DAY;
+/* ---------------- where we are: #/projects, #/projects/<id>, #/projects/<id>/<thread> ---------------- */
+
+const ID = /^[A-Za-z0-9_.-]{1,80}$/;
+
+export function parseHash(hash) {
+  const parts = String(hash || '').replace(/^#/, '').split('/').filter(Boolean);
+  if (parts[0] !== 'projects') return { pid: '', tid: '' };
+  const pid = parts[1] && ID.test(parts[1]) ? parts[1] : '';
+  const tid = pid && parts[2] && ID.test(parts[2]) ? parts[2] : '';
+  return { pid, tid };
 }
 
-/* newest first; the server already sorts, this keeps a re-read stable */
-function byRecent(a, b) {
-  const x = toMs(a.last_active);
-  const y = toMs(b.last_active);
-  return (Number.isFinite(y) ? y : -Infinity) - (Number.isFinite(x) ? x : -Infinity);
+export function hashFor(pid, tid) {
+  return '#/projects' + (pid ? '/' + pid + (tid ? '/' + tid : '') : '');
 }
 
-export function splitProjects(list, now = Date.now()) {
-  const items = (Array.isArray(list) ? list : []).filter((p) => p && typeof p.path === 'string' && p.path);
-  const active = [];
-  const archived = [];
-  items.forEach((p) => (isStale(p, now) ? archived : active).push(p));
-  active.sort(byRecent);
-  archived.sort(byRecent);
-  return { active, archived, total: items.length };
+/* The tab a project thread talks on. The server seeds a "pj:" tab with that project's own instructions, agents
+   and file names; no other project's store is read. */
+export function projectTab(pid, tid) {
+  return 'pj:' + pid + ':' + tid;
 }
 
-const SOURCE_WORD = { claude_code: 'Claude Code', codex_cli: 'Codex', manual: 'created here' };
-
-export function sourceWord(key) {
-  return SOURCE_WORD[key] || String(key);
+export function isProjectTab(tab) {
+  return /^pj:[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+$/.test(String(tab || ''));
 }
 
-/* "3 Claude Code, 1 Codex" from the real per-source counts; '' when there are none */
-export function countsLine(project) {
-  const counts = project && project.session_counts && typeof project.session_counts === 'object' ? project.session_counts : {};
-  return Object.keys(counts)
-    .filter((k) => Number(counts[k]) > 0)
-    .map((k) => Number(counts[k]) + ' ' + sourceWord(k))
-    .join(', ');
+/* ---------------- covers and lines ---------------- */
+
+/* a cover is "1".."6"; anything else is spread over the six cover tokens by the project id */
+export function coverVar(project) {
+  const c = String(project && project.cover ? project.cover : '');
+  if (/^[1-6]$/.test(c)) return 'var(--tk-cover-' + c + ')';
+  let h = 0;
+  const id = String(project && (project.id || project.name) ? project.id || project.name : '');
+  for (let i = 0; i < id.length; i += 1) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+  return 'var(--tk-cover-' + ((h % 6) + 1) + ')';
 }
 
-export function sessionCount(project) {
-  const n = Number(project && project.session_count);
-  return Number.isFinite(n) && n >= 0 ? n : 0;
+/* "2 open, 3 threads"; a zero part is left out, and a project with nothing says nothing */
+export function metaLine(p) {
+  const bits = [];
+  const open = Number(p && p.open_work) || 0;
+  const threads = Number(p && p.threads) || 0;
+  if (open) bits.push(open + ' open');
+  if (threads) bits.push(plural(threads, 'thread'));
+  return bits.join(', ');
 }
 
-export function sessionsWord(project) {
-  const n = sessionCount(project);
-  return n === 1 ? 'session' : 'sessions';
+export function filterProjects(list, query) {
+  const items = Array.isArray(list) ? list.filter((p) => p && typeof p.id === 'string' && p.id) : [];
+  const q = String(query || '').trim().toLowerCase();
+  if (!q) return items;
+  return items.filter((p) => (String(p.name) + ' ' + String(p.goal || '')).toLowerCase().includes(q));
 }
 
-export function originLine(project) {
-  const s = Array.isArray(project && project.sources) ? project.sources : [];
-  return s.map(sourceWord).join(' and ');
+/* the server keeps agent ids ("mail_calendar"); a person reads "Mail calendar" */
+export function agentLabel(id) {
+  const t = String(id || '').replace(/[_-]+/g, ' ').trim();
+  return t ? t.charAt(0).toUpperCase() + t.slice(1) : '';
 }
 
-export function excerpt(text, max = 180) {
+export function sizeLabel(bytes) {
+  const n = Number(bytes);
+  if (!Number.isFinite(n) || n < 0) return '';
+  if (n < 1000) return n + ' B';
+  if (n < 1000000) return (n / 1000).toFixed(n < 10000 ? 1 : 0) + ' KB';
+  return (n / 1000000).toFixed(1) + ' MB';
+}
+
+export function threadTitle(text) {
   const t = String(text || '').replace(/\s+/g, ' ').trim();
-  return t.length > max ? t.slice(0, max - 1) + '…' : t;
+  return t.length > TITLE_MAX ? t.slice(0, TITLE_MAX - 3) + '...' : t || 'New thread';
 }
 
-/* the scope record every chat and confirm will carry */
-export function scopeFrom(project, opened) {
-  const src = opened && opened.tab_id ? opened : project;
-  return { tab_id: String(src.tab_id), name: String(src.name || project.name || src.tab_id), path: String(project.path) };
-}
-
-export function isActiveScope(project, scope) {
-  return Boolean(scope && scope.tab_id && project && project.tab_id && String(scope.tab_id) === String(project.tab_id));
-}
-
-export function stopPrompt(project) {
-  return 'Stop tracking "' + project.name + '"? It leaves this list. The folder and the Claude Code and Codex history stay exactly where they are, and nothing is deleted.';
-}
-
-export function createPrompt(plan, description) {
-  return 'Create the project "' + plan.name + '"? This makes a new folder at ' + plan.path + ' and adds it to this list' +
-    (description ? ' with your description as its context.' : '.') + ' Nothing existing is changed.';
-}
+/* ---------------- checks before anything is sent ---------------- */
 
 export function validateName(raw) {
   const name = String(raw || '').trim();
@@ -96,13 +97,82 @@ export function validateName(raw) {
   return { ok: true, name };
 }
 
-export function sourceStatusLines(view) {
-  const lines = [];
-  const cc = view && view.claude_code;
-  const cx = view && view.codex_cli;
-  lines.push({ label: 'Claude Code history', found: Boolean(cc && cc.configured), where: cc && cc.root ? String(cc.root) : '' });
-  lines.push({ label: 'Codex history', found: Boolean(cx && cx.configured), where: cx && cx.db ? String(cx.db) : '' });
-  return lines;
+export function validateText(raw, what, max) {
+  const text = String(raw || '').trim();
+  if (!text) return { ok: false, message: 'Write something first.' };
+  if (text.length > max) return { ok: false, message: 'The ' + what + ' is ' + text.length + ' characters. The limit is ' + max + '.' };
+  return { ok: true, text };
+}
+
+export function isTextFile(name) {
+  const n = String(name || '').toLowerCase();
+  return TEXT_SUFFIXES.some((s) => n.endsWith(s));
+}
+
+/* null when the file can be added, otherwise the sentence to show */
+export function fileProblem(file) {
+  if (!file || !file.name) return 'Pick a file.';
+  if (file.size > FILE_MAX_BYTES) return file.name + ' is ' + sizeLabel(file.size) + '. The limit is ' + sizeLabel(FILE_MAX_BYTES) + '.';
+  return null;
+}
+
+/* ---------------- work items ---------------- */
+
+export function workState(item) {
+  if (!item) return 'todo';
+  if (item.status === 'done') return 'done';
+  if (item.status === 'doing') return 'doing';
+  return 'todo';
+}
+
+/* the one status change the checkbox makes: done goes back to to do, anything else is done */
+export function workToggle(item) {
+  return workState(item) === 'done' ? 'todo' : 'done';
+}
+
+export function workLine(item) {
+  const bits = [];
+  if (item.assignee) bits.push(agentLabel(item.assignee));
+  if (workState(item) === 'doing') bits.push(item.job_id ? 'Running as a job' : 'In progress');
+  return bits.join(', ');
+}
+
+/* ---------------- threads ---------------- */
+
+/* A stored thread (GET /api/os/project/thread) as the records the thread view restores from: one finished turn per
+   user message with the assistant message that follows it. A user message with no answer after it is dropped. */
+export function turnRecords(messages) {
+  const out = [];
+  const list = Array.isArray(messages) ? messages : [];
+  for (let i = 0; i < list.length; i += 1) {
+    const m = list[i];
+    if (!m || m.role !== 'user') continue;
+    const next = list[i + 1];
+    if (!next || next.role !== 'assistant') continue;
+    const at = Number(m.at);
+    out.push({
+      screen: 'PROJECTS',
+      display_text: String(m.content || ''),
+      final_text: String(next.content || ''),
+      timestamp: Number.isFinite(at) ? new Date(at < 1e11 ? at * 1000 : at).toISOString() : '',
+      transcript: [],
+    });
+    i += 1;
+  }
+  return out;
+}
+
+/* A turn is an answer only when it finished with text that is not the engine's own error line. Only an answer is
+   saved into the project thread. */
+export function answered(turn) {
+  return Boolean(turn && turn.status === 'done' && turn.reply && !/^\s*ERROR\b/.test(turn.reply));
+}
+
+/* the line under a thread's title: its summary when it has one, else when it last moved */
+export function threadLine(t, whenText) {
+  const s = String((t && t.summary) || '').replace(/\s+/g, ' ').trim();
+  if (s) return s.length > 140 ? s.slice(0, 137) + '...' : s;
+  return whenText || '';
 }
 
 export { plural };

@@ -9,6 +9,10 @@
      const view = mountThreadView(regionEl, ctx, { placeholder: '...' });
      await view.start();
 
+   A screen that shows different conversations in the one thread (PROJECTS) passes restoreSource, an async
+   function returning ledger-shaped records, starts with start({ fresh: true }) so nothing of the last
+   conversation shows, and calls destroy() when it leaves one.
+
    The directive box is the shell's own (ctx.chrome.setComposer), so a thread
    screen owns exactly one region and the composer follows it. If the screen has
    stage-bar actions of its own, pass them as opts.actions (an array, or a
@@ -44,6 +48,9 @@ export function mountThreadView(region, ctx, opts = {}) {
     actions: [],
     onSent: null,
     onScope: null,
+    /* async () => ledger-shaped records, or null for "use the server's session ledger". PROJECTS reads its
+       own stored thread this way. */
+    restoreSource: null,
     ...opts,
   };
   const thread = ctx.chat;
@@ -163,7 +170,7 @@ export function mountThreadView(region, ctx, opts = {}) {
     const think = document.createElement('details');
     think.className = 'think';
     think.hidden = true;
-    const tsum = el('summary', '', 'THINKING');
+    const tsum = el('summary', '', 'Thinking');
     const tpre = el('pre', 'think-text');
     think.append(tsum, tpre);
     const aprs = el('div', 'aprs');
@@ -171,10 +178,10 @@ export function mountThreadView(region, ctx, opts = {}) {
     const terr = el('div', 'terr');
     terr.setAttribute('role', 'alert');
     const acts = el('div', 'turn-actions');
-    const copy = el('button', 'os-btn', 'COPY');
+    const copy = el('button', 'os-btn', 'Copy');
     copy.type = 'button';
     copy.dataset.spec = 'Copies the raw reply text to the clipboard.';
-    const regen = el('button', 'os-btn', 'REGENERATE');
+    const regen = el('button', 'os-btn', 'Regenerate');
     regen.type = 'button';
     regen.dataset.spec = 'Re-runs the same directive as a fresh turn. The previous answer stays in the transcript.';
     acts.append(copy, regen);
@@ -251,7 +258,7 @@ export function mountThreadView(region, ctx, opts = {}) {
       copy.disabled = !turn.reply;
       regen.disabled = thread.busy();
       const failed = turn.status === 'error';
-      regen.textContent = failed ? 'RETRY' : 'REGENERATE';
+      regen.textContent = failed ? 'Retry' : 'Regenerate';
       regen.dataset.spec = failed
         ? 'Sends the same directive again after the error above. The failed attempt stays in the transcript.'
         : 'Re-runs the same directive as a fresh turn. The previous answer stays in the transcript.';
@@ -365,8 +372,12 @@ export function mountThreadView(region, ctx, opts = {}) {
     states.loading(region, 'Restoring this thread');
     region.dataset.region = '';
     try {
-      const d = await ctx.api.get('/api/os/session?tab_id=' + encodeURIComponent(ctx.scope.tabId()));
-      thread.restore(recordsFor(d.turns, thread.key));
+      if (o.restoreSource) {
+        thread.restore(recordsFor((await o.restoreSource()) || [], thread.key));
+      } else {
+        const d = await ctx.api.get('/api/os/session?tab_id=' + encodeURIComponent(ctx.scope.tabId()));
+        thread.restore(recordsFor(d.turns, thread.key));
+      }
     } catch (err) {
       if (isAbort(err)) return;
       if (err && err.status === 404) {
@@ -388,7 +399,8 @@ export function mountThreadView(region, ctx, opts = {}) {
   }
 
   /* ---------------- wiring ---------------- */
-  thread.subscribe((e) => {
+  const offs = [];
+  offs.push(thread.subscribe((e) => {
     if (e.kind === 'turn' && e.turn) paintTurn(e.turn);
     else if (e.kind === 'restore') paintAll();
     if (e.kind === 'busy') announce();
@@ -396,29 +408,43 @@ export function mountThreadView(region, ctx, opts = {}) {
       paintChrome();
       views.forEach((v) => v.paint());
     }
-  });
-  ctx.scope.onChange(() => {
+  }));
+  offs.push(ctx.scope.onChange(() => {
     if (o.onScope) o.onScope();
     reload();
     if (o.private) loadPrivate();
-  });
+  }));
   /* the elapsed time of a running turn ticks once a second */
-  ctx.every(1000, () => {
+  offs.push(ctx.every(1000, () => {
     const cur = thread.current();
     const v = cur && views.get(cur.id);
     if (v) v.paint();
-  });
+  }));
 
   return {
+    /* drops this view's listeners and timer; a screen that shows several threads one after another calls it
+       when it leaves one, so they never stack up */
+    destroy() {
+      offs.splice(0).forEach((off) => {
+        try {
+          if (typeof off === 'function') off();
+        } catch (err) {
+          console.error(err);
+        }
+      });
+      frames.clear();
+      announcer.remove();
+    },
     paintChrome,
     paintAll,
     reload,
     restore,
     /* first paint: the chrome, then the thread as it stands or from the ledger */
-    async start() {
+    async start({ fresh = false } = {}) {
       paintChrome();
       if (o.private) loadPrivate();
-      if (thread.turns().length || restored.has(thread.key)) paintAll();
+      if (fresh) await reload();
+      else if (thread.turns().length || restored.has(thread.key)) paintAll();
       else await restore();
     },
   };

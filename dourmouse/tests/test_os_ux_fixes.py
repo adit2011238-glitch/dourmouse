@@ -163,7 +163,7 @@ R.th = (html.match(/<th[ >]/g) || []).length; R.tr = (html.match(/<tr>/g) || [])
 class TestThreadView:
     def test_reply_and_user_text_share_one_token_and_the_button_says_retry_after_an_error(self):
         tv = (_OS / "kit" / "thread-view.js").read_text(encoding="utf-8")
-        assert "'RETRY'" in tv and "wireCodeCopy(reply" in tv
+        assert "'Retry'" in tv and "wireCodeCopy(reply" in tv
         for slug in ("home", "comms", "news", "media"):
             css = (_OS / "screens" / slug / f"{slug}.css").read_text(encoding="utf-8")
             you = re.search(r"\.turn \.you \{[^}]*font-size: ([^;]+);", css).group(1)
