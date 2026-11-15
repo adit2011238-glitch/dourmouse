@@ -72,3 +72,87 @@ def test_the_grouping_rule_is_plain_words_with_no_file_path():
 
     assert ".py" not in office.RULE and "dourmouse/" not in office.RULE
     assert "Unassigned" in office.RULE
+
+
+# ---- Floor and Activity from real events (plan 1.7, finding 203) ----
+
+def test_fourteen_agents_in_rooms_and_each_agent_sits_in_exactly_one(server):
+    from dourmouse.agent_profiles import agent_ids
+
+    status, data = call(server, "GET", "/api/os/office/floor")
+    assert status == 200 and data["ok"]
+    placed = [a for r in data["rooms"] for a in r["agents"]]
+    assert sorted(placed) == sorted(agent_ids()) and len(placed) == len(set(placed)) == 14
+    assert [r["id"] for r in data["rooms"]][-1] == "meeting"
+    assert {a["status"] for a in data["agents"]} == {"idle"}  # a fresh workspace: nobody is doing anything
+
+
+def test_every_profile_has_a_room():
+    from dourmouse.agent_profiles import agent_ids
+    from dourmouse.os_api.office import ROOMS
+
+    named = [n for _, _, ns in ROOMS for n in ns]
+    assert sorted(named) == sorted(agent_ids())
+
+
+def test_a_feed_poll_does_not_make_a_desk_work_or_open_a_lane(server):
+    server.tracker.on_event({"type": "live", "name": "news_headlines", "raw_arguments": "{}", "text": "ok"})
+    _, floor = call(server, "GET", "/api/os/office/floor")
+    _, act = call(server, "GET", "/api/os/office/activity")
+    assert floor["counts"]["working"] == 0
+    assert act["lanes"] == []
+    assert [f["skill"] for f in act["feeds"]] == ["news"] and floor["feeds"] == act["feeds"]
+
+
+def test_a_real_run_lights_the_desk_of_the_agent_that_owns_the_skill_and_opens_a_lane(server):
+    server.tracker.on_event({"type": "tool_use", "name": "news_headlines", "raw_arguments": "{}", "call_id": "call-1"})
+    _, floor = call(server, "GET", "/api/os/office/floor")
+    desk = next(a for a in floor["agents"] if a["id"] == "news_world")
+    assert desk["status"] == "working" and desk["calls"] == 1 and desk["doing"]["tool"] == "news_headlines"
+    _, act = call(server, "GET", "/api/os/office/activity")
+    assert [(lane["call_id"], lane["agent"], lane["agent_name"]) for lane in act["lanes"]] == [("call-1", "news_world", "News and World")]
+    assert act["names"]["news"] == "News and World"
+    server.tracker.on_event({"type": "done"})
+    _, after = call(server, "GET", "/api/os/office/activity")
+    assert after["lanes"] == []
+
+
+def test_a_computing_call_without_a_call_id_lights_the_desk_but_opens_no_lane(server):
+    server.tracker.on_event({"type": "tool_use", "name": "news_headlines", "raw_arguments": "{}"})
+    _, floor = call(server, "GET", "/api/os/office/floor")
+    _, act = call(server, "GET", "/api/os/office/activity")
+    assert next(a for a in floor["agents"] if a["id"] == "news_world")["status"] == "working"
+    assert act["lanes"] == []
+
+
+def test_waiting_for_approval_is_needs_you_and_a_split_task_seats_the_agent_in_the_meeting_room(server):
+    server.tracker.on_event({"type": "tool_use", "name": "news_headlines", "raw_arguments": "{}", "call_id": "c1"})
+    server.tracker.on_event({"type": "confirmation_requested", "prompt": "ok?"})
+    server.tracker.on_event({"type": "delegate_parallel_branch", "run_id": "r1", "index": 0, "total": 2, "agent": "markets", "phase": "start", "task": "t"})
+    _, floor = call(server, "GET", "/api/os/office/floor")
+    by_id = {a["id"]: a for a in floor["agents"]}
+    assert by_id["news_world"]["status"] == "needs_you"
+    assert by_id["markets"]["room"] == "meeting" and by_id["markets"]["meeting"] == "r1" and by_id["markets"]["status"] == "working"
+    meeting = next(r for r in floor["rooms"] if r["id"] == "meeting")
+    assert meeting["agents"] == ["markets"]
+    assert "markets" not in next(r for r in floor["rooms"] if r["id"] == "trading")["agents"]
+
+
+def test_agent_to_agent_messages_become_lines_between_two_desks(server):
+    server.bus.post("orchestrator", "news", "Headlines please", "what is new today")
+    server.bus.post("orchestrator", "BROADCAST", "hello all", "x")
+    server.bus.post("mystery", "news", "who", "x")
+    _, floor = call(server, "GET", "/api/os/office/floor")
+    assert [(m["from"], m["to"], m["subject"]) for m in floor["lines"]] == [("orchestrator", "news_world", "Headlines please")]
+
+
+def test_a_running_job_makes_its_owner_work(monkeypatch):
+    from dourmouse.os_api.office import build_floor
+
+    columns = {"running": [{"owner": "researcher", "title": "Compare two papers", "id": "j1"}],
+               "needs_you": [{"owner": "coder", "title": "Pick a branch", "id": "j2"}]}
+    floor = build_floor({"agents": {}, "fanouts": {}}, columns, [])
+    by_id = {a["id"]: a for a in floor["agents"]}
+    assert by_id["researcher"]["status"] == "working" and by_id["researcher"]["doing"]["text"] == "Compare two papers"
+    assert by_id["coder"]["status"] == "needs_you"
+    assert floor["counts"] == {"working": 1, "needs_you": 1, "idle": 12}

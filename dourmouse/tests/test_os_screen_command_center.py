@@ -99,20 +99,48 @@ def test_tool_use_and_tool_result_are_both_kept_in_order(tmp_path):
     assert "3 results" in out["texts"][1]
 
 
-def test_an_entry_with_no_call_id_gets_a_per_agent_lane_instead_of_being_dropped(tmp_path):
-    """Several real dispatch.py call sites emit with no ctx at all (no call_id) --
-    this must still show up somewhere, not silently vanish from the live feed."""
+def test_an_entry_with_no_call_id_opens_no_lane(tmp_path):
+    """CC-1: a lane is a real run. Something with no call id belongs to no run, so it never makes a lane."""
     out = run_node(
         tmp_path, HELPERS,
         """
         const lanes = {}; const order = [];
-        h.applyTrace(lanes, order, {type:'assistant_delta', text:'hi', agent:'orchestrator'});
+        R.key = h.applyTrace(lanes, order, {type:'assistant_delta', text:'hi', agent:'orchestrator'});
         R.keys = Object.keys(lanes);
-        R.text = lanes['agent:orchestrator'].lines[0].text;
+        R.order = order;
         """,
     )
-    assert out["keys"] == ["agent:orchestrator"]
-    assert out["text"] == "hi"
+    assert out["key"] is None and out["keys"] == [] and out["order"] == []
+
+
+def test_a_live_feed_poll_never_opens_a_lane_and_gets_one_plain_line(tmp_path):
+    out = run_node(
+        tmp_path, HELPERS,
+        """
+        const feeds = {}; const lanes = {}; const order = [];
+        h.applyFeeds(feeds, {agents: {news: {status: 'live', last: {tool: 'news_headlines', at: '2026-11-15T06:00:00'}}}});
+        R.keys = Object.keys(lanes);
+        R.line = h.feedsLine(feeds, Date.parse('2026-11-15T06:02:10'));
+        h.applyFeeds(feeds, {agents: {news: {status: 'computing', last: {tool: 'x', at: 'y'}}}});
+        R.after = Object.keys(feeds);
+        """,
+    )
+    assert out["keys"] == []
+    assert out["line"] == "Feeds: news polled 2 min ago. No model runs for these."
+    assert out["after"] == []  # once the agent is really computing it is a run, not a feed
+
+
+def test_the_server_seed_opens_a_lane_only_with_a_call_id(tmp_path):
+    out = run_node(
+        tmp_path, HELPERS,
+        """
+        const lanes = {}; const order = [];
+        R.none = h.seedLane(lanes, order, {agent: 'mail', status: 'computing'});
+        R.key = h.seedLane(lanes, order, {agent: 'mail', call_id: 'c9', status: 'auth', tool: 'gmail_search'});
+        R.waiting = lanes.c9.waiting; R.order = order;
+        """,
+    )
+    assert out["none"] is None and out["key"] == "c9" and out["waiting"] is True and out["order"] == ["c9"]
 
 
 def test_lane_cap_evicts_the_oldest_not_the_one_just_touched(tmp_path):
@@ -132,6 +160,7 @@ def test_screen_subscribes_to_agent_trace_and_security_star_live_and_never_trunc
     assert "ctx.events.on('security_*'" in src
     assert "a.summary || ''" in src  # the FULL summary, not a 160-char slice like security/helpers.js's activityLine
     assert ".slice(0, 160)" not in src
+    assert "/api/os/office/activity" in src and "/api/activity" not in src.replace("/api/os/office/activity", "")
     assert "innerHTML" not in src and "insertAdjacentHTML" not in src and " eval(" not in src
 
 

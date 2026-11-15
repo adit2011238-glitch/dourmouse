@@ -38,11 +38,12 @@ function describe(entry) {
   return { kind: 'other', text: JSON.stringify(entry).slice(0, 500) };
 }
 
-/** Applies one "agent_trace" event's inner `entry` to the lanes map (keyed
-    by call_id, or by agent name when no call_id was ever assigned -- some
-    entries genuinely have none, see dispatch.py's own ctx-less contract). */
+/** Applies one "agent_trace" event's inner `entry` to the lanes map, keyed by call_id.
+    An entry without a call id is ignored (CC-1). */
 export function applyTrace(lanes, order, entry) {
-  const key = entry.call_id || ('agent:' + (entry.agent || 'orchestrator'));
+  /* CC-1: a lane is a real run. An entry with no call id belongs to no run, so it opens nothing. */
+  if (!entry || !entry.call_id) return null;
+  const key = entry.call_id;
   let lane = lanes[key];
   if (!lane) {
     lane = newLane(entry.agent, entry.call_id);
@@ -76,4 +77,47 @@ export function laneSummary(lane) {
   const kinds = {};
   for (const l of lane.lines) kinds[l.kind] = (kinds[l.kind] || 0) + 1;
   return { n, kinds };
+}
+
+/** Opens a lane for a run the server reports as live right now (GET /api/os/office/activity). */
+export function seedLane(lanes, order, lane) {
+  if (!lane || !lane.call_id || lanes[lane.call_id]) return null;
+  const made = newLane(lane.agent, lane.call_id);
+  made.waiting = lane.status === 'auth';
+  made.tool = lane.tool || '';
+  lanes[lane.call_id] = made;
+  order.push(lane.call_id);
+  while (order.length > LANE_CAP) delete lanes[order.pop()];
+  return lane.call_id;
+}
+
+/** Model-free feed polls: skill -> { tool, at }. They are not runs and never open a lane. */
+export function applyFeeds(feeds, evt) {
+  const agents = evt && evt.agents && typeof evt.agents === 'object' ? evt.agents : {};
+  for (const [skill, a] of Object.entries(agents)) {
+    if (a && a.status === 'live' && a.last) feeds[skill] = { tool: a.last.tool, at: a.last.at };
+    else if (a && a.status && a.status !== 'live') delete feeds[skill];
+  }
+  return feeds;
+}
+
+export function seedFeeds(list) {
+  const out = {};
+  for (const f of Array.isArray(list) ? list : []) if (f && f.skill) out[f.skill] = { tool: f.tool, at: f.at };
+  return out;
+}
+
+function minutes(at, now) {
+  const ms = typeof at === 'number' ? at : Date.parse(at);
+  if (!Number.isFinite(ms)) return '';
+  const m = Math.max(0, Math.round((now - ms) / 60000));
+  return m < 1 ? 'just now' : m + ' min ago';
+}
+
+/** One plain line: "Feeds: news polled 2 min ago, mail polled just now. No model runs for these." */
+export function feedsLine(feeds, now = Date.now()) {
+  const rows = Object.entries(feeds || {}).map(([skill, f]) => ({ skill, when: minutes(f.at, now), at: Date.parse(f.at) || 0 }));
+  if (!rows.length) return '';
+  rows.sort((a, b) => b.at - a.at);
+  return 'Feeds: ' + rows.map((r) => r.skill + ' polled ' + (r.when || 'recently')).join(', ') + '. No model runs for these.';
 }
