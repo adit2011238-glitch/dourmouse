@@ -1,15 +1,23 @@
-/* HOME: the central dispatch. One thread per tab, streamed from POST /api/chat
-   through core/chat.js and drawn by the shared thread view (kit/thread-view.js).
-   Around the thread HOME adds the project scope bar and the attention list.
-   Every figure on the page is read from the server or derived from what it
-   sent. Nothing here is a sample. */
+/* HOME: greeting, one ask box with a project picker, and three cards (Needs you, In the office, Today) plus
+   Continue tiles for projects. Everything is read from GET /api/os/today, which reads real stores only.
 
-import { states } from '../../kit/states.js';
-import { ago } from '../../kit/format.js';
-import { mountThreadView } from '../../kit/thread-view.js';
+   An ask from here is a quick ask unless a project is picked in the box:
+   - quick: it talks on a throwaway tab ("quick:<id>"). The server keeps no ledger worth keeping and learns
+     nothing from it. "Save to project" copies the exchange into a project thread on request.
+   - in a project: a project thread is created and the ask talks on that thread's tab
+     ("pj:<project>:<thread>", so the project's instructions and files seed it); when the answer is done the
+     exchange is saved with POST /api/os/project/thread/turn. */
+
+import { html, setHtml } from '../../kit/html.js';
+import { md } from '../../kit/md.js';
+import { whenShort } from '../../kit/format.js';
+import { icon } from '../../kit/icons.js';
 import { isAbort } from '../../core/api.js';
 import { readSeen, markSeen } from '../apps/walkthrough.js';
-import { seedAllHands, applyAllHands, counts as ahCounts, newestRuns, runMs, runWord, goalLine } from '../orchestration/allhands.js';
+import {
+  greetingLine, subLine, coverVar, avatarCover, statusWord, officeLine, calendarEmpty, quickTab, projectTab,
+  threadTitle, tileLine, needsCount, answered,
+} from './helpers.js';
 
 function el(tag, cls, text) {
   const n = document.createElement(tag);
@@ -25,97 +33,349 @@ export default {
   thread: true,
 
   async mount(root, ctx) {
-    const attnEl = el('div', 'home-attn');
-    attnEl.dataset.region = '';
-    const scopeEl = el('div', 'home-scope');
-    const ahEl = el('div', 'home-ah');
-    ahEl.hidden = true;
-    const threadEl = el('div', 'home-thread');
-    const walkEl = el('div', 'home-walk');
-    walkEl.hidden = true;
-    root.replaceChildren(scopeEl, walkEl, ahEl, attnEl, threadEl);
-    root.dataset.state = 'populated';
+    const st = { today: null, pick: '', tab: quickTab(), ask: null, saved: null, projects: [] };
+    root.dataset.state = 'loading';
+    setHtml(root, html`
+      <div class="hm">
+        <header class="hm-head"><h1 class="hm-title" id="hmTitle"></h1><p class="hm-sub" id="hmSub"></p></header>
+        <form class="hm-ask" id="hmAsk" autocomplete="off">
+          <label class="sr-only" for="hmIn">Ask anything, or start a project</label>
+          <textarea class="hm-in" id="hmIn" rows="1" placeholder="Ask anything, or start a project" data-spec="Enter sends. Shift+Enter starts a new line. With no project picked it is a quick ask: nothing is saved unless you save it."></textarea>
+          <label class="sr-only" for="hmPick">Project</label>
+          <select class="hm-pick" id="hmPick" data-spec="Quick ask keeps nothing. Pick a project to ask inside it: its instructions and files are used and the exchange is saved in a thread there."></select>
+          <button type="submit" class="hm-go" id="hmGo" aria-label="Send" data-spec="Sends the question.">${icon('M12 19V5M5 12l7-7 7 7', '', { width: 2 })}</button>
+        </form>
+        <div class="hm-walk home-walk" id="hmWalk" hidden></div>
+        <section class="hm-answer" id="hmAnswer" hidden></section>
+        <div class="hm-cards" id="hmCards"></div>
+        <section class="hm-continue" id="hmContinue" hidden><h2 class="hm-h2">Continue a project</h2><div class="hm-tiles" id="hmTiles"></div></section>
+      </div>`);
+    const $ = (id) => root.querySelector('#' + id);
+    const titleEl = $('hmTitle');
+    const subEl = $('hmSub');
+    const form = $('hmAsk');
+    const input = $('hmIn');
+    const pick = $('hmPick');
+    const go = $('hmGo');
+    const answerEl = $('hmAnswer');
+    const cardsEl = $('hmCards');
+    const contEl = $('hmContinue');
+    const tilesEl = $('hmTiles');
+    const walkEl = $('hmWalk');
+    const thread = ctx.chat;
 
-    /* ---------------- scope (project) ---------------- */
-    const paintScope = () => {
-      const p = ctx.scope.project();
-      if (!p) {
-        scopeEl.hidden = true;
-        scopeEl.replaceChildren();
-        return;
-      }
-      scopeEl.hidden = false;
-      const label = el('span', 'muted', 'Project scope: ');
-      const name = el('b', '', p.name || p.tab_id);
-      const leave = el('button', 'os-btn', 'LEAVE PROJECT');
-      leave.type = 'button';
-      leave.dataset.spec = 'Returns this tab to its own general conversation. The project keeps its own thread on the server.';
-      leave.addEventListener('click', () => ctx.scope.leaveProject());
-      scopeEl.replaceChildren(label, name, leave);
-    };
-
-    /* ---------------- attention ---------------- */
-    let attnItems = null;
-    let showAll = false;
-    async function refreshAttention() {
-      try {
-        const d = await ctx.api.get('/api/attention');
-        attnItems = Array.isArray(d.items) ? d.items : [];
-        states.clearStale(attnEl);
-        paintAttention();
-      } catch (err) {
-        if (isAbort(err)) return;
-        if (attnItems && attnItems.length) states.stale(attnEl, 'Could not refresh this list: ' + err.message);
-        else if (attnItems === null) states.error(attnEl, err, { title: 'Could not read the attention list', retry: () => refreshAttention() });
-      }
+    /* ---------------- greeting and cards ---------------- */
+    function paintHead() {
+      const t = st.today;
+      titleEl.textContent = greetingLine(t ? t.greeting : null);
+      subEl.textContent = t ? subLine(t) : '';
     }
-    function paintAttention() {
-      const items = attnItems || [];
-      if (!items.length) {
-        attnEl.replaceChildren();
-        attnEl.dataset.state = 'empty';
-        attnEl.hidden = true;
-        return;
+
+    function needsCard(t) {
+      const card = el('section', 'hm-card');
+      card.dataset.card = 'needs';
+      const head = el('div', 'hm-card-head');
+      head.append(el('h2', 'hm-h2', 'Needs you'), el('span', 'hm-count', needsCount(t.needs_total)));
+      card.append(head);
+      if (!t.needs_you.length) {
+        card.append(el('p', 'hm-muted', 'Nothing needs you.'));
+        return card;
       }
-      attnEl.hidden = false;
-      attnEl.dataset.state = 'populated';
-      const card = el('div', 'card');
-      card.append(el('div', 'lbl', 'Needs attention (' + items.length + ')'));
-      (showAll ? items : items.slice(0, 6)).forEach((it) => {
-        const row = el('div', 'os-row');
-        row.append(el('span', 'tag warn', String(it.kind || 'note').replace(/_/g, ' ')));
-        const t = el('span', 'rt', it.summary || '');
-        t.title = it.detail || '';
-        row.append(t, el('span', 'muted', (it.screen || '') + (ago(it.at) ? ' · ' + ago(it.at) : '')));
-        const b = el('button', 'os-btn', 'DISMISS');
-        b.type = 'button';
-        b.dataset.spec = 'Clears this one card. The same pattern can fire again on the next turn.';
-        b.addEventListener('click', async () => {
-          b.disabled = true;
-          try {
-            await ctx.api.post('/api/attention/dismiss', { id: it.id });
-            await refreshAttention();
-            /* keep keyboard focus in the list instead of dropping it to the page */
-            const next = attnEl.querySelector('.os-btn');
-            if (next) next.focus();
-            else ctx.chrome.focusComposer();
-          } catch (err) {
-            b.disabled = false;
-            ctx.notify({ level: 'error', title: 'Could not dismiss', detail: err && err.message });
-          }
-        });
-        row.append(b);
+      t.needs_you.slice(0, 3).forEach((it) => {
+        const row = el('div', 'hm-need');
+        row.append(el('span', 'hm-dot'));
+        const text = el('div', 'hm-need-t');
+        text.append(el('div', 'hm-need-title', it.title));
+        const since = whenShort(it.since);
+        const sub = [it.note, since ? 'since ' + since : ''].filter(Boolean).join(', ');
+        if (sub) text.append(el('div', 'hm-muted', sub));
+        row.append(text);
+        const review = el('a', 'hm-btn', 'Review');
+        review.href = '#/' + (it.target || 'goals');
+        review.dataset.spec = 'Opens the place where this is waiting for you. It changes nothing.';
+        row.append(review);
         card.append(row);
       });
-      if (items.length > 6) {
-        const more = el('button', 'os-btn home-more', showAll ? 'SHOW FEWER' : 'SHOW ALL ' + items.length);
-        more.type = 'button';
-        more.dataset.spec = 'Shows every item that needs attention, or only the newest six. It changes nothing.';
-        more.addEventListener('click', () => { showAll = !showAll; paintAttention(); const again = attnEl.querySelector('.home-more'); if (again) again.focus(); });
-        card.append(more);
-      }
-      attnEl.replaceChildren(card);
+      if (t.needs_total > 3) card.append(el('p', 'hm-muted', '+' + (t.needs_total - 3) + ' more'));
+      return card;
     }
+
+    function officeCard(t) {
+      const card = el('section', 'hm-card');
+      card.dataset.card = 'office';
+      const head = el('div', 'hm-card-head');
+      const open = el('a', 'hm-link', 'Open office');
+      open.href = '#/office';
+      head.append(el('h2', 'hm-h2', 'In the office'), open);
+      card.append(head);
+      const grid = el('div', 'hm-avatars');
+      t.office.agents.forEach((a, i) => {
+        const av = el('span', 'hm-av hm-av--' + a.status, a.initials);
+        av.style.background = avatarCover(i);
+        av.title = a.name + ', ' + statusWord(a.status);
+        av.setAttribute('role', 'img');
+        av.setAttribute('aria-label', a.name + ', ' + statusWord(a.status));
+        grid.append(av);
+      });
+      card.append(grid);
+      const line = officeLine(t.office);
+      const p = el('p', 'hm-office-line');
+      if (line) p.append(el('b', '', line.agent), document.createTextNode(' ' + line.text));
+      else p.className = 'hm-muted';
+      if (!line) p.textContent = 'No agent is working right now.';
+      card.append(p);
+      return card;
+    }
+
+    function todayCard(t) {
+      const card = el('section', 'hm-card');
+      card.dataset.card = 'today';
+      const head = el('div', 'hm-card-head');
+      head.append(el('h2', 'hm-h2', 'Today'));
+      card.append(head);
+      const cal = t.calendar;
+      if (cal.state !== 'ok') {
+        card.append(el('p', 'hm-muted', calendarEmpty(cal)));
+        return card;
+      }
+      cal.events.forEach((ev) => {
+        const row = el('div', 'hm-event');
+        row.append(el('span', 'hm-time', ev.time), el('span', 'hm-event-t', ev.title));
+        card.append(row);
+      });
+      if (cal.more) card.append(el('p', 'hm-muted', '+' + cal.more + ' more'));
+      return card;
+    }
+
+    function paintCards() {
+      const t = st.today;
+      if (!t) return;
+      cardsEl.replaceChildren(needsCard(t), officeCard(t), todayCard(t));
+    }
+
+    function paintTiles() {
+      const t = st.today;
+      if (!t) return;
+      st.projects = t.projects;
+      contEl.hidden = !t.projects.length;
+      tilesEl.replaceChildren(...t.projects.map((p) => {
+        const tile = el('button', 'hm-tile');
+        tile.type = 'button';
+        tile.dataset.project = p.id;
+        tile.dataset.spec = 'Picks this project in the ask box, so your next question is asked inside it.';
+        const cover = el('span', 'hm-cover');
+        cover.style.background = coverVar(p);
+        tile.append(cover);
+        const body = el('span', 'hm-tile-body');
+        body.append(el('span', 'hm-tile-name', p.name), el('span', 'hm-muted', tileLine(p)));
+        tile.append(body);
+        tile.addEventListener('click', () => {
+          pick.value = p.id;
+          st.pick = p.id;
+          input.focus();
+        });
+        return tile;
+      }));
+    }
+
+    function paintPicker() {
+      const prev = st.pick;
+      pick.replaceChildren();
+      const quick = el('option', '', 'Quick ask');
+      quick.value = '';
+      pick.append(quick);
+      st.projects.forEach((p) => {
+        const o = el('option', '', p.name);
+        o.value = p.id;
+        pick.append(o);
+      });
+      pick.value = st.projects.some((p) => p.id === prev) ? prev : '';
+      st.pick = pick.value;
+    }
+
+    let loadedOnce = false;
+    async function load() {
+      try {
+        st.today = await ctx.api.get('/api/os/today');
+        loadedOnce = true;
+        root.dataset.state = 'populated';
+        root.classList.remove('hm-stale');
+        paintHead();
+        paintCards();
+        paintTiles();
+        paintPicker();
+      } catch (err) {
+        if (isAbort(err)) return;
+        if (loadedOnce) {
+          root.classList.add('hm-stale');
+          return;
+        }
+        root.dataset.state = 'error';
+        titleEl.textContent = greetingLine(null);
+        subEl.textContent = 'Could not read today: ' + (err && err.message ? err.message : err);
+      }
+    }
+
+    /* ---------------- ask ---------------- */
+    const projectName = (id) => (st.projects.find((p) => p.id === id) || {}).name || '';
+
+    function paintAnswer() {
+      const a = st.ask;
+      if (!a) {
+        answerEl.hidden = true;
+        answerEl.replaceChildren();
+        return;
+      }
+      answerEl.hidden = false;
+      const turn = a.turn;
+      const box = el('div', 'hm-turn');
+      box.append(el('div', 'hm-you', a.text));
+      const reply = el('div', 'hm-reply');
+      if (turn && turn.reply) setHtml(reply, md(turn.reply));
+      else if (turn && turn.status === 'error') reply.append(el('span', 'hm-err', turn.error || 'The request failed.'));
+      else reply.append(el('span', 'hm-muted', 'Working'));
+      box.append(reply);
+      if (turn && turn.status === 'error' && turn.reply) box.append(el('div', 'hm-err', turn.error));
+      const aprs = el('div', 'hm-approvals');
+      (turn && turn.approvals || []).forEach((id) => {
+        const entry = ctx.approvals.get(id);
+        if (entry) ctx.approvals.render(aprs, { id: entry.id, prompt: entry.prompt, tool: entry.tool, autonomous: entry.autonomous });
+      });
+      box.append(aprs);
+      const done = turn && turn.status !== 'thinking' && turn.status !== 'generating' && turn.status !== 'working' && turn.status !== 'waiting';
+      const bar = el('div', 'hm-actions');
+      if (!done) {
+        const stop = el('button', 'hm-btn', 'Stop');
+        stop.type = 'button';
+        stop.addEventListener('click', () => thread.stop());
+        bar.append(stop);
+      } else {
+        if (a.project) {
+          bar.append(el('span', 'hm-muted', a.saved === false ? 'Not saved: ' + a.saveError : 'Saved to ' + projectName(a.project)));
+        } else if (answered(turn)) {
+          bar.append(saveControl(a));
+        }
+        const fresh = el('button', 'hm-btn', 'New ask');
+        fresh.type = 'button';
+        fresh.addEventListener('click', () => {
+          st.ask = null;
+          st.tab = quickTab();
+          paintAnswer();
+          input.focus();
+        });
+        bar.append(fresh);
+      }
+      box.append(bar);
+      answerEl.replaceChildren(box);
+    }
+
+    /* Save a quick ask into a project on request: a new thread there holding this one exchange. */
+    function saveControl(a) {
+      const wrap = el('span', 'hm-save');
+      if (!st.projects.length) return wrap;
+      const sel = el('select', 'hm-pick hm-pick--small');
+      sel.setAttribute('aria-label', 'Project to save to');
+      st.projects.forEach((p) => {
+        const o = el('option', '', p.name);
+        o.value = p.id;
+        sel.append(o);
+      });
+      const btn = el('button', 'hm-btn', 'Save to project');
+      btn.type = 'button';
+      btn.dataset.spec = 'Copies this exchange into a new thread of the project you picked. Nothing else from this ask is kept.';
+      btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        try {
+          const th = await ctx.api.post('/api/os/project/thread/new', { id: sel.value, title: threadTitle(a.text) });
+          await ctx.api.post('/api/os/project/thread/turn', { id: sel.value, thread: th.thread.id, user: a.text, assistant: a.turn.reply });
+          ctx.notify({ level: 'ok', title: 'Saved to ' + projectName(sel.value), ttl: 2500 });
+          wrap.replaceChildren(el('span', 'hm-muted', 'Saved to ' + projectName(sel.value)));
+        } catch (err) {
+          btn.disabled = false;
+          ctx.notify({ level: 'error', title: 'Could not save', detail: err && err.message });
+        }
+      });
+      wrap.append(sel, btn);
+      return wrap;
+    }
+
+    async function send(text) {
+      const projectId = st.pick;
+      let tab = st.tab;
+      let threadId = '';
+      if (projectId) {
+        try {
+          const th = await ctx.api.post('/api/os/project/thread/new', { id: projectId, title: threadTitle(text) });
+          threadId = th.thread.id;
+          tab = projectTab(projectId, threadId);
+        } catch (err) {
+          ctx.notify({ level: 'error', title: 'Could not start the thread', detail: err && err.message });
+          return;
+        }
+      }
+      st.ask = { text, project: projectId, thread: threadId, turn: null, saved: null, saveError: '' };
+      const a = st.ask;
+      paintAnswer();
+      go.disabled = true;
+      const off = thread.subscribe(() => {
+        const turns = thread.turns();
+        const last = turns[turns.length - 1];
+        if (last && last.text === text && st.ask === a) {
+          a.turn = last;
+          paintAnswer();
+        }
+      });
+      try {
+        const turn = await thread.send(text, { tabId: tab });
+        if (turn && st.ask === a) {
+          a.turn = turn;
+          if (projectId && answered(turn)) {
+            try {
+              await ctx.api.post('/api/os/project/thread/turn', { id: projectId, thread: threadId, user: text, assistant: turn.reply });
+              a.saved = true;
+            } catch (err) {
+              a.saved = false;
+              a.saveError = err && err.message ? err.message : 'unknown error';
+            }
+          } else if (projectId) {
+            /* no answer: the empty thread made for it is archived so the project does not collect blank threads */
+            a.saved = false;
+            a.saveError = 'there was no answer to keep';
+            try {
+              await ctx.api.post('/api/os/project/thread/archive', { id: projectId, thread: threadId });
+            } catch (err) {
+              a.saveError += ', and the empty thread could not be archived: ' + (err && err.message ? err.message : 'unknown error');
+            }
+          }
+        }
+      } finally {
+        off();
+        go.disabled = false;
+        paintAnswer();
+        load();
+      }
+    }
+
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const text = input.value.trim();
+      if (!text || go.disabled) return;
+      input.value = '';
+      grow();
+      send(text);
+    });
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+        e.preventDefault();
+        form.requestSubmit();
+      }
+    });
+    function grow() {
+      input.style.height = 'auto';
+      input.style.height = Math.min(input.scrollHeight, 160) + 'px';
+    }
+    input.addEventListener('input', grow);
+    pick.addEventListener('change', () => { st.pick = pick.value; });
 
     /* ---------------- first-run permissions guide ----------------
        Offered once, ever: it is recorded as seen the moment it is shown (in the
@@ -126,10 +386,10 @@ export default {
       const seen = await readSeen(ctx);
       if (seen !== false || ctx.signal.aborted) return;
       const text = el('span', 'home-walk-t', 'New here? See which macOS permissions Dourmouse uses and what each one lets it do. macOS only asks when a feature needs one.');
-      const go = el('a', 'os-btn', 'OPEN THE PERMISSIONS GUIDE');
+      const go = el('a', 'hm-btn', 'Open the permissions guide');
       go.href = '#/apps';
       go.dataset.spec = 'Opens APPS, where each macOS permission Dourmouse uses is explained with a button to its System Settings page. It changes no permission.';
-      const later = el('button', 'os-btn', 'NOT NOW');
+      const later = el('button', 'hm-btn', 'Not now');
       later.type = 'button';
       later.dataset.spec = 'Hides this for good. The guide stays on the APPS screen.';
       later.addEventListener('click', () => { walkEl.hidden = true; });
@@ -139,86 +399,19 @@ export default {
       if (err) ctx.notify({ level: 'warn', title: 'Permissions guide', detail: 'Could not save that this was shown, so it may appear again: ' + err });
     }
 
-    /* ---------------- all hands (/all) ----------------
-       /all <goal> starts a run that works in the background. The server's
-       reply says it streams in a window the shell does not have, so HOME
-       shows the run itself and links to where it is drawn. */
-    let runs = {};
-    let ahReload = null;
-    async function readRuns() {
-      try {
-        const r = await ctx.api.get('/api/allhands');
-        if (ctx.signal.aborted) return;
-        runs = seedAllHands(r && r.runs);
-      } catch (err) {
-        if (isAbort(err)) return;
-      }
-      paintAllHands();
-    }
-    function paintAllHands() {
-      const now = Date.now();
-      /* the newest run, only while it works or for ten minutes after it finished (finished is an ISO string from the server) */
-      const run = newestRuns(runs, 1).find((r) => r.status === 'running' || (r.finished && now - runMs(r.finished) < 600000));
-      if (!run) {
-        ahEl.hidden = true;
-        ahEl.replaceChildren();
-        return;
-      }
-      const c = ahCounts(run);
-      const line = el('span', 'home-ah-t');
-      const tag = el('span', 'tag ' + (run.status === 'running' ? 'warn' : runWord(run) === 'done' ? 'ok' : 'bad'), 'ALL HANDS ' + runWord(run));
-      const what = el('span', 'home-ah-goal', goalLine(run));
-      const prog = el('span', 'muted', c.total ? c.done + ' of ' + c.total + ' models answered' + (c.failed ? ', ' + c.failed + ' failed' : '') : 'starting');
-      line.append(tag, what, prog);
-      const go = el('a', 'os-btn', run.status === 'running' ? 'WATCH IN ORCHESTRATION' : 'SEE THE ANSWER');
-      go.href = '#/orchestration';
-      go.dataset.spec = 'Opens ORCHESTRATION, where each model of this all hands run and the merged answer are shown. It changes nothing.';
-      ahEl.hidden = false;
-      ahEl.replaceChildren(line, go);
-    }
-    ctx.events.on('allhands', (evt) => {
-      const run = applyAllHands(runs, evt);
-      if (!run) return;
-      paintAllHands();
-      if (run.partial && !ahReload) {
-        /* the start event has no goal: read the list once, coalescing a burst */
-        ahReload = true;
-        readRuns().finally(() => { ahReload = null; });
-      }
-    });
-
-    /* ---------------- the thread ---------------- */
-    const view = mountThreadView(threadEl, ctx, {
-      scroller: root.parentElement,
-      emptyHint: 'Enter sends. /all puts every model on it.',
-      emptyActions: [
-        { label: 'What needs my attention?', send: 'What needs my attention right now? Check mail, security alerts and anything still running, and answer in a few short lines.', spec: 'Sends this question to the companion on HOME. It uses the model and may call read-only tools.' },
-        { label: 'What can you do here?', send: 'List what you can do on this Mac in five short lines, using only the tools you really have.', spec: 'Sends this question to the companion on HOME. It uses the model.' },
-        { label: 'Open SECURITY', go: 'security', spec: 'Opens the SECURITY screen: the latest scan and what needs a decision.' },
-        { label: 'Open COMMS', go: 'comms', spec: 'Opens COMMS: your Gmail inbox, read only until you approve a send.' },
-      ],
-      onSent: () => refreshAttention(),
-      onScope: paintScope,
-    });
-    ctx.events.onStatus((s) => {
-      if (s === 'error') states.stale(attnEl, 'Live updates paused. Reconnecting.');
-      else states.clearStale(attnEl);
-    });
-    ctx.events.onResync(() => { refreshAttention(); readRuns(); });
-
-    paintScope();
-    await view.start();
-    await refreshAttention();
-    readRuns();
+    ctx.every(30000, load);
+    ctx.events.onResync(() => load());
+    ctx.events.onStatus((s) => { if (s === 'error') root.classList.add('hm-stale'); });
+    await load();
     offerWalkthrough();
     /* the shell moves focus to the stage title once a screen has mounted; ask again after that so typing starts at once */
-    ctx.chrome.focusComposer();
-    setTimeout(() => { if (!ctx.signal.aborted) ctx.chrome.focusComposer(); }, 120);
+    input.focus();
+    setTimeout(() => { if (!ctx.signal.aborted) input.focus(); }, 120);
   },
 
   async refresh(ctx, reason) {
     if (reason === 'manual') {
-      ctx.notify({ level: 'info', title: 'HOME', detail: 'The thread is live; nothing to refresh.', ttl: 2000 });
+      ctx.notify({ level: 'info', title: 'Home', detail: 'Home refreshes itself every 30 seconds.', ttl: 2000 });
     }
   },
 };

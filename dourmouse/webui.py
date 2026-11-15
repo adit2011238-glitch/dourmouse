@@ -5728,7 +5728,11 @@ class _Handler(BaseHTTPRequestHandler):
                     config=self.server.config,
                     job_tracker=self.server.jobs,
                     rbac=self.server.session.rbac,  # shared — see docstring above
-                    memory=self.server.memory,
+                # plan 1.5: a quick ask from Home (tab "quick:<id>") is not kept. Its ledger goes to the pruned
+                # helper folder and nothing from it is learned into long-term memory.
+                quick = tab_id.startswith("quick:")
+                    memory=None if quick else self.server.memory,
+                    ephemeral=True if quick else None,
                 )
                 # world-monitor-expansion ("make projects open their own
                 # chat like Claude Desktop's Projects"): a tab_id that IS a

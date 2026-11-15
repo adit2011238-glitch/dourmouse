@@ -259,7 +259,7 @@ export function createChat({ api, scope, approvals, threadScreens = [], storage 
       current = { ctrl, turn };
       setBusy(true);
       emit('turn', turn);
-      const body = { prompt: turn.text, screen: key, tab_id: scope.tabId(), autonomous: Boolean(autonomous) };
+      const body = { prompt: turn.text, screen: key, tab_id: (opts && opts.tabId) || scope.tabId(), autonomous: Boolean(autonomous) };
       if (opts && opts.focusAgent) body.focus_agent = opts.focusAgent;
       if (opts && opts.forceBackend) body.force_backend = opts.forceBackend;
       try {

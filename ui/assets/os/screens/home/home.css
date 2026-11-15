@@ -1,44 +1,75 @@
-/* HOME. Everything is scoped to [data-screen="HOME"] so it cannot restyle the
-   chrome or another screen. Amber tints are color-mix() on --dm-active. */
+/* HOME. Native-Mac look: system font, token colours, hairline edges, no pills, no gradients.
+   Scoped to [data-screen="HOME"]. Reading surfaces (cards, ask box) stay near-solid so text keeps its
+   contrast over the owner's wallpaper. */
 
-[data-screen="HOME"] { display: flex; flex-direction: column; gap: 12px; }
-[data-screen="HOME"] .home-scope { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 8px; border: 1px solid color-mix(in srgb, var(--dm-active) 35%, transparent); background: color-mix(in srgb, var(--dm-active) 8%, transparent); font-size: var(--dm-text-sm); color: var(--dm-fg-body); }
-[data-screen="HOME"] .home-scope[hidden] { display: none; }
-[data-screen="HOME"] .home-attn[hidden] { display: none; }
-[data-screen="HOME"] .home-thread { min-height: 40px; }
+[data-screen="HOME"] .hm { max-width: 1040px; margin: 0 auto; padding: var(--tk-space-8) var(--tk-space-6); display: flex; flex-direction: column; gap: var(--tk-space-5); }
+[data-screen="HOME"] .hm.hm-stale, [data-screen="HOME"].hm-stale .hm { opacity: .85; }
+[data-screen="HOME"] .hm-title { margin: 0; font-size: 28px; line-height: 34px; font-weight: 600; color: var(--tk-text); }
+[data-screen="HOME"] .hm-sub { margin: 2px 0 0; font-size: var(--tk-size-page); line-height: 22px; color: var(--tk-text-2); }
+[data-screen="HOME"] .hm-muted { margin: 0; font-size: var(--tk-size-small); line-height: var(--tk-line-body); color: var(--tk-text-3); overflow-wrap: anywhere; }
+[data-screen="HOME"] .hm-h2 { margin: 0; font-size: var(--tk-size-section); line-height: 20px; font-weight: 600; color: var(--tk-text); }
 
-[data-screen="HOME"] .turn { margin-bottom: 14px; }
-[data-screen="HOME"] .turn-you { margin-bottom: 12px; }
-[data-screen="HOME"] .turn .you { color: var(--dm-fg); white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--dm-text-base); line-height: 1.6; }
-[data-screen="HOME"] .turn-bot .who { min-height: 1em; }
-[data-screen="HOME"] .chips { margin-top: 2px; }
-[data-screen="HOME"] .chips .tag { font-family: var(--dm-font-mono); text-transform: none; letter-spacing: .02em; }
-[data-screen="HOME"] .chipdetail { margin: 4px 0 8px; padding: 8px 10px; border-radius: 8px; background: rgba(0,0,0,.28); border: 1px solid var(--os-edge-lo); }
-[data-screen="HOME"] .chipdetail[hidden] { display: none; }
-[data-screen="HOME"] .chip-pre, [data-screen="HOME"] .think-text {
-  margin: 0 0 8px; font-family: var(--dm-font-mono); font-size: var(--dm-text-xs); color: var(--dm-fg-body);
-  white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow: auto;
-}
-[data-screen="HOME"] .think { margin: 6px 0; font-size: var(--dm-text-xs); color: var(--dm-fg-dim); }
-[data-screen="HOME"] .think[hidden] { display: none; }
-[data-screen="HOME"] .think summary { cursor: pointer; letter-spacing: .1em; }
-[data-screen="HOME"] .think summary:focus-visible { outline: 2px solid var(--dm-active); outline-offset: 2px; }
-[data-screen="HOME"] .reply { margin-top: 8px; font-size: var(--dm-text-base); line-height: 1.6; overflow-wrap: anywhere; }
-[data-screen="HOME"] .reply:empty { display: none; }
-[data-screen="HOME"] .terr { margin-top: 8px; color: var(--dm-error); font-size: var(--dm-text-sm); overflow-wrap: anywhere; }
-[data-screen="HOME"] .terr:empty { display: none; }
-[data-screen="HOME"] .turn-actions { margin-top: 8px; display: flex; gap: 8px; }
-[data-screen="HOME"] .turn-actions[hidden] { display: none; }
-[data-screen="HOME"] .home-ah { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--os-edge-lo); background: rgba(255,255,255,.04); font-size: var(--dm-text-sm); }
-[data-screen="HOME"] .home-ah[hidden] { display: none; }
-[data-screen="HOME"] .home-ah-t { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
-[data-screen="HOME"] .home-ah-goal { color: var(--dm-fg); overflow-wrap: anywhere; }
-[data-screen="HOME"] a.os-btn { text-decoration: none; flex: none; }
-/* the shared dim token is about 2:1 on this background; informational text on this screen uses the body color so it reads at 4.5:1 or better */
-[data-screen="HOME"] .muted, [data-screen="HOME"] .st .st-d { color: var(--dm-fg-body); }
-[data-screen="HOME"] .lbl, [data-screen="HOME"] .st { color: var(--dm-fg-body); }
-[data-screen="HOME"] .home-attn .card { max-height: 42vh; overflow-y: auto; }
-[data-screen="HOME"] .home-more { margin-top: 8px; }
-[data-screen="HOME"] .home-walk { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 8px; border: 1px solid color-mix(in srgb, var(--dm-active) 35%, transparent); background: color-mix(in srgb, var(--dm-active) 8%, transparent); font-size: var(--dm-text-sm); }
-[data-screen="HOME"] .home-walk[hidden] { display: none; }
-[data-screen="HOME"] .home-walk-t { flex: 1; min-width: 0; color: var(--dm-fg-body); overflow-wrap: anywhere; }
+/* ask box */
+[data-screen="HOME"] .hm-ask { display: flex; align-items: center; gap: var(--tk-space-3); padding: var(--tk-space-3) var(--tk-space-3) var(--tk-space-3) var(--tk-space-4); background: var(--tk-bg-raised); border-radius: var(--tk-radius-sheet); box-shadow: 0 0 0 0.5px var(--tk-separator); }
+[data-screen="HOME"] .hm-ask:focus-within { outline: 2px solid var(--tk-accent); outline-offset: 1px; }
+[data-screen="HOME"] .hm-in { flex: 1; min-width: 0; resize: none; border: 0; background: transparent; color: var(--tk-text); font: inherit; font-size: var(--tk-size-page); line-height: 24px; padding: 4px 0; max-height: 160px; }
+[data-screen="HOME"] .hm-in:focus { outline-width: 0; }
+[data-screen="HOME"] .hm-in::placeholder { color: var(--tk-text-3); }
+[data-screen="HOME"] .hm-pick { font: inherit; font-size: var(--tk-size-body); color: var(--tk-text-2); background: transparent; border: 0; border-radius: var(--tk-radius-control); padding: 4px 6px; max-width: 200px; cursor: pointer; }
+[data-screen="HOME"] .hm-pick:hover { background: var(--tk-fill); }
+[data-screen="HOME"] .hm-pick--small { border: 0; background: var(--tk-fill); }
+[data-screen="HOME"] .hm-go { flex: none; width: 32px; height: 32px; border: 0; border-radius: 50%; background: var(--tk-accent-fill); color: var(--tk-on-accent); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
+[data-screen="HOME"] .hm-go svg { width: 16px; height: 16px; }
+[data-screen="HOME"] .hm-go:disabled { opacity: .4; cursor: default; }
+[data-screen="HOME"] .hm-go:focus-visible { outline: 2px solid var(--tk-accent); outline-offset: 2px; }
+
+/* buttons and links */
+[data-screen="HOME"] .hm-btn { font: inherit; font-size: var(--tk-size-body); color: var(--tk-text); background: var(--tk-bg-raised); border: 0; border-radius: var(--tk-radius-control); box-shadow: 0 0 0 0.5px var(--tk-separator); padding: 3px 12px; min-height: var(--tk-control-small); cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; flex: none; }
+[data-screen="HOME"] .hm-btn:hover { background: var(--tk-fill); }
+[data-screen="HOME"] .hm-btn:focus-visible, [data-screen="HOME"] .hm-link:focus-visible, [data-screen="HOME"] .hm-tile:focus-visible { outline: 2px solid var(--tk-accent); outline-offset: 2px; }
+[data-screen="HOME"] .hm-link { font-size: var(--tk-size-small); color: var(--tk-link); text-decoration: none; }
+[data-screen="HOME"] .hm-link:hover { text-decoration: underline; }
+
+/* the answer to an ask */
+[data-screen="HOME"] .hm-answer[hidden], [data-screen="HOME"] .hm-continue[hidden], [data-screen="HOME"] .hm-walk[hidden] { display: none; }
+[data-screen="HOME"] .hm-turn { background: var(--tk-bg-raised); border-radius: var(--tk-radius-sheet); box-shadow: 0 0 0 0.5px var(--tk-separator); padding: var(--tk-space-4); display: flex; flex-direction: column; gap: var(--tk-space-3); }
+[data-screen="HOME"] .hm-you { font-weight: 500; color: var(--tk-text); white-space: pre-wrap; overflow-wrap: anywhere; }
+[data-screen="HOME"] .hm-reply { color: var(--tk-text); font-size: var(--tk-size-body); line-height: var(--tk-line-long); overflow-wrap: anywhere; }
+[data-screen="HOME"] .hm-reply:empty { display: none; }
+[data-screen="HOME"] .hm-err { color: var(--tk-critical-text); font-size: var(--tk-size-small); overflow-wrap: anywhere; }
+[data-screen="HOME"] .hm-actions { display: flex; align-items: center; gap: var(--tk-space-2); flex-wrap: wrap; }
+[data-screen="HOME"] .hm-save { display: inline-flex; align-items: center; gap: var(--tk-space-2); }
+
+/* cards */
+[data-screen="HOME"] .hm-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--tk-space-4); }
+@media (max-width: 860px) { [data-screen="HOME"] .hm-cards { grid-template-columns: minmax(0, 1fr); } }
+[data-screen="HOME"] .hm-card { background: var(--tk-bg-raised); border-radius: var(--tk-radius-sheet); box-shadow: 0 0 0 0.5px var(--tk-separator); padding: var(--tk-space-4); min-height: 140px; display: flex; flex-direction: column; gap: var(--tk-space-3); }
+[data-screen="HOME"] .hm-card-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--tk-space-2); }
+[data-screen="HOME"] .hm-count { color: var(--tk-text-3); font-size: var(--tk-size-body); }
+[data-screen="HOME"] .hm-need { display: flex; align-items: center; gap: var(--tk-space-2); }
+[data-screen="HOME"] .hm-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--tk-warning); }
+[data-screen="HOME"] .hm-need-t { flex: 1; min-width: 0; }
+[data-screen="HOME"] .hm-need-title { font-size: var(--tk-size-body); color: var(--tk-text); overflow-wrap: anywhere; }
+[data-screen="HOME"] .hm-avatars { display: flex; flex-wrap: wrap; gap: 6px; }
+[data-screen="HOME"] .hm-av { width: 28px; height: 28px; border-radius: 50%; border: 2px solid var(--tk-separator); color: var(--tk-on-accent); font-size: 10px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; }
+[data-screen="HOME"] .hm-av--working { border-color: var(--tk-good); }
+[data-screen="HOME"] .hm-av--waiting { border-color: var(--tk-warning); }
+[data-screen="HOME"] .hm-office-line { margin: 0; font-size: var(--tk-size-body); color: var(--tk-text-2); overflow-wrap: anywhere; }
+[data-screen="HOME"] .hm-office-line b { color: var(--tk-text); font-weight: 600; }
+[data-screen="HOME"] .hm-event { display: flex; gap: var(--tk-space-4); font-size: var(--tk-size-body); }
+[data-screen="HOME"] .hm-time { flex: none; min-width: 48px; color: var(--tk-text); font-weight: 500; font-variant-numeric: tabular-nums; }
+[data-screen="HOME"] .hm-event-t { color: var(--tk-text-2); overflow-wrap: anywhere; }
+
+/* continue tiles */
+[data-screen="HOME"] .hm-continue { display: flex; flex-direction: column; gap: var(--tk-space-3); }
+[data-screen="HOME"] .hm-tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--tk-space-4); }
+@media (max-width: 860px) { [data-screen="HOME"] .hm-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+[data-screen="HOME"] .hm-tile { padding: 0; border: 0; background: var(--tk-bg-raised); border-radius: var(--tk-radius-sheet); box-shadow: 0 0 0 0.5px var(--tk-separator); overflow: hidden; text-align: left; font: inherit; cursor: pointer; display: flex; flex-direction: column; }
+[data-screen="HOME"] .hm-tile:hover { background: var(--tk-fill); }
+[data-screen="HOME"] .hm-cover { display: block; height: 64px; }
+[data-screen="HOME"] .hm-tile-body { display: flex; flex-direction: column; gap: 2px; padding: var(--tk-space-3) var(--tk-space-4); }
+[data-screen="HOME"] .hm-tile-name { font-size: var(--tk-size-section); font-weight: 600; color: var(--tk-text); overflow-wrap: anywhere; }
+
+/* the one-time permissions note */
+[data-screen="HOME"] .hm-walk { display: flex; align-items: center; gap: var(--tk-space-2); padding: var(--tk-space-3) var(--tk-space-4); border-radius: var(--tk-radius-block); background: var(--tk-bg-raised); box-shadow: 0 0 0 0.5px var(--tk-separator); font-size: var(--tk-size-small); }
+[data-screen="HOME"] .home-walk-t { flex: 1; min-width: 0; color: var(--tk-text-2); overflow-wrap: anywhere; }

@@ -145,11 +145,6 @@ def finished_run(run_id="run1", ago=60):
             "brains": {"claude": {"label": "CLAUDE", "status": "done", "result": "a", "error": None, "elapsed": 3.0}}}
 
 
-def test_home_shows_a_finished_all_hands_run_that_the_server_dated_with_iso_strings(srv, page):
-    open_screen(page, srv, "home", [("/api/allhands", lambda r, q: r.fulfill(**json_body({"ok": True, "runs": [finished_run()]})))])
-    page.wait_for_selector("text=SEE THE ANSWER", timeout=8000)
-
-
 def test_orchestration_open_page_hands_an_absolute_address_to_the_host(srv, page):
     page.add_init_script("window.__opened = []; window.open = (u) => { window.__opened.push(u); return {}; };")
     open_screen(page, srv, "orchestration", [("/api/allhands", lambda r, q: r.fulfill(**json_body({"ok": True, "runs": [finished_run("r7")]})))])

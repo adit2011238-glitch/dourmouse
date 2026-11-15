@@ -164,7 +164,7 @@ class TestThreadView:
     def test_reply_and_user_text_share_one_token_and_the_button_says_retry_after_an_error(self):
         tv = (_OS / "kit" / "thread-view.js").read_text(encoding="utf-8")
         assert "'Retry'" in tv and "wireCodeCopy(reply" in tv
-        for slug in ("home", "comms", "news", "media"):
+        for slug in ("comms", "news", "media"):  # HOME is the plan 1.5 layout now and has no thread view
             css = (_OS / "screens" / slug / f"{slug}.css").read_text(encoding="utf-8")
             you = re.search(r"\.turn \.you \{[^}]*font-size: ([^;]+);", css).group(1)
             reply = re.search(r"\.reply \{[^}]*font-size: ([^;]+);", css).group(1)
