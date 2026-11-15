@@ -82,6 +82,28 @@ def set_consent(req: Request) -> tuple[int, dict[str, Any]]:
     return 200, {"ok": True, "sources": _sources(store)}
 
 
+@route("GET", "/api/os/settings/privacy/folders")
+def folders(req: Request) -> tuple[int, dict[str, Any]]:
+    """The library folders the owner has allowed or denied. A folder with no row is "ask": nothing in it is sent
+    to an embedding model."""
+    from dourmouse import privacy
+
+    return 200, {"ok": True, "folders": privacy.PrivacyStore().folder_consents()}
+
+
+@route("POST", "/api/os/settings/privacy/folders")
+def set_folder(req: Request) -> tuple[int, dict[str, Any]]:
+    """Body ``{folder, decision: allow|deny|ask}``: consent for one library folder (ask removes the record)."""
+    from dourmouse import privacy
+
+    store = privacy.PrivacyStore()
+    try:
+        row = store.set_folder_consent(str(req.body.get("folder") or ""), str(req.body.get("decision") or ""))
+    except ValueError as exc:
+        raise ApiError(400, str(exc)) from exc
+    return 200, {"ok": True, "folder": row, "folders": store.folder_consents()}
+
+
 @route("POST", "/api/os/settings/privacy/private_mode")
 def set_private_mode(req: Request) -> tuple[int, dict[str, Any]]:
     """Body ``{enabled}``: Private mode for every chat."""

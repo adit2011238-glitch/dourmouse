@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any
 
 from dourmouse.config import workspace_dir
+from dourmouse.library.store import Store as LibraryStore
 
 NAME_MAX = 120
 GOAL_MAX = 300
@@ -162,70 +163,9 @@ def fts_query(raw: str) -> str:
     return " ".join('"' + w.replace('"', "") + '"' for w in words if w.strip("'-"))
 
 
-class PassageStore:
-    """One project's passages: files, instructions, memory notes and thread summaries, with FTS5 search."""
-
-    def __init__(self, path: Path) -> None:
-        self.path = path
-        path.parent.mkdir(parents=True, exist_ok=True)
-        self._lock = threading.RLock()
-        with self._connect() as db:
-            db.execute(
-                "CREATE TABLE IF NOT EXISTS passages (id INTEGER PRIMARY KEY, source TEXT NOT NULL, source_id TEXT NOT NULL,"
-                " title TEXT NOT NULL, seq INTEGER NOT NULL, text TEXT NOT NULL, added_at REAL NOT NULL)"
-            )
-            db.execute("CREATE INDEX IF NOT EXISTS passages_src ON passages(source, source_id)")
-            db.execute("CREATE VIRTUAL TABLE IF NOT EXISTS passages_fts USING fts5(text, title, content='passages', content_rowid='id', tokenize='porter unicode61')")
-
-    def _connect(self) -> sqlite3.Connection:
-        db = sqlite3.connect(str(self.path), timeout=10)
-        db.row_factory = sqlite3.Row
-        return db
-
-    def replace(self, source: str, source_id: str, title: str, text: str) -> int:
-        """Replace everything stored for one source with fresh passages. Returns how many were written."""
-        parts = chunks(text)
-        with self._lock, self._connect() as db:
-            self._drop(db, source, source_id)
-            for seq, part in enumerate(parts):
-                cur = db.execute(
-                    "INSERT INTO passages(source, source_id, title, seq, text, added_at) VALUES (?,?,?,?,?,?)",
-                    (source, source_id, title, seq, part, _now()))
-                db.execute("INSERT INTO passages_fts(rowid, text, title) VALUES (?,?,?)", (cur.lastrowid, part, title))
-        return len(parts)
-
-    def remove(self, source: str, source_id: str) -> None:
-        with self._lock, self._connect() as db:
-            self._drop(db, source, source_id)
-
-    @staticmethod
-    def _drop(db: sqlite3.Connection, source: str, source_id: str) -> None:
-        for row in db.execute("SELECT id, text, title FROM passages WHERE source=? AND source_id=?", (source, source_id)).fetchall():
-            db.execute("INSERT INTO passages_fts(passages_fts, rowid, text, title) VALUES ('delete', ?,?,?)",
-                       (row["id"], row["text"], row["title"]))
-        db.execute("DELETE FROM passages WHERE source=? AND source_id=?", (source, source_id))
-
-    def search(self, query: str, limit: int = 8) -> list[dict[str, Any]]:
-        q = fts_query(query)
-        if not q:
-            return []
-        limit = max(1, min(int(limit), SEARCH_LIMIT_MAX))
-        with self._lock, self._connect() as db:
-            rows = db.execute(
-                "SELECT p.source, p.source_id, p.title, p.seq, snippet(passages_fts, 0, '[', ']', ' ... ', 24) AS snippet, p.text,"
-                " bm25(passages_fts) AS rank FROM passages_fts JOIN passages p ON p.id = passages_fts.rowid"
-                " WHERE passages_fts MATCH ? ORDER BY rank LIMIT ?", (q, limit)).fetchall()
-        return [{"source": r["source"], "source_id": r["source_id"], "title": r["title"], "passage": r["seq"] + 1,
-                 "snippet": r["snippet"], "text": r["text"], "citation": f"{r['title']}, passage {r['seq'] + 1}"} for r in rows]
-
-    def count(self) -> int:
-        with self._lock, self._connect() as db:
-            return int(db.execute("SELECT COUNT(*) FROM passages").fetchone()[0])
-
-    def sources(self) -> list[dict[str, Any]]:
-        with self._lock, self._connect() as db:
-            return [dict(r) for r in db.execute(
-                "SELECT source, source_id, title, COUNT(*) AS passages FROM passages GROUP BY source, source_id ORDER BY title")]
+#: A project's passage store is a library store (plan 2.1): the same file layout as the user wiki, with the
+#: documents, vectors and embedding queue next to the FTS5 passages. The old name stays for callers and tests.
+PassageStore = LibraryStore
 
 
 _SCHEMA = """
@@ -294,7 +234,7 @@ class ProjectStore:
         """This project's own passage store. The id is checked, so no path outside the folder can be built."""
         if not isinstance(project_id, str) or not _ID.match(project_id):
             raise LookupError("no such project")
-        return PassageStore(self.library / f"{project_id}.db")
+        return LibraryStore(self.library / f"{project_id}.db", kind="project")
 
     def _log(self, db: sqlite3.Connection, project_id: str, kind: str, summary: str, ref: str = "") -> None:
         now = _now()

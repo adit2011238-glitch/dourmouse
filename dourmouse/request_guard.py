@@ -171,6 +171,7 @@ OWNER_ONLY_POST: frozenset[str] = frozenset({
     "/api/os/settings/privacy/private_mode",
     "/api/os/settings/privacy/chat",
     "/api/os/settings/privacy/provider",
+    "/api/os/settings/privacy/folders",
 })
 
 #: POST path prefixes that only the owner may call.

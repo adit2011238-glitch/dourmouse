@@ -64,6 +64,11 @@ SENSITIVE_AGENTS = frozenset({
     "markets", "forex", "mt5", "t212",
 })
 
+#: At most this many library folders can carry a consent record (a runaway client cannot grow privacy.json).
+FOLDER_CONSENT_LIMIT = 500
+#: Folder names that never become a library folder, whatever the owner is asked: they hold credentials.
+_SECRET_FOLDER_NAMES = frozenset({".ssh", ".aws", ".gnupg", ".kube", "keychains"})
+
 #: The consent source an unlisted tool of a sensitive agent falls under.
 _AGENT_SOURCE = {
     "mail": "mail", "comms": "mail", "messenger": "mail",
@@ -738,6 +743,11 @@ class PrivacyStore:
             out["private_chats"], out["private_mode"] = {}, True
         providers = out.get("providers")
         out["providers"] = providers if isinstance(providers, dict) else {}
+        folders = out.get("folder_consent")
+        out["folder_consent"] = {
+            k: v for k, v in folders.items()
+            if isinstance(k, str) and k.startswith("/") and isinstance(v, dict) and v.get("decision") in ("allow", "deny")
+        } if isinstance(folders, dict) else {}
         out["private_mode"] = bool(out.get("private_mode"))
         return out
 
@@ -803,6 +813,63 @@ class PrivacyStore:
                 chats.pop(chat, None)
             data["private_chats"] = chats
             self._write(data)
+
+    # ---- library folders (plan 2.1, finding 206) ------------------------------------------------------------
+    # One record per folder, kept apart from the fixed consent sources above. "allow" lets the library send that
+    # folder's passages to the embedding model; no record means "ask" and nothing is sent. The nearest folder above a
+    # path decides, so a "deny" on a sub-folder beats an "allow" on its parent.
+
+    @staticmethod
+    def _folder_key(folder: str | Path) -> str:
+        text = str(folder or "").strip()
+        if not text or "\x00" in text:
+            raise ValueError("a folder path is required")
+        path = Path(text).expanduser()
+        if not path.is_absolute():
+            raise ValueError("the folder must be a full path")
+        key = os.path.realpath(str(path))
+        if key == "/" or key.count("/") < 2:
+            raise ValueError("a whole disk or the root cannot be one library folder")
+        if _SECRET_FRAGMENT.search(key) or any(
+                part in _SECRET_FOLDER_NAMES for part in Path(key).parts):
+            raise ValueError("a folder that holds keys, tokens or passwords cannot be a library folder")
+        return key
+
+    def folder_consent_for(self, path: str | Path) -> str | None:
+        """``"allow"``, ``"deny"`` or None (ask) for a file or folder: the nearest recorded folder above it."""
+        try:
+            probe = os.path.realpath(str(Path(str(path)).expanduser()))
+        except (OSError, ValueError):
+            return None
+        best, decision = -1, None
+        for key, rec in (self._read().get("folder_consent") or {}).items():
+            inside = probe == key or probe.startswith(key.rstrip("/") + "/")
+            if inside and len(key) > best:
+                best, decision = len(key), rec.get("decision")
+        return decision if decision in ("allow", "deny") else None
+
+    def folder_consents(self) -> list[dict[str, Any]]:
+        rows = [{"folder": k, "decision": v["decision"], "at": v.get("at", "")}
+                for k, v in (self._read().get("folder_consent") or {}).items()]
+        return sorted(rows, key=lambda r: r["folder"])
+
+    def set_folder_consent(self, folder: str | Path, decision: str) -> dict[str, Any]:
+        """Record allow, deny or ask (ask removes the record) for one folder. Returns the folder's row."""
+        if decision not in ("allow", "deny", "ask"):
+            raise ValueError("the decision must be allow, deny or ask")
+        key = self._folder_key(folder)
+        with _store_lock:
+            data = self._read()
+            table = dict(data.get("folder_consent") or {})
+            if decision == "ask":
+                table.pop(key, None)
+            else:
+                if key not in table and len(table) >= FOLDER_CONSENT_LIMIT:
+                    raise ValueError(f"{FOLDER_CONSENT_LIMIT} library folders are already recorded; remove some first")
+                table[key] = {"decision": decision, "at": _utc_now()}
+            data["folder_consent"] = table
+            self._write(data)
+        return {"folder": key, "decision": decision}
 
     def set_provider_verified(self, provider: str, verified: bool) -> None:
         if provider not in _PROVIDER_IDS:
