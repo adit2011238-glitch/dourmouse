@@ -67,31 +67,34 @@ def counted(payload_fn):
     return box, handler
 
 
-# ---------------------------------------------------------------- U1-6 TIMETABLE
-SCHED = {"schedules": [{"id": "s1", "tool": "web_search", "arguments": {"query": "x"}, "schedule_text": "daily at 8:30",
-                        "schedule_description": "daily at 08:30", "enabled": True, "next_run": "2026-10-17T08:30:00", "last_run": None}]}
+# ---------------------------------------------------------------- U1-6 TIMETABLE (Automations, plan 2.2)
+AUTO = {"ok": True, "automations": [{
+    "id": "sched-001", "name": "Morning brief", "version": 2, "trigger": "Every weekday at 08:00", "action": "Daily digest",
+    "action_type": "tool", "next_run": "2026-10-17 08:00", "enabled": True, "auto_disabled": False, "result": "", "result_status": "",
+    "last_at": "", "runs_today": 0, "caps": {"max_runs_per_day": 6, "max_steps": 8}, "fail_count": 0, "watch_error": "", "template": ""}],
+    "templates": [], "mail_trigger": False, "defaults": {"max_runs_per_day": 6, "max_steps": 8}}
 
 
 def test_timetable_poll_keeps_what_the_owner_is_typing(srv, page):
-    box, h = counted(lambda n: json_body(SCHED))
-    open_screen(page, srv, "timetable", [("/api/schedules", h)], clock=True)
-    page.click('[data-edit="s1"]')
-    page.fill("[data-edit-input]", "every weekday at 9:15")
+    box, h = counted(lambda n: json_body(AUTO))
+    open_screen(page, srv, "timetable", [("/api/os/automations", h)], clock=True)
+    page.click("text=New automation")
+    page.fill("[data-sentence]", "every weekday at 9:15 check my mail")
     before = box["n"]
     page.clock.run_for(10500)
     assert box["n"] > before, "the poll must really have run"
-    assert page.input_value("[data-edit-input]") == "every weekday at 9:15"
+    assert page.input_value("[data-sentence]") == "every weekday at 9:15 check my mail"
 
 
 def test_timetable_keeps_the_draft_when_the_list_really_changes(srv, page):
-    changed = {"schedules": [{**SCHED["schedules"][0], "last_run": "2026-10-16T08:30:00"}]}
-    box, h = counted(lambda n: json_body(SCHED if n < 3 else changed))
-    open_screen(page, srv, "timetable", [("/api/schedules", h)], clock=True)
-    page.click('[data-edit="s1"]')
-    page.fill("[data-edit-input]", "every weekday at 9:15")
+    changed = {**AUTO, "automations": [{**AUTO["automations"][0], "result": "Done", "result_status": "ok", "last_at": "2026-10-16T08:00:00"}]}
+    box, h = counted(lambda n: json_body(AUTO if n < 3 else changed))
+    open_screen(page, srv, "timetable", [("/api/os/automations", h)], clock=True)
+    page.click("text=New automation")
+    page.fill("[data-sentence]", "every weekday at 9:15 check my mail")
     page.clock.run_for(21000)
     assert box["n"] >= 3
-    assert page.input_value("[data-edit-input]") == "every weekday at 9:15"
+    assert page.input_value("[data-sentence]") == "every weekday at 9:15 check my mail"
 
 
 # ---------------------------------------------------------------- U1-4 GOALS

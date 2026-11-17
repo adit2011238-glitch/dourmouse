@@ -1,49 +1,47 @@
-/* TIMETABLE: the recurring routines the scheduler runs. Reads
-   GET /api/schedules and the tool tiers from GET /api/roster.
+/* Automations (plan 2.2, finding 207): things Dourmouse does by itself, on a clock or when something happens.
 
-   EDIT changes only WHEN (POST /api/schedules/update); DISABLE and ENABLE keep
-   the routine and its last run (POST /api/schedules/toggle). Each is the
-   owner's click plus a card stating what will change. NEW ROUTINE hands the
-   request to HOME, because a routine is a tool call plus a schedule and the
-   model chooses the tool; that call is gated, so it is approved there.
-
-   The store keeps only the last run time, so there is no run history and no
-   "missed" record. What is shown instead is true: an overdue routine will be
-   fired once by the runner's next check (catch-up). It is never claimed as run. */
+   One column of grouped boxes like System Settings. The list shows each automation's name, its trigger in words, the
+   next run and the last result word, with a switch. Nothing is created from a click alone: a sentence (or a template)
+   becomes a parsed card that says when, what, what it may use, how it tells you and its limits, and only Approve
+   creates it. A step that needs confirmation never runs unattended; it waits here under Review. Reads
+   GET /api/os/automations and acts through /api/os/automations/*. */
 
 import { html, setHtml } from '../../kit/html.js';
 import { states } from '../../kit/states.js';
-import { agoLabel, plural, whenShort } from '../../kit/format.js';
+import { confirmHere } from '../../kit/confirm-card.js';
 import { isAbort } from '../../core/api.js';
-import { isOverdue, argsPreview, toolTiers, cannotRunUnattended, sortEntries, handoffText, lastAttemptText, toolLabel, argsPhrase, scheduleSentence, upNext, parseNext } from './helpers.js';
+import { countsText, rowSub, resultTone, cardRows, historyLine, historyNote, parkedRuns, EXAMPLE } from './helpers.js';
 
 const POLL_MS = 10000;
 
 export default {
   id: 'TIMETABLE',
-  sub: 'routines',
+  sub: 'automations',
   css: true,
   thread: false,
 
   async mount(root, ctx) {
-    const st = { entries: null, tiers: {}, tiersError: '', error: null, edit: null, editError: '', sig: '', hand: null, draft: null };
+    const st = { rows: null, templates: [], error: null, sig: '', open: null, detail: null, detailError: '', sheet: null, sheetError: '', busy: false };
+    const linked = (ctx.params && ctx.params.query) || {};
+    if (linked.id) st.open = String(linked.id);
 
-    root.dataset.state = 'populated';
+    root.dataset.state = 'loading';
     setHtml(root, html`
-      <div class="tt-note" id="ttNote" role="status" hidden></div>
-      <div id="ttConfirm"></div>
-      <div class="card tt-hand" id="ttHandCard" hidden><div class="lbl">New routine</div><div id="ttHand"></div></div>
-      <div class="card tt-next" id="ttNext" hidden><div class="lbl">Up next</div><div id="ttNextList"></div></div>
-      <div id="ttList" data-region></div>
-      <div class="muted tt-foot">The scheduler only runs while this server runs. Nothing records a run that was missed while it was off: the store keeps only each routine's last run. When a routine is overdue the runner fires it once on its next check (catch-up), and it is marked overdue here until then. Only tools that need no confirmation can run unattended; a routine on any other tool is stopped by the gate and does nothing.</div>`);
+      <div class="am">
+        <div class="am-note" id="amNote" role="status" hidden></div>
+        <div id="amConfirm"></div>
+        <div id="amSheet"></div>
+        <div class="am-group"><h2 class="am-h" id="amListH">Automations</h2><div class="am-box" id="amList" data-region></div></div>
+        <div id="amTemplates"></div>
+        <div id="amDetail"></div>
+      </div>`);
     const $ = (id) => root.querySelector('#' + id);
-    const noteEl = $('ttNote');
-    const confirmEl = $('ttConfirm');
-    const listEl = $('ttList');
-    const handCard = $('ttHandCard');
-    const handEl = $('ttHand');
-    const nextCard = $('ttNext');
-    const nextEl = $('ttNextList');
+    const noteEl = $('amNote');
+    const confirmEl = $('amConfirm');
+    const sheetEl = $('amSheet');
+    const listEl = $('amList');
+    const tplEl = $('amTemplates');
+    const detailEl = $('amDetail');
 
     const note = (text, tone) => {
       noteEl.hidden = !text;
@@ -52,278 +50,298 @@ export default {
     };
 
     ctx.chrome.setActions([{
-      id: 'new', label: 'NEW ROUTINE', kind: 'primary',
-      spec: 'Describe a routine in words. It is sent to HOME, where the model proposes the tool and the schedule and you approve the change. Nothing is created from this screen.',
-      onClick: () => openHand(),
+      id: 'new', label: 'New automation', kind: 'primary',
+      spec: 'Write when and what in a sentence. You see what it will do, and nothing is created until you approve it.',
+      onClick: () => openSheet({ sentence: '' }),
     }]);
-
-    function confirmHere(prompt, run) {
-      const entry = { id: 'local-' + Date.now(), prompt, email: false, autonomous: false, state: 'pending', busy: false, error: '' };
-      const card = ctx.kit.approvalCard(entry, async (ok) => {
-        if (!ok) {
-          entry.state = 'declined';
-          card.paint();
-          return true;
-        }
-        entry.busy = true;
-        entry.error = '';
-        card.paint();
-        try {
-          await run();
-          entry.state = 'approved';
-        } catch (err) {
-          entry.error = err && err.message ? err.message : String(err);
-        }
-        entry.busy = false;
-        card.paint();
-        return true;
-      });
-      confirmEl.replaceChildren(card.el);
-      card.focus();
-    }
 
     /* ---------------- reads ---------------- */
     async function load(reason) {
-      const [sch, ros] = await Promise.allSettled([ctx.api.get('/api/schedules'), ctx.api.get('/api/roster')]);
-      if (ctx.signal.aborted) return;
-      if (ros.status === 'fulfilled') {
-        st.tiers = toolTiers(ros.value);
-        st.tiersError = '';
-      } else if (!isAbort(ros.reason)) {
-        st.tiersError = ros.reason.message;
-      }
-      if (sch.status === 'fulfilled') {
-        const wasStale = Boolean(st.error);
-        st.error = null;
-        const sig = JSON.stringify(sch.value) + JSON.stringify(st.tiers);
-        /* an unchanged poll never repaints, even with an editor open: a repaint would replace the
-           input the owner is typing in with the stored text (U1-6). A recovered poll drops its banner. */
-        if (sig === st.sig && reason === 'poll') {
-          if (wasStale) {
-            states.clearStale(root);
-            if (st.entries && !st.entries.length) root.dataset.state = 'empty';
-          }
-          paintOverdue();
-          return;
-        }
-        st.sig = sig;
-        st.entries = sortEntries(sch.value.schedules);
-      } else if (!isAbort(sch.reason)) {
-        st.error = sch.reason;
-      } else {
+      let out;
+      try {
+        out = await ctx.api.get('/api/os/automations');
+      } catch (err) {
+        if (isAbort(err) || ctx.signal.aborted) return;
+        st.error = err;
+        paint();
         return;
       }
+      if (ctx.signal.aborted) return;
+      st.error = null;
+      const sig = JSON.stringify(out) + String(st.open);
+      if (sig === st.sig && reason === 'poll') return;
+      st.sig = sig;
+      st.rows = out.automations || [];
+      st.templates = out.templates || [];
       paint();
+      if (st.open) await loadDetail(reason === 'poll');
+    }
+
+    async function loadDetail(quiet) {
+      if (!st.open) return;
+      try {
+        const out = await ctx.api.get('/api/os/automations/detail?id=' + encodeURIComponent(st.open));
+        if (ctx.signal.aborted) return;
+        st.detail = out;
+        st.detailError = '';
+      } catch (err) {
+        if (isAbort(err) || ctx.signal.aborted) return;
+        st.detail = null;
+        st.detailError = err.message;
+        if (!quiet && /no such/i.test(err.message)) st.open = null;
+      }
+      paintDetail();
     }
 
     /* ---------------- painting ---------------- */
     function paint() {
-      if (st.error && !st.entries) {
+      if (st.error && !st.rows) {
         root.dataset.state = 'error';
-        states.error(listEl, st.error, { title: 'Could not read the routines', retry: () => { states.loading(listEl, 'Reading the routines'); load('manual'); } });
+        states.error(listEl, st.error, { title: 'Could not read the automations', retry: () => { states.loading(listEl, 'Reading the automations'); load('manual'); } });
         return;
       }
-      if (!st.entries) return;
-      /* a changed list repaints the rows; keep what the owner has typed in the open editor */
-      const open = listEl.querySelector('[data-edit-input]');
-      if (open && st.edit) st.draft = { id: st.edit, text: open.value };
-      root.querySelectorAll(':scope > .st-stale').forEach((n) => n.remove());
-      if (st.error) states.stale(root, 'Could not refresh: ' + st.error.message + ' Showing the last read.');
-      else root.dataset.state = 'populated';
-      const on = st.entries.filter((e) => e.enabled).length;
-      ctx.chrome.setSub(plural(st.entries.length, 'routine') + ' · ' + on + ' on');
+      if (!st.rows) return;
+      root.dataset.state = st.rows.length ? 'populated' : 'empty';
+      ctx.chrome.setSub(countsText(st.rows));
       ctx.chrome.setLive(false);
-      if (!st.entries.length) {
-        if (!st.error) root.dataset.state = 'empty';
-        nextCard.hidden = true;
-        states.empty(listEl, 'Nothing is scheduled yet.', {
-          hint: 'Describe what should happen and when, and the model proposes a routine for you to approve.',
-          action: { label: 'New routine', onClick: () => openHand() },
-        });
-        return;
+      root.querySelector('#amListH').hidden = !st.rows.length;
+      listEl.parentElement.hidden = !st.rows.length;
+      if (st.rows.length) {
+        listEl.dataset.state = 'populated';
+        setHtml(listEl, html`${st.rows.map((r) => row(r))}`);
       }
-      paintNext();
-      listEl.dataset.state = 'populated';
-      setHtml(listEl, html`<div class="card tt-card">${st.tiersError ? html`<div class="muted tt-err">Tool tiers could not be read (${st.tiersError}), so the unattended check below is not shown.</div>` : ''}${st.entries.map((e) => row(e))}</div>`);
-      const box = listEl.querySelector('[data-edit-input]');
-      if (box) box.focus();
+      paintTemplates();
+      paintSheet();
     }
 
-    /* F5: the next few runs in time order, in the one date style the app uses */
-    function paintNext() {
-      const list = upNext(st.entries);
-      nextCard.hidden = !list.length;
-      if (!list.length) return;
-      setHtml(nextEl, html`${list.map(({ e, at }) => html`<div class="kv"><span>${toolLabel(e.tool)} <span class="muted">${argsPhrase(e.tool, e.arguments)}</span></span><b>${whenShort(at)}</b></div>`)}`);
-    }
-
-    function draftFor(e) {
-      return st.draft && st.draft.id === e.id ? st.draft.text : (e.schedule_text || '');
-    }
-
-    function row(e) {
-      const overdue = isOverdue(e);
-      const blocked = cannotRunUnattended(e, st.tiers);
-      const editing = st.edit === e.id;
-      return html`<div class="tt-item" data-sched="${e.id}" data-enabled="${String(Boolean(e.enabled))}">
-        <div class="os-row">
-          <span class="tag ${e.enabled ? 'ok' : ''}">${scheduleSentence(e.schedule_description)}</span>
-          <span class="rt"><b>${toolLabel(e.tool)}</b> <span class="muted" title="${e.tool}${argsPreview(e.arguments) === 'no arguments' ? '' : ' ' + argsPreview(e.arguments)}">${argsPhrase(e.tool, e.arguments)}</span>
-            <div class="muted">${e.enabled ? 'Next run ' + (whenShort(parseNext(e.next_run)) || e.next_run || 'unknown') : 'Paused'} · ${lastAttemptText(e, blocked, e.last_run ? agoLabel(e.last_run) : '')}</div></span>
-          ${!e.enabled ? html`<span class="tag">paused</span>` : ''}
-          <span data-overdue="${e.id}">${overdue ? html`<span class="tag warn" title="The runner fires this once on its next check">overdue</span>` : ''}</span>
-          ${blocked ? html`<span class="tag bad" title="This tool needs confirmation, so the unattended runner stops it">needs confirmation, will not run</span>` : ''}
-          <span class="os-row-actions">
-            <button type="button" class="os-btn" data-edit="${e.id}" aria-expanded="${String(editing)}" data-spec="Changes when this routine runs, not what it does. The routine keeps its id and its last run time.">EDIT</button>
-            <button type="button" class="os-btn" data-toggle="${e.id}" data-spec="${e.enabled ? 'Stops future runs after asking. The routine and its last run time are kept.' : 'Turns this routine back on after asking.'}">${e.enabled ? 'DISABLE' : 'ENABLE'}</button>
-          </span>
-        </div>
-        ${editing ? html`<div class="tt-edit"><label class="tt-l" for="ttEdit-${e.id}">When, in words (for example: daily at 8:30, every 30 minutes, every Monday at 9:00)</label>
-          <div class="tt-editrow"><input id="ttEdit-${e.id}" class="tt-in" type="text" maxlength="120" value="${draftFor(e)}" data-edit-input data-spec="The new schedule in words. The server checks it and says why if it does not understand.">
-          <button type="button" class="os-btn os-btn--primary" data-save="${e.id}" data-spec="Asks for confirmation, then changes the schedule.">SAVE</button>
-          <button type="button" class="os-btn" data-edit-cancel data-spec="Closes this editor without changing anything.">CANCEL</button></div>
-          ${st.editError ? html`<div class="tt-err" role="alert">${st.editError}</div>` : ''}</div>` : ''}
+    function row(r) {
+      const tone = resultTone(r.result_status);
+      return html`<div class="am-row" data-id="${r.id}" data-open="${String(st.open === r.id)}">
+        <button type="button" class="am-main" data-open-id="${r.id}" aria-expanded="${String(st.open === r.id)}">
+          <span class="am-rt"><span class="am-name">${r.name}</span><span class="am-sub">${rowSub(r)}</span></span>
+          <span class="am-word" data-tone="${tone}">${r.result}</span>
+        </button>
+        <button type="button" class="os-switch" role="switch" aria-checked="${String(Boolean(r.enabled))}" aria-label="${r.name}" data-switch="${r.id}" data-spec="${r.enabled ? 'Pauses this automation. It keeps its history.' : 'Turns this automation back on.'}"></button>
       </div>`;
     }
 
-    /* the overdue tag depends on the clock, so it is refreshed without a full repaint */
-    function paintOverdue() {
-      if (!st.entries) return;
-      for (const e of st.entries) {
-        const slot = listEl.querySelector('[data-overdue="' + CSS.escape(e.id) + '"]');
-        if (slot) slot.replaceChildren(...(isOverdue(e) ? [Object.assign(document.createElement('span'), { className: 'tag warn', textContent: 'overdue', title: 'The runner fires this once on its next check' })] : []));
-      }
-    }
-
-    /* ---------------- new routine (hand-off) ---------------- */
-    function openHand() {
-      handCard.hidden = false;
-      st.hand = st.hand || '';
-      setHtml(handEl, html`
-        <label class="tt-l" for="ttWhat">What should happen, and when</label>
-        <textarea id="ttWhat" class="tt-in" rows="3" data-hand-input placeholder="Every weekday at 07:30, check my mail for anything urgent" data-spec="Your request in words. It is sent to HOME as a message; the model picks the tool and the schedule.">${st.hand}</textarea>
-        <div class="muted tt-warn">Sending puts this message into the HOME conversation. The model then proposes a schedule_recurring call, and that call waits for your approval there. Nothing is scheduled from this screen.</div>
-        <div class="tt-editrow"><button type="button" class="os-btn os-btn--primary" data-send-hand data-spec="Asks for confirmation, then sends your request to HOME.">SEND TO HOME</button>
-        <button type="button" class="os-btn" data-hand-close data-spec="Closes this form without sending anything.">DISCARD</button></div><div class="tt-err" id="ttHandErr" role="alert"></div>`);
-      handEl.querySelector('#ttWhat').focus();
-    }
-
-    function closeHand() {
-      handCard.hidden = true;
-      handEl.replaceChildren();
-    }
-
-    function sendHand() {
-      const what = handEl.querySelector('#ttWhat').value.trim();
-      st.hand = what;
-      const err = handEl.querySelector('#ttHandErr');
-      if (!what) {
-        err.textContent = 'Write what should happen and when.';
+    function paintTemplates() {
+      /* the five starting points show when the list is empty, and stay one click away behind New automation after that */
+      if (!st.rows || st.rows.length || !st.templates.length) {
+        tplEl.replaceChildren();
         return;
       }
-      if (what.length > 1200) {
-        err.textContent = 'That is longer than 1200 characters.';
+      setHtml(tplEl, html`<div class="am-group"><h2 class="am-h">Start from one of these</h2><div class="am-box">${st.templates.map((t) => html`
+        <div class="am-row"><span class="am-rt"><span class="am-name">${t.name}</span><span class="am-sub">${t.when}${t.when ? ' · ' : ''}${t.action}</span></span>
+        <button type="button" class="os-btn" data-template="${t.id}" data-spec="Shows what this will do. Nothing is created until you approve it.">Add</button></div>`)}</div></div>`);
+    }
+
+    /* ---------------- the create sheet ---------------- */
+    function openSheet(seed) {
+      st.sheet = { sentence: seed.sentence || '', template: seed.template || '', card: null };
+      st.sheetError = '';
+      paintSheet();
+      if (seed.template) previewSheet();
+    }
+
+    function closeSheet() {
+      st.sheet = null;
+      st.sheetError = '';
+      sheetEl.replaceChildren();
+    }
+
+    function paintSheet() {
+      if (!st.sheet) {
+        sheetEl.replaceChildren();
         return;
       }
-      err.textContent = '';
-      confirmHere('Send this to HOME? "' + what + '". The model will propose a routine and wait for your approval before anything is scheduled.', async () => {
-        await ctx.chat.send(handoffText(what));
-        st.hand = '';
-        closeHand();
-        const a = document.createElement('a');
-        a.href = '#/home';
-        a.textContent = 'Open HOME to follow it';
-        noteEl.hidden = false;
-        noteEl.dataset.tone = 'ok';
-        noteEl.replaceChildren(document.createTextNode('Sent. Nothing is scheduled until you approve it. '), a);
-      });
+      const s = st.sheet;
+      const keep = sheetEl.querySelector('[data-sentence]');
+      if (keep) s.sentence = keep.value;
+      setHtml(sheetEl, html`<div class="am-group"><h2 class="am-h">${s.template ? 'Add automation' : 'New automation'}</h2><div class="am-box am-pad">
+        ${s.template ? '' : html`<label class="am-l" for="amSentence">When, and what to do</label>
+        <input id="amSentence" class="am-in" type="text" maxlength="400" value="${s.sentence}" placeholder="${EXAMPLE}" data-sentence data-spec="For example: every weekday at 8 check my security, or remind me tomorrow at 5pm to call the bank.">`}
+        ${s.card ? html`<div class="am-card">${cardRows(s.card).map(([k, v]) => html`<div class="am-kv"><span class="am-k">${k}</span><span class="am-v">${v}</span></div>`)}</div>` : ''}
+        ${st.sheetError ? html`<div class="am-err" role="alert">${st.sheetError}</div>` : ''}
+        <div class="am-btns">
+          ${s.card ? html`<button type="button" class="os-btn os-btn--primary" data-approve ${st.busy ? 'disabled' : ''} data-spec="Creates this automation. It then runs by itself, within its limits.">Approve</button>` : html`<button type="button" class="os-btn os-btn--primary" data-preview ${st.busy ? 'disabled' : ''} data-spec="Shows what this would do. Nothing is created yet.">Preview</button>`}
+          <button type="button" class="os-btn" data-cancel-sheet data-spec="Closes this without creating anything.">Cancel</button>
+        </div></div></div>`);
+      const input = sheetEl.querySelector('[data-sentence]');
+      if (input && !s.card) input.focus();
+    }
+
+    function sheetBody() {
+      const s = st.sheet;
+      return s.template ? { template: s.template } : { sentence: s.sentence.trim() };
+    }
+
+    async function previewSheet() {
+      const s = st.sheet;
+      if (!s) return;
+      const input = sheetEl.querySelector('[data-sentence]');
+      if (input) s.sentence = input.value;
+      if (!s.template && !s.sentence.trim()) {
+        st.sheetError = 'Say when and what, for example: ' + EXAMPLE.toLowerCase() + '.';
+        paintSheet();
+        return;
+      }
+      st.busy = true;
+      st.sheetError = '';
+      paintSheet();
+      try {
+        const out = await ctx.api.post('/api/os/automations/preview', sheetBody());
+        s.card = out.card;
+      } catch (err) {
+        if (isAbort(err)) return;
+        st.sheetError = err.message;
+        s.card = null;
+      }
+      st.busy = false;
+      paintSheet();
+    }
+
+    async function approveSheet() {
+      const s = st.sheet;
+      if (!s || !s.card) return;
+      st.busy = true;
+      st.sheetError = '';
+      paintSheet();
+      try {
+        const out = await ctx.api.post('/api/os/automations/create', { ...sheetBody(), approve: true });
+        st.busy = false;
+        closeSheet();
+        st.open = out.automation.id;
+        note('Created ' + out.automation.name + '.', 'ok');
+        await load('manual');
+        return;
+      } catch (err) {
+        if (isAbort(err)) return;
+        st.sheetError = err.message;
+      }
+      st.busy = false;
+      paintSheet();
+    }
+
+    /* ---------------- the detail ---------------- */
+    function paintDetail() {
+      if (!st.open) {
+        detailEl.replaceChildren();
+        return;
+      }
+      if (st.detailError) {
+        setHtml(detailEl, html`<div class="am-group"><div class="am-box am-pad am-err" role="alert">${st.detailError}</div></div>`);
+        return;
+      }
+      const d = st.detail;
+      if (!d || d.automation.id !== st.open) return;
+      const a = d.automation;
+      const parked = parkedRuns(d.history);
+      setHtml(detailEl, html`<div class="am-group"><h2 class="am-h">${a.name}</h2>
+        <div class="am-box">
+          <div class="am-row"><span class="am-rt"><span class="am-name">${a.trigger}</span><span class="am-sub">${a.action}</span></span></div>
+          <div class="am-row"><span class="am-rt"><span class="am-name">Can use</span><span class="am-sub">${d.tools}</span></span></div>
+          <div class="am-row"><span class="am-rt"><span class="am-name">Today</span><span class="am-sub">${a.runs_today} of ${a.caps.max_runs_per_day} runs, ${a.caps.max_steps} steps each</span></span></div>
+          ${parked.map((p) => html`<div class="am-row am-parked" data-run="${p.id}"><span class="am-rt"><span class="am-name">Waiting for you</span><span class="am-sub">${p.result}</span></span>
+            <button type="button" class="os-btn os-btn--primary" data-review="${p.id}" data-spec="Shows what it wants to do. Nothing runs until you approve.">Review</button></div>`)}
+          <div class="am-row am-actions"><button type="button" class="os-btn" data-run-now="${a.id}" data-spec="Runs it once now, after you confirm. It counts toward today's runs.">Run now</button>
+            <button type="button" class="os-btn" data-remove="${a.id}" data-spec="Deletes this automation and its history, after you confirm.">Remove</button></div>
+        </div></div>
+        <div class="am-group"><h2 class="am-h">History</h2><div class="am-box">${d.history.length ? d.history.map((h) => html`
+          <div class="am-row"><span class="am-rt"><span class="am-name">${historyLine(h)}</span><span class="am-sub">${h.result}${historyNote(h) ? ' · ' + historyNote(h) : ''}</span></span>
+          <span class="am-word" data-tone="${resultTone(h.status)}">${h.word}</span></div>`) : html`<div class="am-row am-sub">No runs yet.</div>`}</div></div>`);
     }
 
     /* ---------------- actions ---------------- */
-    const find = (id) => (st.entries || []).find((e) => e.id === id);
-
-    async function post(path, body, okText) {
-      await ctx.api.post(path, body);
-      note(okText, 'ok');
+    async function act(path, body, okText) {
+      try {
+        await ctx.api.post(path, body);
+        note(okText, 'ok');
+      } catch (err) {
+        if (isAbort(err)) return;
+        note(err.message, 'error');
+      }
       if (!ctx.signal.aborted) await load('manual');
     }
 
     root.addEventListener('click', (e) => {
       const q = (sel) => e.target.closest(sel);
       let el;
-      if ((el = q('[data-edit]'))) {
-        st.edit = st.edit === el.dataset.edit ? null : el.dataset.edit;
-        st.editError = '';
-        st.draft = null;
+      if ((el = q('[data-open-id]'))) {
+        st.open = st.open === el.dataset.openId ? null : el.dataset.openId;
+        st.detail = null;
+        st.detailError = '';
+        st.sig = '';
         paint();
-      } else if (q('[data-edit-cancel]')) {
-        st.edit = null;
-        st.draft = null;
-        paint();
-      } else if ((el = q('[data-save]'))) {
-        saveEdit(el.dataset.save);
-      } else if ((el = q('[data-toggle]'))) {
-        const en = find(el.dataset.toggle);
-        if (!en) return;
-        const to = !en.enabled;
-        confirmHere((to ? 'Turn this routine back on? ' : 'Disable this routine? ') + en.tool + ', ' + (en.schedule_description || '') + '. ' +
-          (to ? 'It will run again when it is next due.' : 'It stops running until you enable it again. The routine and its last run time are kept.'),
-        () => post('/api/schedules/toggle', { id: en.id, enabled: to }, to ? 'Routine enabled.' : 'Routine disabled.'));
-      } else if (q('[data-send-hand]')) {
-        sendHand();
-      } else if (q('[data-hand-close]')) {
-        closeHand();
+        paintDetail();
+        loadDetail(false);
+      } else if ((el = q('[data-switch]'))) {
+        const r = (st.rows || []).find((x) => x.id === el.dataset.switch);
+        if (!r) return;
+        act(r.enabled ? '/api/os/automations/pause' : '/api/os/automations/resume', { id: r.id }, r.enabled ? r.name + ' paused.' : r.name + ' is on.');
+      } else if ((el = q('[data-template]'))) {
+        openSheet({ template: el.dataset.template });
+      } else if (q('[data-preview]')) {
+        previewSheet();
+      } else if (q('[data-approve]')) {
+        approveSheet();
+      } else if (q('[data-cancel-sheet]')) {
+        closeSheet();
+      } else if ((el = q('[data-run-now]'))) {
+        const a = st.detail && st.detail.automation;
+        if (!a) return;
+        confirmHere(confirmEl, 'Run ' + a.name + ' now? It counts toward today\'s runs.',
+          () => act('/api/os/automations/run', { id: a.id }, a.name + ' ran.'));
+      } else if ((el = q('[data-remove]'))) {
+        const a = st.detail && st.detail.automation;
+        if (!a) return;
+        confirmHere(confirmEl, 'Remove ' + a.name + '? Its history goes too. This cannot be undone.', async () => {
+          await ctx.api.post('/api/os/automations/remove', { id: a.id });
+          st.open = null;
+          st.detail = null;
+          note(a.name + ' removed.', 'ok');
+          await load('manual');
+          paintDetail();
+        });
+      } else if ((el = q('[data-review]'))) {
+        const run = (st.detail && st.detail.history || []).find((h) => h.id === el.dataset.review);
+        if (!run) return;
+        const what = run.parked ? run.parked.tool.replace(/_/g, ' ') : 'this step';
+        confirmHere(confirmEl, 'Let ' + (st.detail.automation.name) + ' run ' + what + ' once? It asked first because it needs your approval.',
+          () => act('/api/os/automations/approve', { run: run.id }, 'Done.'));
       }
     });
 
-    function saveEdit(id) {
-      const en = find(id);
-      const input = listEl.querySelector('[data-edit-input]');
-      if (!en || !input) return;
-      const text = input.value.trim();
-      if (!text) {
-        st.editError = 'Write when it should run.';
-        paint();
-        return;
-      }
-      confirmHere('Change when "' + en.tool + '" runs, from "' + (en.schedule_text || en.schedule_description) + '" to "' + text + '"? What it does stays the same and its last run time is kept.',
-        async () => {
-          try {
-            await post('/api/schedules/update', { id: id, schedule_text: text }, 'Schedule changed.');
-            st.edit = null;
-            st.draft = null;
-            st.editError = '';
-            paint();
-          } catch (err) {
-            st.editError = err.message;
-            paint();
-            throw err;
-          }
-        });
-    }
-
     root.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') {
-        if (st.edit) {
-          st.edit = null;
-          st.draft = null;
-          paint();
-        } else if (!handCard.hidden) {
-          closeHand();
-        }
-      } else if (e.key === 'Enter' && e.target.matches && e.target.matches('[data-edit-input]') && st.edit) {
+      if (e.key === 'Escape' && st.sheet) closeSheet();
+      else if (e.key === 'Enter' && e.target.matches && e.target.matches('[data-sentence]')) {
         e.preventDefault();
-        saveEdit(st.edit);
+        if (st.sheet && st.sheet.card) approveSheet();
+        else previewSheet();
+      }
+    });
+
+    /* a changed sentence invalidates the card the owner was about to approve */
+    root.addEventListener('input', (e) => {
+      if (e.target.matches && e.target.matches('[data-sentence]') && st.sheet && st.sheet.card) {
+        st.sheet.card = null;
+        st.sheet.sentence = e.target.value;
+        paintSheet();
+        const input = sheetEl.querySelector('[data-sentence]');
+        if (input) {
+          input.focus();
+          input.setSelectionRange(input.value.length, input.value.length);
+        }
       }
     });
 
     ctx.events.onResync(() => load('resync'));
     ctx.every(POLL_MS, () => load('poll'));
-    states.loading(listEl, 'Reading the routines');
+    states.loading(listEl, 'Reading the automations');
     await load('show');
   },
 
   async refresh(ctx, reason) {
-    if (reason === 'manual') ctx.notify({ level: 'info', title: 'TIMETABLE', detail: 'This screen re-reads every few seconds while it is open.', ttl: 3000 });
+    if (reason === 'manual') ctx.notify({ level: 'info', title: 'Automations', detail: 'This screen re-reads every few seconds while it is open.', ttl: 3000 });
   },
 };

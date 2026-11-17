@@ -73,16 +73,24 @@ def _parse_clock(text: str) -> str:
         elif ampm == "am" and hour == 12:
             hour = 0
         return f"{hour:02d}:00"
+    m = re.fullmatch(r"\s*(\d{1,2})\s*", text)  # a bare hour is the 24 hour clock: "8" is 08:00
+    if m:
+        if int(m.group(1)) > 23:
+            raise ValueError("time must be a valid hour (0-23)")
+        return f"{int(m.group(1)):02d}:00"
     raise ValueError(
-        "time must look like '9:00', '09:00', '9am' or '2pm'"
+        "time must look like '9:00', '09:00', '9am', '2pm' or just '8'"
     )
 
 
-def parse_schedule(text: str) -> dict[str, Any]:
+def parse_schedule(text: str, now: datetime | None = None) -> dict[str, Any]:
     """Deterministically parse a user schedule phrase into a spec dict.
 
     Returns {kind, time, weekday, interval_seconds}. Raises ValueError with
     the accepted shapes when the phrase is not understood (honest, Rule 2.2).
+    Plan 2.2 adds "every weekday [at HH:MM]" (Monday to Friday) and the two
+    one-time shapes used by reminders, "tomorrow at HH:MM" and "in N minutes|hours",
+    which return kind "once" with the moment in ``when`` (``now`` is injectable).
     """
     s = (text or "").strip().lower()
     if not s:
@@ -90,6 +98,30 @@ def parse_schedule(text: str) -> dict[str, Any]:
             "schedule must describe when: e.g. 'every Monday at 9:00', "
             "'daily at 8:30', 'every 30 minutes', 'weekly'"
         )
+
+    # --- one time: "tomorrow at 5pm", "in 20 minutes" (reminders) ---
+    m = re.fullmatch(r"tomorrow\s*(?:at\s+(.+))?", s)
+    if m:
+        hh, mm = _parse_clock(m.group(1) if m.group(1) else "09:00").split(":")
+        base = (now or _now()) + timedelta(days=1)
+        when = base.replace(hour=int(hh), minute=int(mm), second=0, microsecond=0)
+        return {"kind": "once", "time": f"{hh}:{mm}", "weekday": None, "interval_seconds": None,
+                "when": when.isoformat(timespec="minutes")}
+    m = re.fullmatch(r"in\s+(\d+)\s+(minute|minutes|hour|hours)", s)
+    if m:
+        n = int(m.group(1))
+        if n < 1 or n > 720:
+            raise ValueError("a reminder in minutes or hours must be between 1 and 720")
+        delta = timedelta(minutes=n) if m.group(2).startswith("minute") else timedelta(hours=n)
+        when = (now or _now()).replace(second=0, microsecond=0) + delta
+        return {"kind": "once", "time": when.strftime("%H:%M"), "weekday": None, "interval_seconds": None,
+                "when": when.isoformat(timespec="minutes")}
+
+    # --- "every weekday [at HH:MM]" (Monday to Friday) ---
+    m = re.fullmatch(r"(?:every\s+weekday|weekdays)\s*(?:at\s+(.+))?", s)
+    if m:
+        time_s = _parse_clock(m.group(1)) if m.group(1) else "09:00"
+        return {"kind": "weekdays", "time": time_s, "weekday": None, "interval_seconds": None}
 
     # --- interval: "every N minutes|hours|days" ---
     m = re.fullmatch(
@@ -143,14 +175,20 @@ def parse_schedule(text: str) -> dict[str, Any]:
         return {"kind": "daily", "time": time_s, "weekday": None, "interval_seconds": None}
 
     raise ValueError(
-        "schedule not understood. Accepted shapes: 'every Monday at 9:00', "
-        "'daily at 8:30', 'every 30 minutes', 'weekly'. Nothing was scheduled."
+        "schedule not understood. Accepted shapes: 'every Monday at 9:00', 'every weekday at 8:00', "
+        "'daily at 8:30', 'every 30 minutes', 'tomorrow at 5pm', 'in 20 minutes', 'weekly'. Nothing was scheduled."
     )
 
 
 def describe_spec(spec: dict[str, Any]) -> str:
     """Human description of a parsed spec (used in list output)."""
     kind = spec.get("kind")
+    if not kind:
+        return ""  # an event trigger has no clock; describe_trigger words it
+    if kind == "once":
+        return f"once on {str(spec.get('when') or '').replace('T', ' ')}"
+    if kind == "weekdays":
+        return f"every weekday at {spec.get('time') or '09:00'}"
     if kind == "interval":
         secs = int(spec.get("interval_seconds") or 0)
         if secs % 86400 == 0:
@@ -170,6 +208,17 @@ def next_run(spec: dict[str, Any], after: datetime) -> datetime:
     kind = spec.get("kind")
     if kind == "interval":
         return after + timedelta(seconds=int(spec.get("interval_seconds") or 0))
+    if kind == "once":
+        when = datetime.fromisoformat(str(spec.get("when")))
+        return when if when > after else datetime.max.replace(microsecond=0)
+    if kind == "weekdays":
+        hh, mm = (spec.get("time") or "09:00").split(":")
+        candidate = after.replace(hour=int(hh), minute=int(mm), second=0, microsecond=0)
+        for _ in range(8):
+            if candidate.weekday() < 5 and candidate > after:
+                return candidate
+            candidate += timedelta(days=1)
+        raise RuntimeError("could not compute next run (internal)")
     hh, mm = (spec.get("time") or "09:00").split(":")
     hour, minute = int(hh), int(mm)
     if kind == "daily":
@@ -265,6 +314,106 @@ class Schedules:
     def list(self) -> list[dict[str, Any]]:
         return self._load()
 
+    def get(self, schedule_id: str) -> dict[str, Any] | None:
+        return next((e for e in self._load() if e.get("id") == schedule_id), None)
+
+    # ---- store v2 (plan 2.2, finding 207) --------------------------------------------------------------------
+    # A v2 entry is the same JSONL row with more fields, so every v1 reader keeps working: ``tool`` and
+    # ``arguments`` stay (a prompt action carries tool "automation_prompt"), and an entry without ``version`` is
+    # a v1 entry that runs exactly as before.
+
+    def add_v2(
+        self, name: str, trigger: dict[str, Any], action: dict[str, Any], *, spec: dict[str, Any] | None = None,
+        schedule_text: str = "", delivery: dict[str, Any] | None = None, caps: dict[str, Any] | None = None,
+        template: str = "", created_at: str | None = None,
+    ) -> dict[str, Any]:
+        """A clean entry. ``trigger`` is {"type": "time"|"file_appears"|"security_finding"|"mail_match", ...}; a time
+        trigger carries the parsed ``spec``. ``action`` is {"type": "tool", "tool", "arguments"} or
+        {"type": "prompt", "prompt", "owner"}. Validation lives in automation_runs.clean_entry, which the API calls."""
+        with _STORE_LOCK:
+            entries = self._load()
+            is_prompt = action.get("type") == "prompt"
+            entry = {
+                "id": self._next_id(entries),
+                "version": 2,
+                "name": name,
+                "tool": "automation_prompt" if is_prompt else str(action.get("tool") or ""),
+                "arguments": {"prompt": action.get("prompt", "")} if is_prompt else dict(action.get("arguments") or {}),
+                "action": action,
+                "trigger": trigger,
+                "schedule_text": schedule_text,
+                "spec": spec or {},
+                "delivery": delivery or {"notify": True},
+                "caps": caps or {},
+                "template": template,
+                "state": {"fail_count": 0, "runs_today": 0, "runs_day": "", "last_status": "", "last_run_id": ""},
+                "created_at": created_at or _now().isoformat(timespec="seconds"),
+                "last_run": None,
+                "enabled": True,
+            }
+            entries.append(entry)
+            self._save(entries)
+            return entry
+
+    def patch_state(self, schedule_id: str, **changes: Any) -> dict[str, Any] | None:
+        """Merge ``changes`` into the entry's ``state`` under the store lock (the runner and the screen both write)."""
+        with _STORE_LOCK:
+            entries = self._load()
+            hit = None
+            for e in entries:
+                if e.get("id") == schedule_id:
+                    state = dict(e.get("state") or {})
+                    state.update(changes)
+                    e["state"] = state
+                    hit = e
+                    break
+            if hit is not None:
+                self._save(entries)
+            return hit
+
+    def count_run(self, schedule_id: str, now: datetime | None = None) -> int:
+        """One more run today; returns the new count. The day rolls over by itself."""
+        with _STORE_LOCK:
+            entries = self._load()
+            count = 0
+            today = (now or _now()).date().isoformat()
+            for e in entries:
+                if e.get("id") == schedule_id:
+                    state = dict(e.get("state") or {})
+                    if state.get("runs_day") != today:
+                        state["runs_day"], state["runs_today"] = today, 0
+                    state["runs_today"] = int(state.get("runs_today") or 0) + 1
+                    count = state["runs_today"]
+                    e["state"] = state
+                    break
+            self._save(entries)
+            return count
+
+    def runs_today(self, entry: dict[str, Any], now: datetime | None = None) -> int:
+        state = entry.get("state") or {}
+        return int(state.get("runs_today") or 0) if state.get("runs_day") == (now or _now()).date().isoformat() else 0
+
+    def record_outcome(self, schedule_id: str, ok: bool, status: str, *, max_failures: int = 3) -> dict[str, Any] | None:
+        """Fold one finished run into the state. A success clears the failure count; the third failure in a row
+        switches the automation off (it keeps its history and its place, and Resume turns it back on)."""
+        with _STORE_LOCK:
+            entries = self._load()
+            hit = None
+            for e in entries:
+                if e.get("id") == schedule_id:
+                    state = dict(e.get("state") or {})
+                    state["last_status"] = status
+                    state["fail_count"] = 0 if ok else int(state.get("fail_count") or 0) + 1
+                    if state["fail_count"] >= max_failures and e.get("enabled"):
+                        e["enabled"] = False
+                        state["auto_disabled"] = True
+                    e["state"] = state
+                    hit = e
+                    break
+            if hit is not None:
+                self._save(entries)
+            return hit
+
     def remove(self, schedule_id: str) -> bool:
         with _STORE_LOCK:
             entries = self._load()
@@ -296,6 +445,8 @@ class Schedules:
             for e in entries:
                 if e.get("id") == schedule_id:
                     e["enabled"] = bool(enabled)
+                    if enabled and isinstance(e.get("state"), dict):
+                        e["state"] = {**e["state"], "fail_count": 0, "auto_disabled": False}
                     changed = True
                     break
             if changed:
@@ -354,7 +505,10 @@ class SchedulerRunner:
         fetcher: Callable[[str, dict[str, Any]], str] | None = None,
         now_fn: Callable[[], datetime] = _now,
         bus: Any | None = None,
+        engine: Any | None = None,
     ) -> None:
+        self._engine_override = engine
+        self._engine_cached: Any | None = None
         self._registry = registry
         self._tracker = tracker
         self._store = store or Schedules()
@@ -399,10 +553,62 @@ class SchedulerRunner:
                     detail=f"{type(exc).__name__}: {exc}",
                 )
 
+    def _engine(self) -> Any:
+        """The automation engine (plan 2.2), built on first use: v1 schedules never need it."""
+        if self._engine_override is not None:
+            return self._engine_override
+        if self._engine_cached is None:
+            from dourmouse.automation_runs import Engine
+
+            self._engine_cached = Engine(self._store, self._registry, now_fn=self._now_fn)
+        return self._engine_cached
+
+    def _tick_v2(self, entry: dict[str, Any], now: datetime) -> None:
+        """One automation: an event trigger is polled, a clock trigger is judged with the same ``_due`` as before.
+        A failure in one automation is recorded as a failed run by the engine; it never stops the others."""
+        from dourmouse import automation_triggers as triggers
+
+        engine = self._engine()
+        fired = ""
+        if triggers.is_event(entry):
+            events, change = triggers.poll(entry)
+            if change:
+                self._store.patch_state(entry["id"], **change)
+            if events:
+                fired = triggers.describe(entry, describe_spec)
+        elif (entry.get("trigger") or {}).get("type", "time") == "time" and self._due(entry, now):
+            fired = triggers.describe(entry, describe_spec)
+        if not fired:
+            return
+        row = engine.run(entry, fired)
+        self._store.mark_run(entry["id"], at=now)
+        if (entry.get("spec") or {}).get("kind") == "once":
+            self._store.set_enabled(entry["id"], False)  # a reminder happens once
+        self._tracker.on_event({
+            "type": "schedule", "name": entry.get("name") or entry.get("tool", "?"), "raw_arguments": "{}",
+            "text": f"[{entry.get('id')} {row.get('status')}] {row.get('result', '')}"[:600],
+        })
+
     def _tick_once(self) -> None:
         now = self._now_fn()
+        try:
+            self._engine().refresh_running()  # prompt runs finish later; read their jobs
+        except Exception as exc:  # noqa: BLE001 - a job that cannot be read must not stop the schedules
+            from dourmouse import obs
+
+            obs.log_error(source="scheduler", kind="refresh_failed", what="automation jobs",
+                          detail=f"{type(exc).__name__}: {exc}")
         for entry in self._store.list():
             if not entry.get("enabled"):
+                continue
+            if entry.get("version") == 2:
+                try:
+                    self._tick_v2(entry, now)
+                except Exception as exc:  # noqa: BLE001
+                    from dourmouse import obs
+
+                    obs.log_error(source="scheduler", kind="automation_failed", what=str(entry.get("id")),
+                                  detail=f"{type(exc).__name__}: {exc}")
                 continue
             try:
                 if not self._due(entry, now):
@@ -497,9 +703,12 @@ def describe_next_run(entry: dict[str, Any], now_fn: Callable[[], datetime] = _n
     """'next run' description for list output (used by the tools)."""
     try:
         spec = entry.get("spec") or {}
+        if not spec.get("kind"):
+            return ""  # an event trigger has no next time
         after = datetime.fromisoformat(str(entry.get("last_run"))) if entry.get("last_run") else (
             datetime.fromisoformat(str(entry.get("created_at"))) if entry.get("created_at") else now_fn()
         )
-        return next_run(spec, after).strftime("%Y-%m-%d %H:%M")
+        nxt = next_run(spec, after)
+        return "" if nxt.year >= 9999 else nxt.strftime("%Y-%m-%d %H:%M")
     except Exception:
         return "unknown"

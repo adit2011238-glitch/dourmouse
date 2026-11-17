@@ -189,14 +189,6 @@ R.junk = whenShort('junk');
 """, "import { whenShort } from 'kit/format.js';")
         assert out["v"] == ["07:30", "Tomorrow 09:00", "Fri 09:00", "20 Oct", "2 Jan 2027", "Yesterday 23:00"] and out["junk"] == ""
 
-    def test_routines_read_as_sentences(self, tmp_path):
-        out = run(tmp_path, """
-R.s = ['every 30 minute(s)', 'daily at 07:30', 'every Monday at 09:00', 'every 1 hour(s)', 'every 2 day(s)'].map(scheduleSentence);
-R.t = [toolLabel('check_mail'), toolLabel('some_odd_tool')]; R.a = argsPhrase('web_search', { query: 'nvidia earnings' });
-""", "import { scheduleSentence, toolLabel, argsPhrase } from 'screens/timetable/helpers.js';")
-        assert out["s"] == ["Every 30 minutes", "Every day at 07:30", "Every Monday at 09:00", "Every hour", "Every 2 days"]
-        assert out["t"] == ["Check mail", "Some odd tool"] and out["a"] == 'for "nvidia earnings"'
-
     def test_the_goals_header_counts_each_state_separately_and_blocked_tasks_are_on_hold(self, tmp_path):
         out = run(tmp_path, """
 const g = (status) => ({ status });
