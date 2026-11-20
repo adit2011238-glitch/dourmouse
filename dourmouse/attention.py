@@ -385,7 +385,7 @@ class AttentionStore:
                 cur = db.execute("UPDATE items SET read_at=? WHERE read_at IS NULL", (self._clock(),))
             else:
                 marks = ",".join("?" for _ in ids) or "NULL"
-                cur = db.execute(f"UPDATE items SET read_at=? WHERE read_at IS NULL AND id IN ({marks})", (self._clock(), *ids))
+                cur = db.execute(f"UPDATE items SET read_at=? WHERE read_at IS NULL AND id IN ({marks})", (self._clock(), *ids))  # noqa: S608 - only fixed column names and ? placeholders are joined into the text
             n = cur.rowcount
         if n:
             self._changed("read", ids or [])

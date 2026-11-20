@@ -16,7 +16,7 @@ def _node(script: str):
     node = shutil.which("node")
     if not node:
         pytest.skip("node not available")
-    out = subprocess.run([node, "--input-type=module", "-e", script], capture_output=True, text=True, timeout=30, cwd=_HOME)
+    out = subprocess.run([node, "--input-type=module", "-e", script], capture_output=True, text=True, timeout=30, cwd=_HOME, check=False)
     assert out.returncode == 0, out.stderr
     return json.loads(out.stdout)
 

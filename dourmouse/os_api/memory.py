@@ -38,7 +38,7 @@ def _store(req: Request) -> MemoryStore:
 def _fact_id(req: Request) -> int:
     raw = req.body.get("id") if req.body.get("id") is not None else req.arg("id")
     try:
-        return int(raw)
+        return int(str(raw))
     except (TypeError, ValueError):
         raise ApiError(400, "id is required") from None
 
@@ -189,7 +189,7 @@ def supersede(req: Request) -> tuple[int, dict[str, Any]]:
 @route("POST", "/api/os/memory/merge")
 def merge(req: Request) -> tuple[int, dict[str, Any]]:
     try:
-        made = _store(req).merge(int(req.body.get("keep")), int(req.body.get("drop")))
+        made = _store(req).merge(int(str(req.body.get("keep"))), int(str(req.body.get("drop"))))
     except (TypeError, ValueError):
         raise ApiError(400, "keep and drop are required") from None
     except LookupError:

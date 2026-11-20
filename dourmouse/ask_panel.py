@@ -76,9 +76,7 @@ def clean_hotkey(raw: Any) -> str:
             raise ValueError("a shortcut has one key besides the modifiers")
         if low in _NAMED_KEYS:
             key = _NAMED_KEYS[low]
-        elif re.fullmatch(r"[a-z0-9]", low):
-            key = low.upper()
-        elif re.fullmatch(r"f([1-9]|1[0-9]|2[0-4])", low):
+        elif re.fullmatch(r"[a-z0-9]", low) or re.fullmatch(r"f([1-9]|1[0-9]|2[0-4])", low):
             key = low.upper()
         elif part in (",", ".", "/", ";", "'", "[", "]", "-", "=", "`"):
             key = part

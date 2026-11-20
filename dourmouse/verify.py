@@ -267,7 +267,7 @@ def audit_final_answer(answer: str, outcomes: Iterable[dict[str, Any] | Outcome 
 
 def day_counts(events: Iterable[dict[str, Any]], since_ts: float) -> dict[str, Any]:
     """Counts of ``action.verified`` events since ``since_ts``: per status and per tool."""
-    counts = {s: 0 for s in STATUSES}
+    counts = dict.fromkeys(STATUSES, 0)
     by_tool: dict[str, dict[str, int]] = {}
     for event in events:
         if event.get("kind") != "action.verified" or float(event.get("ts") or 0) < since_ts:
@@ -277,5 +277,5 @@ def day_counts(events: Iterable[dict[str, Any]], since_ts: float) -> dict[str, A
             continue
         counts[status] += 1
         tool = str(event.get("subject_id") or "")
-        by_tool.setdefault(tool, {s: 0 for s in STATUSES})[status] += 1
+        by_tool.setdefault(tool, dict.fromkeys(STATUSES, 0))[status] += 1
     return {"counts": counts, "total": sum(counts.values()), "by_tool": by_tool}

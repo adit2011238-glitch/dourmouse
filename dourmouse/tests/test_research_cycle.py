@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import re
+from typing import Any
 
 import pytest
 
@@ -57,10 +58,12 @@ class Model:
             return self.contradiction
         if "making a short, factual card" in prompt or "make a short, factual card" in prompt:
             return json.dumps(self.card or {})
-        sub = re.search(r"SUB-QUESTION: (.*)", prompt).group(1)
+        found = re.search(r"SUB-QUESTION: (.*)", prompt)
+        assert found is not None
+        sub = found.group(1)
         refs = _refs(prompt)
         spec = self.answers.get(sub, {"sentences": []})
-        out = {"sentences": [], "numbers": []}
+        out: dict[str, list[Any]] = {"sentences": [], "numbers": []}
         for text, quotes in spec.get("sentences", []):
             out["sentences"].append({"text": text, "cites": [refs[q] for q in quotes if q in refs]})
         for qty, unit, written in spec.get("numbers", []):

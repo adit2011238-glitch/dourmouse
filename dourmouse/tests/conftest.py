@@ -6,7 +6,6 @@ import pytest
 
 from dourmouse import code_backends as _code_backends_for_signin
 
-
 REAL_CLAUDE_CLI_SIGNED_IN = _code_backends_for_signin.claude_cli_signed_in
 
 

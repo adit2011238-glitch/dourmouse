@@ -34,7 +34,7 @@ def test_corrupt_file_means_on(_cfg, text):
     assert privacy.privacy_mode() is True
 
 
-@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores file modes")
+@pytest.mark.skipif(os.name == "nt" or os.geteuid() == 0, reason="root ignores file modes")
 def test_unreadable_file_means_on(_cfg):
     f = _cfg / "security.json"
     f.write_text(json.dumps({"privacy_mode": False}))

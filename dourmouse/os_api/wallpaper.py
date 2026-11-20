@@ -123,8 +123,8 @@ def _reencode(data: bytes) -> bytes:
         raise ApiError(501, "Pillow is not installed, so photos cannot be prepared safely") from exc
     try:
         Image.MAX_IMAGE_PIXELS = 120_000_000
-        with Image.open(io.BytesIO(data)) as img:
-            img = ImageOps.exif_transpose(img)
+        with Image.open(io.BytesIO(data)) as opened:
+            img = ImageOps.exif_transpose(opened)
             img.thumbnail((MAX_EDGE, MAX_EDGE))
             if img.mode != "RGB":
                 img = img.convert("RGB")

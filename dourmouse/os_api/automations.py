@@ -102,7 +102,7 @@ def detail(req: Request) -> tuple[int, dict[str, Any]]:
         pass
     history = engine.history.for_automation(entry["id"], 50)
     for r in history:
-        r["word"] = runs.RESULT_WORDS.get(r.get("status"), "")
+        r["word"] = runs.RESULT_WORDS.get(str(r.get("status") or ""), "")
     action = entry.get("action") or {"type": "tool", "tool": entry.get("tool"), "arguments": entry.get("arguments") or {}}
     return 200, {"ok": True, "automation": _row(entry, engine), "tools": runs.tools_it_may_use(action),
                  "history": history, "parked": [r for r in history if r.get("status") == "parked" and not r.get("job_id")]}

@@ -16,6 +16,7 @@ Everything raises ``ValueError`` (bad input) or ``LookupError`` (no such thing);
 
 from __future__ import annotations
 
+import builtins
 import hashlib
 import json
 import re
@@ -300,7 +301,7 @@ class ProjectStore:
     def list(self, *, include_archived: bool = False, query: str = "") -> list[dict[str, Any]]:
         """Pinned first, then by recent activity. ``query`` matches name, goal and instructions (case-insensitive)."""
         with self._connect() as db:
-            rows = db.execute("SELECT * FROM projects" + ("" if include_archived else " WHERE archived=0")
+            rows = db.execute("SELECT * FROM projects" + ("" if include_archived else " WHERE archived=0")  # noqa: S608 - only fixed column names and ? placeholders are joined into the text
                               + " ORDER BY pinned DESC, last_active DESC").fetchall()
             out = []
             needle = (query or "").strip().lower()
@@ -353,7 +354,7 @@ class ProjectStore:
         sets["updated_at"] = _now()
         with self._lock, self._connect() as db:
             self._need(db, project_id)
-            db.execute(f"UPDATE projects SET {', '.join(k + '=?' for k in sets)} WHERE id=?", (*sets.values(), project_id))
+            db.execute(f"UPDATE projects SET {', '.join(k + '=?' for k in sets)} WHERE id=?", (*sets.values(), project_id))  # noqa: S608 - only fixed column names and ? placeholders are joined into the text
             if "instructions" in fields:
                 self._log(db, project_id, "instructions", "Instructions changed")
             if "archived" in fields:
@@ -459,7 +460,7 @@ class ProjectStore:
             self._log(db, project_id, "memory", "A memory was forgotten", note_id)
         self.passages(project_id).remove("memory", note_id)
 
-    def search(self, project_id: str, query: str, limit: int = 8) -> list[dict[str, Any]]:
+    def search(self, project_id: str, query: str, limit: int = 8) -> builtins.list[dict[str, Any]]:
         with self._connect() as db:
             self._need(db, project_id)
         return self.passages(project_id).search(query, limit)
@@ -509,7 +510,7 @@ class ProjectStore:
         with self._lock, self._connect() as db:
             self._need(db, project_id)
             self.work_item(project_id, work_id)
-            db.execute(f"UPDATE work_items SET {', '.join(k + '=?' for k in sets)} WHERE id=? AND project_id=?",
+            db.execute(f"UPDATE work_items SET {', '.join(k + '=?' for k in sets)} WHERE id=? AND project_id=?",  # noqa: S608 - only fixed column names and ? placeholders are joined into the text
                        (*sets.values(), work_id, project_id))
             if "status" in sets:
                 item = db.execute("SELECT title FROM work_items WHERE id=?", (work_id,)).fetchone()
@@ -605,7 +606,7 @@ class ProjectStore:
 
     # ---- timeline and context ---------------------------------------------------------------------------------------
 
-    def timeline(self, project_id: str, limit: int = 100) -> list[dict[str, Any]]:
+    def timeline(self, project_id: str, limit: int = 100) -> builtins.list[dict[str, Any]]:
         with self._connect() as db:
             self._need(db, project_id)
             rows = db.execute("SELECT at, kind, summary, ref FROM timeline WHERE project_id=? ORDER BY id DESC LIMIT ?",

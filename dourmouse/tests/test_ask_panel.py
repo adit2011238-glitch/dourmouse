@@ -156,7 +156,7 @@ def node(script: str, cwd: Path, esm: bool = True):
     if not NODE:
         pytest.skip("node not available")
     args = [NODE, "--input-type=module", "-e", script] if esm else [NODE, "-e", script]
-    out = subprocess.run(args, capture_output=True, text=True, timeout=30, cwd=cwd)
+    out = subprocess.run(args, capture_output=True, text=True, timeout=30, cwd=cwd, check=False)
     assert out.returncode == 0, out.stderr
     return json.loads(out.stdout)
 

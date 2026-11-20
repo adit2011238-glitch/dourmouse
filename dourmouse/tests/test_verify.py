@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 from dourmouse import dispatch, system_access, verify
-from dourmouse.os_api import Request, verification
+from dourmouse.os_api import ApiError, Request, verification
 
 
 def _spec(name):
@@ -148,7 +148,7 @@ def test_day_counts_and_route(monkeypatch):
     log = SimpleNamespace(events_since_time=lambda since, prefix: events)
     status, body = verification.counts(Request(server=SimpleNamespace(office_log=log), query={"hours": ["24"]}))
     assert status == 200 and body["total"] == 3
-    with pytest.raises(Exception):
+    with pytest.raises(ApiError):
         verification.counts(Request(server=SimpleNamespace(office_log=log), query={"hours": ["nope"]}))
 
 

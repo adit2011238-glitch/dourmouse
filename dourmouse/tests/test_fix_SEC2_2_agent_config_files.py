@@ -14,11 +14,8 @@ from __future__ import annotations
 
 import pytest
 
-from dourmouse import code_backends
+from dourmouse import code_backends, project_instructions, sandbox, system_access
 from dourmouse import general_roster as gr
-from dourmouse import project_instructions
-from dourmouse import sandbox
-from dourmouse import system_access
 
 
 @pytest.fixture()

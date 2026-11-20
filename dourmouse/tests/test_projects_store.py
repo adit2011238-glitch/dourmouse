@@ -23,7 +23,7 @@ def test_templates_seed_instructions_agents_and_work(store):
     p = store.create("Year 12 Physics", template="school")
     assert p["template"] == "school" and "MLA" in p["instructions"]
     assert p["agents"] == ["researcher", "docs", "planner"] and len(p["work_items"]) == 3
-    assert {t for t in ps.TEMPLATES} == {"blank", "school", "research", "personal_admin", "coding"}
+    assert set(ps.TEMPLATES) == {"blank", "school", "research", "personal_admin", "coding"}
     blank = store.create("Empty")
     assert blank["instructions"] == "" and blank["work_items"] == [] and blank["agents"] == []
 

@@ -2,18 +2,19 @@
 
 from __future__ import annotations
 
-import json
-import os
 import time
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
 
-from dourmouse import attention, automation_runs as runs, automation_triggers as triggers, schedules
+from dourmouse import attention, schedules
+from dourmouse import automation_runs as runs
+from dourmouse import automation_triggers as triggers
 from dourmouse.attention import AttentionStore
 from dourmouse.dispatch import DispatchRegistry, Permission, Subagent, ToolSpec
-from dourmouse.os_api import ApiError, Request, automations as api
+from dourmouse.os_api import ApiError, Request
+from dourmouse.os_api import automations as api
 
 NOW = datetime(2026, 11, 17, 10, 0)
 

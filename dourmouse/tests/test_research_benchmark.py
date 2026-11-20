@@ -7,7 +7,7 @@ import re
 from types import SimpleNamespace
 
 from dourmouse.research_pipeline import benchmark as BM
-from dourmouse.research_pipeline.cards import Finding, Grade, PaperCard
+from dourmouse.research_pipeline.cards import Grade, PaperCard
 from dourmouse.research_pipeline.library_port import InterimLibrary
 from dourmouse.research_pipeline.papers import OPENALEX, Paper, SearchResult
 from dourmouse.research_pipeline.reading import PaperText, Section

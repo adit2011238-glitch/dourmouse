@@ -8,8 +8,6 @@ import errno
 import json
 import time
 
-import pytest
-
 from dourmouse.office_logger import OfficeLogger
 from dourmouse.research_pipeline.core import ResearchRecord
 from dourmouse.research_pipeline.stages import run_full_pipeline

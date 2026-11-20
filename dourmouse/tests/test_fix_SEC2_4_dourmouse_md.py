@@ -13,8 +13,7 @@ from __future__ import annotations
 
 import pytest
 
-from dourmouse import dispatch
-from dourmouse import system_access
+from dourmouse import dispatch, system_access
 from dourmouse.dispatch import DispatchRegistry
 
 _MARKER = "MARKER-SEC2-4-harmless"

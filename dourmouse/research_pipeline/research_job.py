@@ -287,7 +287,7 @@ def _step_papers(store: Any, job_id: str, task: dict[str, Any], meta: dict[str, 
     papers, ranked, chosen = got["papers"], got["ranked"], got["chosen"]
 
     def save(b: dict[str, Any]) -> None:
-        for p, s in ranked[:40]:
+        for p, _score in ranked[:40]:
             b["papers"][p.key] = p.to_dict()
         b["ranked"] = [{"key": p.key, "score": s.to_dict()} for p, s in ranked[:40]]
         b["chosen"] = [p.key for p in chosen]
@@ -486,7 +486,7 @@ def correct_brief(job_id: str, owner_notes: str) -> dict[str, Any]:
 def continue_after_brief(job_id: str, store: Any = None) -> bool:
     store = store or _goal_store()
     task = _parked_task(store, job_id, "brief")
-    return bool(task) and store.resolve_task_approval(task["id"], True, "brief checked on the RESEARCH screen")
+    return task is not None and bool(store.resolve_task_approval(task["id"], True, "brief checked on the RESEARCH screen"))
 
 
 def edit_questions(job_id: str, payload: dict[str, Any]) -> dict[str, Any]:

@@ -505,7 +505,7 @@ class MemoryStore:
 
     @staticmethod
     def _fact_dict(r: sqlite3.Row) -> dict[str, Any]:
-        d = {k: r[k] for k in r.keys()}
+        d = {k: r[k] for k in r.keys()}  # noqa: SIM118 - sqlite3.Row iterates values, not keys
         for flag in ("pinned", "hidden", "reviewed"):
             d[flag] = bool(d.get(flag))
         d["closed"] = bool(d.get("valid_to"))
@@ -556,17 +556,17 @@ class MemoryStore:
         limit = max(1, min(int(limit), 500))
         offset = max(0, int(offset))
         with self._lock:
-            total = self._conn.execute(f"SELECT COUNT(*) AS n FROM facts f {join} WHERE {' AND '.join(where)}",
+            total = self._conn.execute(f"SELECT COUNT(*) AS n FROM facts f {join} WHERE {' AND '.join(where)}",  # noqa: S608 - only fixed column names and ? placeholders are joined into the text
                                        args).fetchone()["n"]
             rows = self._conn.execute(
-                f"SELECT {', '.join('f.' + c.strip() for c in self._FACT_COLS.split(','))} FROM facts f {join} "
+                f"SELECT {', '.join('f.' + c.strip() for c in self._FACT_COLS.split(','))} FROM facts f {join} "  # noqa: S608 - only fixed column names and ? placeholders are joined into the text
                 f"WHERE {' AND '.join(where)} ORDER BY f.pinned DESC, f.updated_at DESC, f.id DESC LIMIT ? OFFSET ?",
                 [*args, limit, offset]).fetchall()
         return {"facts": [self._fact_dict(r) for r in rows], "total": int(total)}
 
     def get_fact(self, fact_id: int) -> dict[str, Any] | None:
         with self._lock:
-            row = self._conn.execute(f"SELECT {self._FACT_COLS} FROM facts WHERE id = ?", (int(fact_id),)).fetchone()
+            row = self._conn.execute(f"SELECT {self._FACT_COLS} FROM facts WHERE id = ?", (int(fact_id),)).fetchone()  # noqa: S608 - only fixed column names and ? placeholders are joined into the text
             if row is None:
                 return None
             hist = self._conn.execute(
@@ -637,7 +637,7 @@ class MemoryStore:
             raise ValueError("flag must be pinned or hidden")
         with self._lock:
             cur = self._conn.cursor()
-            cur.execute(f"UPDATE facts SET {flag} = ?, reviewed = 1 WHERE id = ?", (1 if value else 0, int(fact_id)))
+            cur.execute(f"UPDATE facts SET {flag} = ?, reviewed = 1 WHERE id = ?", (1 if value else 0, int(fact_id)))  # noqa: S608 - only fixed column names and ? placeholders are joined into the text
             if cur.rowcount == 0:
                 raise LookupError("no such fact")
             self._log(cur, int(fact_id), flag if value else f"un{flag}")
@@ -702,7 +702,7 @@ class MemoryStore:
             where.append("created_at <= ?")
             args.append(until if "T" in until else until + "T23:59:59")
         with self._lock:
-            ids = [r["id"] for r in self._conn.execute(f"SELECT id FROM facts WHERE {' AND '.join(where)}", args)]
+            ids = [r["id"] for r in self._conn.execute(f"SELECT id FROM facts WHERE {' AND '.join(where)}", args)]  # noqa: S608 - only fixed column names and ? placeholders are joined into the text
         if dry_run:
             return len(ids)
         return sum(1 for i in ids if self.forget(i))
@@ -783,7 +783,7 @@ class MemoryStore:
         """"Why did you say that": the facts injected into one turn. Facts forgotten since are simply absent."""
         with self._lock:
             rows = self._conn.execute(
-                f"SELECT {', '.join('f.' + c.strip() for c in self._FACT_COLS.split(','))} FROM fact_uses u "
+                f"SELECT {', '.join('f.' + c.strip() for c in self._FACT_COLS.split(','))} FROM fact_uses u "  # noqa: S608 - only fixed column names and ? placeholders are joined into the text
                 "JOIN facts f ON f.id = u.fact_id WHERE u.session = ? AND u.turn = ? GROUP BY f.id ORDER BY f.id",
                 (str(session), int(turn))).fetchall()
         return [self._fact_dict(r) for r in rows]

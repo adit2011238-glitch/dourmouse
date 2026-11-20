@@ -196,7 +196,7 @@ def test_a_partial_view_does_not_clear_findings(tmp_path, monkeypatch):
     assert len(marked) == 1  # a partial one does not
 
 
-@pytest.mark.skipif(not __import__("sys").platform == "darwin", reason="live macOS check")
+@pytest.mark.skipif(__import__("sys").platform != "darwin", reason="live macOS check")
 def test_live_netstat_parses_on_this_mac():
     ok, out = pa._run(["/usr/sbin/netstat", "-anv", "-p", "tcp"], timeout=10.0)
     assert ok

@@ -68,9 +68,9 @@ from dourmouse.dispatch import (
     system_message,
 )
 from dourmouse.goal_tools import build_goals_subagent
-from dourmouse.peer_tools import build_peer_tools
 from dourmouse.librarian import librarian_tools
 from dourmouse.message_bus import BROADCAST, get_message_bus
+from dourmouse.peer_tools import build_peer_tools
 from dourmouse.research_mesh_tools import build_research_mesh_subagent
 from dourmouse.research_pipeline_tools import build_research_pipeline_subagent
 from dourmouse.sandbox import _PROTECTED_WORKSPACE_DIRS as _SANDBOX_PROTECTED_DIRS
@@ -5745,21 +5745,18 @@ def build_general_registry() -> DispatchRegistry:
             from dourmouse.browser_agent import (
                 browser_back,
                 browser_click,
-                dourmouse_chrome_open,
-                dourmouse_chrome_quit,
-                dourmouse_chrome_status,
                 browser_creds_forget,
                 browser_creds_list,
                 browser_creds_store,
                 browser_extract,
                 browser_fill,
                 browser_fill_form,
+                browser_keep_page,
                 browser_media,
                 browser_open,
                 browser_pane_hide,
                 browser_pane_show,
                 browser_press,
-                browser_keep_page,
                 browser_screenshot,
                 browser_select,
                 browser_signin,
@@ -5767,6 +5764,9 @@ def build_general_registry() -> DispatchRegistry:
                 browser_submit,
                 browser_type,
                 browser_wait,
+                dourmouse_chrome_open,
+                dourmouse_chrome_quit,
+                dourmouse_chrome_status,
             )
 
             _FN = {

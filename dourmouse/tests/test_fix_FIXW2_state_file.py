@@ -10,7 +10,7 @@ import pytest
 from dourmouse import bulk_ingest, live_feeds, project_bookkeeper, usage_tracker
 from dourmouse.state_file import StateUnreadable, load_json_or_aside
 
-pytestmark = pytest.mark.skipif(os.geteuid() == 0, reason="root ignores file permissions")
+pytestmark = pytest.mark.skipif(os.name == "nt" or os.geteuid() == 0, reason="root ignores file permissions")
 
 
 @pytest.fixture

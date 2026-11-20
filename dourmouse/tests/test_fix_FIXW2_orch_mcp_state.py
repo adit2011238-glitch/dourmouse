@@ -38,7 +38,7 @@ def test_a_corrupt_meta_file_is_kept_aside_when_the_next_write_replaces_it(store
     assert kept and kept[0].read_text() == "{not json"
 
 
-@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores file permissions")
+@pytest.mark.skipif(os.name == "nt" or os.geteuid() == 0, reason="root ignores file permissions")
 def test_an_unreadable_meta_file_is_left_exactly_as_it_is(store):
     store._write_meta({"trained_count": 7, "agent_names": ["a"], "dirty": False})
     raw = store.meta_path.read_text()

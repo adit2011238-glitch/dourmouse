@@ -5,6 +5,7 @@ from __future__ import annotations
 import inspect
 import socket
 import threading
+from typing import Any
 
 import pytest
 
@@ -13,7 +14,7 @@ from dourmouse import tv_webhook_server as tv
 
 
 class _FakeServer:
-    created = []
+    created: list[Any] = []
 
     def __init__(self, addr, handler):
         _FakeServer.created.append(addr)

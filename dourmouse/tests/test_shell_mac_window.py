@@ -163,7 +163,9 @@ R.keys = l.filter((s) => s.combo && s.bound !== false && s.id !== 'undo').map((s
         assert "Hide Sidebar" in menu["view"] and "Show Inspector" in menu["view"]
         assert "Show Sidebar" in menu["viewHidden"] and "Hide Inspector" in menu["viewHidden"]
         # the same keys on the menu and in the page keymap
-        to_electron = lambda c: c.replace("Meta", "Command").replace("Ctrl", "Control")
+        def to_electron(c):
+            return c.replace("Meta", "Command").replace("Ctrl", "Control")
+
         menu_acc = {a.lower() for _, a in menu["acc"]}
         for cid, combo in page["keys"]:
             if cid in ("search",):

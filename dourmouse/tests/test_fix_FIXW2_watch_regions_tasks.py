@@ -46,7 +46,7 @@ def test_a_region_file_that_is_not_a_list_is_not_wiped_by_a_delete(tmp_path):
     assert [p.name for p in tmp_path.iterdir() if ".corrupt-" in p.name]
 
 
-@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores file permissions")
+@pytest.mark.skipif(os.name == "nt" or os.geteuid() == 0, reason="root ignores file permissions")
 def test_an_unreadable_region_file_is_left_exactly_where_it_is(tmp_path):
     wr.add_region("Keep", 1.0, 2.0, 1.0, 2.0)
     os.chmod(_file(tmp_path), 0)

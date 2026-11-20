@@ -146,12 +146,16 @@ def set_budget(store: GoalStore, goal_id: str, raw: dict[str, Any]) -> dict[str,
     limits = dict(goal["resource_limits"])
     limits["budget"] = clean_budget(raw, base=_budget_of(goal))
     store.set_resource_limits(goal_id, limits)
-    goal = store.get_goal(goal_id)  # type: ignore[assignment]
-    if goal["status"] == "BLOCKED" and "budget is used up" in str(goal.get("blocked_reason") or ""):
-        if over_budget(store, goal) is None:
-            store.update_goal_status(goal_id, "EXECUTING")
-            goal = store.get_goal(goal_id)  # type: ignore[assignment]
-    return goal
+    fresh = store.get_goal(goal_id)
+    if fresh is None:
+        raise LookupError("no such job")
+    parked_on_budget = fresh["status"] == "BLOCKED" and "budget is used up" in str(fresh.get("blocked_reason") or "")
+    if parked_on_budget and over_budget(store, fresh) is None:
+        store.update_goal_status(goal_id, "EXECUTING")
+        fresh = store.get_goal(goal_id)
+        if fresh is None:
+            raise LookupError("no such job")
+    return fresh
 
 
 def column_of(status: str) -> str:
