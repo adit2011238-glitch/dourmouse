@@ -41,6 +41,20 @@ contextBridge.exposeInMainWorld("dourmouseShell", {
       return () => ipcRenderer.removeListener("appearance:changed", h);
     },
   },
+  // Plan 4.9 (PL-04): the Ask panel. Every call is checked in main.js by sender: the panel page may close
+  // itself, read the clipboard on a click, resize and open the app; the console may only apply settings.
+  ask: {
+    onShow: (cb) => {
+      const h = () => cb();
+      ipcRenderer.on("ask:shown", h);
+      return () => ipcRenderer.removeListener("ask:shown", h);
+    },
+    close: () => ipcRenderer.invoke("ask:close"),
+    resize: (height) => ipcRenderer.invoke("ask:resize", height),
+    clipboard: () => ipcRenderer.invoke("ask:clipboard"),
+    openApp: (hash) => ipcRenderer.invoke("ask:open-app", hash),
+    apply: () => ipcRenderer.invoke("ask:apply"),
+  },
   menu: {
     onCommand: (cb) => {
       const h = (_evt, id) => cb(id);

@@ -34,6 +34,7 @@
       "drm.js",
       "appearance.js",
       "appmenu.js",
+      "ask.js",
       "content/**",
       "resources/icon.png",
       "package.json"

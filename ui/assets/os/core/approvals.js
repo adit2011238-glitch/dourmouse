@@ -66,6 +66,7 @@ export function createApprovals({ api, scope }) {
         key,
         prompt: evt.prompt || '',
         tool: evt.tool || '',
+        risk: evt.risk === 'low' ? 'low' : 'high',
         autonomous: Boolean(evt.autonomous),
         email: isEmailSendPrompt(evt.prompt),
         state: 'pending',

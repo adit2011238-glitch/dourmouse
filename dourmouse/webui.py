@@ -552,12 +552,19 @@ class WebConfirmationGate:
         # offer every character (GET /api/confirm/details?details_id=...).
         from dourmouse.dispatch import current_confirmation_details
 
-        details_id = _store_confirmation_details(current_confirmation_details())
+        details = current_confirmation_details()
+        details_id = _store_confirmation_details(details)
+        # Plan 4.9: the Ask panel answers low-risk approvals itself and sends the rest to the app.
+        from dourmouse.ask_panel import approval_risk
+
+        tool_name = str((details or {}).get("tool") or "")
         event = {
             "type": "confirmation_requested",
             "id": confirm_id,
             "prompt": prompt_text,
             "autonomous": self.autonomous,
+            "tool": tool_name,
+            "risk": approval_risk(tool_name),
         }
         if details_id:
             event["details_id"] = details_id
@@ -2859,6 +2866,10 @@ class _Handler(BaseHTTPRequestHandler):
             # beside the console until the deliberate swap. Modules under
             # /assets/os/ are served by the ordinary asset rule.
             self._serve_static("shell.html")
+        elif path in ("/ask", "/ask.html"):
+            # Plan 4.9 (PL-04): the Ask panel, the small always-on-top window opened from any app by a
+            # global shortcut. Same origin and same auth gate as the shell; Electron loads it.
+            self._serve_static("ask.html")
         elif path in ("/os_mockup", "/os_mockup.html"):
             # 2026-09-23 (finding #080): the OS shell design mockup, served
             # for review before any of it is wired into a live surface.
@@ -5612,6 +5623,7 @@ class _Handler(BaseHTTPRequestHandler):
             "hud.html",
             "console.html",
             "shell.html",
+            "ask.html",
         ):
             widget_css = _UI_DIR / "spotify_widget.css"
             widget_js = _UI_DIR / "spotify_widget.js"
@@ -5640,7 +5652,7 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
-        if rel == "shell.html":
+        if rel in ("shell.html", "ask.html"):
             # Finding #143: the shell has no inline script, so scripts may come
             # only from this origin. The page can approve actions (POST
             # /api/confirm), so a script injected through an email subject or a

@@ -22,7 +22,7 @@
 // no Electron and must still start -- run `npm install` here to enable it.
 
 const electronApi = require("electron");
-const { app, BrowserWindow, BrowserView, ipcMain, shell, Tray, Menu, nativeImage, nativeTheme, Notification, session, dialog, safeStorage, systemPreferences } = electronApi;
+const { app, BrowserWindow, BrowserView, ipcMain, globalShortcut, screen, clipboard, shell, Tray, Menu, nativeImage, nativeTheme, Notification, session, dialog, safeStorage, systemPreferences } = electronApi;
 const { spawn, execFile } = require("child_process");
 const crypto = require("crypto");
 const http = require("http");
@@ -37,6 +37,7 @@ const impLib = require("./importers");
 const drmLib = require("./drm");
 const appearanceLib = require("./appearance");
 const appMenuLib = require("./appmenu");
+const askLib = require("./ask");
 
 // An isolated copy (a test run, a second profile) can keep every file the shell
 // writes (window state, the browser profile, history, bookmarks, downloads list)
@@ -3897,6 +3898,155 @@ function installShellMenuAndAppearance() {
   appearanceLib.watchAppearance({ nativeTheme, systemPreferences, send: (a) => sendToConsole("appearance:changed", a) });
 }
 
+
+// --------------------------------------------------------------------- //
+// Ask panel (plan 4.9, PL-04): a small always-on-top window opened from any app by a global shortcut.
+// The shortcut and the other settings are owned by the server (GET /api/os/ask/settings), which has
+// already refused chords macOS or this app uses. The panel page can close itself, read the clipboard on
+// a click, resize and send the owner to a screen of the main window. Nothing else.
+// --------------------------------------------------------------------- //
+
+let askWindow = null;
+let askSettings = { enabled: false, hotkey: "", close_on_blur: true };
+let askRegistered = "";
+let askReturnTo = "none"; // "main" when the console had focus as the panel opened, else the app that did
+let askShownAt = 0;
+
+function fromAsk(evt) {
+  return Boolean(askWindow && !askWindow.isDestroyed() && evt.sender === askWindow.webContents && askLib.isAskPage(evt.sender.getURL(), PORT) && evt.senderFrame && evt.senderFrame.parent === null);
+}
+
+function ensureAskWindow() {
+  if (askWindow && !askWindow.isDestroyed()) return askWindow;
+  const b = askLib.panelBounds(screen.getPrimaryDisplay().workArea, askLib.HEIGHT_MIN);
+  askWindow = new BrowserWindow({
+    ...b,
+    show: false,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    movable: true,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    skipTaskbar: true,
+    hasShadow: true,
+    alwaysOnTop: true,
+    vibrancy: "popover",
+    visualEffectState: "active",
+    roundedCorners: true,
+    backgroundColor: "#00000000",
+    title: "Ask Dourmouse",
+    webPreferences: { preload: PRELOAD, contextIsolation: true },
+  });
+  askWindow.setAlwaysOnTop(true, "floating");
+  askWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
+  lockToAppOrigin(askWindow);
+  askWindow.loadURL(`${BASE_URL}/ask`);
+  askWindow.on("blur", () => {
+    // A blur that arrives right after showing is the OS settling focus, not the owner leaving.
+    if (askSettings.close_on_blur && Date.now() - askShownAt > 300) hideAsk(false);
+  });
+  askWindow.on("closed", () => {
+    askWindow = null;
+  });
+  return askWindow;
+}
+
+function showAsk() {
+  const win = ensureAskWindow();
+  askReturnTo = mainWindow && !mainWindow.isDestroyed() && mainWindow.isFocused() ? "main" : "other";
+  const point = screen.getCursorScreenPoint();
+  const b = askLib.panelBounds(screen.getDisplayNearestPoint(point).workArea, askLib.HEIGHT_MIN);
+  win.setBounds(b);
+  askShownAt = Date.now();
+  win.show();
+  win.focus();
+  win.webContents.send("ask:shown");
+}
+
+function hideAsk(giveFocusBack) {
+  if (!askWindow || askWindow.isDestroyed() || !askWindow.isVisible()) return;
+  askWindow.hide();
+  if (!giveFocusBack) return;
+  // Escape returns the owner to where they were: the console when they came from it, otherwise the
+  // previous app (macOS hands focus back when this app hides).
+  if (askReturnTo === "main" && mainWindow && !mainWindow.isDestroyed()) mainWindow.focus();
+  else if (process.platform === "darwin" && !(mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible())) app.hide();
+}
+
+function toggleAsk() {
+  if (askWindow && !askWindow.isDestroyed() && askWindow.isVisible()) hideAsk(true);
+  else showAsk();
+}
+
+// Reads the server's settings and registers or releases the shortcut. Returns what happened in plain words.
+async function applyAskSettings() {
+  let data;
+  try {
+    data = await fetchJson(`${BASE_URL}/api/os/ask/settings`, { method: "GET" });
+  } catch (exc) {
+    return { ok: false, error: `could not read the Ask panel settings: ${(exc && exc.message) || exc}` };
+  }
+  const next = data && data.settings ? data.settings : null;
+  if (!next) return { ok: false, error: "the server sent no Ask panel settings" };
+  const plan = askLib.shortcutPlan({ enabled: Boolean(askRegistered), hotkey: askRegistered }, next);
+  if (plan.unregister) {
+    globalShortcut.unregister(plan.unregister);
+    askRegistered = "";
+  }
+  askSettings = next;
+  if (plan.register) {
+    let ok = false;
+    try {
+      ok = globalShortcut.register(plan.register, toggleAsk);
+    } catch (exc) {
+      return { ok: false, error: `the shortcut ${plan.register} is not valid here: ${(exc && exc.message) || exc}` };
+    }
+    if (!ok) {
+      return { ok: false, error: `${data.hotkey_label || plan.register} is already taken by another app, so the Ask panel has no shortcut. Choose another in Settings.` };
+    }
+    askRegistered = plan.register;
+  }
+  return { ok: true, registered: askRegistered, hotkey_label: data.hotkey_label || "" };
+}
+
+ipcMain.handle("ask:close", (evt) => {
+  if (!fromAsk(evt)) return REFUSED;
+  hideAsk(true);
+  return { ok: true };
+});
+ipcMain.handle("ask:resize", (evt, height) => {
+  if (!fromAsk(evt)) return REFUSED;
+  const b = askWindow.getBounds();
+  const h = askLib.clampHeight(height);
+  if (h !== b.height) askWindow.setBounds({ x: b.x, y: b.y, width: b.width, height: h });
+  return { ok: true, height: h };
+});
+ipcMain.handle("ask:clipboard", (evt) => {
+  if (!fromAsk(evt)) return REFUSED;
+  const got = askLib.clipboardContext(clipboard.readText());
+  return got ? { ok: true, ...got } : { ok: false, error: "The clipboard has no text." };
+});
+ipcMain.handle("ask:open-app", (evt, hash) => {
+  if (!fromAsk(evt)) return REFUSED;
+  if (!askLib.openTargetAllowed(hash)) return { ok: false, error: "that is not a screen of the app" };
+  if (!mainWindow || mainWindow.isDestroyed()) createMainWindow();
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+  // The hash was checked by askLib.openTargetAllowed (a screen of the shell and a few id characters), so
+  // it can only name a screen of this app.
+  mainWindow.webContents.executeJavaScript(`location.hash = ${JSON.stringify(hash)};`).catch((exc) => log("Ask panel could not open the app:", (exc && exc.message) || exc));
+  hideAsk(false);
+  return { ok: true };
+});
+ipcMain.handle("ask:apply", async (evt) => (consoleOnly(evt) ? applyAskSettings() : REFUSED));
+
+app.on("will-quit", () => {
+  globalShortcut.unregisterAll();
+});
+
 function createMainWindow() {
   const geometry = readWindowState();
   const win = new BrowserWindow({
@@ -3986,6 +4136,10 @@ app.whenReady().then(async () => {
   installPermissionPolicy(session.defaultSession);
   installShellMenuAndAppearance();
   createMainWindow();
+  applyAskSettings().then((r) => {
+    if (!r.ok) log("Ask panel:", r.error);
+    else if (r.registered) log(`Ask panel shortcut ${r.registered} registered`);
+  });
 
   // Created hidden up front, same as dourmouse/desktop.py's map_window --
   // pywebview's own "create before start(), reveal on demand" rule doesn't

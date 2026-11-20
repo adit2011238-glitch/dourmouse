@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en" data-shell="os">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Ask Dourmouse</title>
+<!-- The Ask panel (plan 4.9, PL-04). No inline script: the server sends this page with script-src 'self',
+     like the shell, because the panel can approve a low-risk action (POST /api/confirm). -->
+<link rel="stylesheet" href="/assets/os/tokens.css">
+<link rel="stylesheet" href="/assets/os/ask/ask.css">
+</head>
+<body>
+<main class="ak" id="ak" aria-label="Ask Dourmouse">
+  <div class="ak-row">
+    <button type="button" class="ak-mode" id="akMode" title="Tab changes the mode">Ask</button>
+    <textarea class="ak-in" id="akIn" rows="1" aria-label="Ask, or start with n for a note, r for a reminder" placeholder="Ask anything" spellcheck="true" autofocus></textarea>
+  </div>
+  <div class="ak-chips" id="akChips" role="group" aria-label="Context to add"></div>
+  <div class="ak-sep" id="akSep" hidden></div>
+  <section class="ak-body" id="akBody" aria-live="polite" hidden></section>
+  <p class="ak-hint" id="akHint">Return sends. Tab changes mode. Esc closes.</p>
+</main>
+<script type="module" src="/assets/os/ask/ask.js"></script>
+</body>
+</html>

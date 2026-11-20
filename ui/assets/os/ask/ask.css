@@ -1,0 +1,40 @@
+/* The Ask panel: one input over the system popover material. Native-Mac look, system font, token colours,
+   hairline edges, no pills. The window itself is the vibrancy; the page paints nothing opaque behind the text. */
+
+html, body { margin: 0; height: auto; background: transparent; color: var(--tk-text); font: var(--tk-size-body)/var(--tk-line-body) var(--tk-font); -webkit-font-smoothing: antialiased; }
+body { overflow: hidden; }
+.ak { display: flex; flex-direction: column; padding: var(--tk-space-3) var(--tk-space-4); gap: var(--tk-space-3); }
+.ak-row { display: flex; align-items: center; gap: var(--tk-space-3); }
+.ak-mode { flex: none; font: inherit; font-size: var(--tk-size-small); font-weight: 500; color: var(--tk-text-2); background: var(--tk-fill); border: 0; border-radius: var(--tk-radius-control); padding: 3px 8px; min-height: var(--tk-control-small); cursor: pointer; }
+.ak-mode:hover { background: var(--tk-fill-2); }
+.ak-mode:focus-visible, .ak-btn:focus-visible, .ak-chip:focus-visible, .ak-pick:focus-visible { outline: 2px solid var(--tk-accent); outline-offset: 2px; }
+.ak-in { flex: 1; min-width: 0; resize: none; border: 0; background: transparent; color: var(--tk-text); font: inherit; font-size: var(--tk-size-page); line-height: 24px; padding: 4px 0; max-height: 120px; }
+.ak-in:focus { outline: none; }
+.ak-in::placeholder { color: var(--tk-text-3); }
+.ak-chips { display: flex; gap: var(--tk-space-2); flex-wrap: wrap; }
+.ak-chips:empty { display: none; }
+.ak-chip { font: inherit; font-size: var(--tk-size-small); color: var(--tk-text-2); background: var(--tk-fill); border: 0; border-radius: var(--tk-radius-control); padding: 2px 8px; min-height: var(--tk-control-small); cursor: pointer; }
+.ak-chip:hover { background: var(--tk-fill-2); }
+.ak-chip[aria-pressed="true"] { color: var(--tk-on-accent); background: var(--tk-accent-fill); }
+.ak-sep { height: 0; border-top: 0.5px solid var(--tk-separator); margin: 0 calc(-1 * var(--tk-space-4)); }
+.ak-body[hidden], .ak-sep[hidden] { display: none; }
+.ak-body { display: flex; flex-direction: column; gap: var(--tk-space-3); max-height: 360px; overflow-y: auto; }
+.ak-you { font-weight: 500; color: var(--tk-text); white-space: pre-wrap; overflow-wrap: anywhere; }
+.ak-reply { color: var(--tk-text); line-height: var(--tk-line-long); overflow-wrap: anywhere; }
+.ak-reply p { margin: 0 0 var(--tk-space-2); }
+.ak-reply pre { margin: 0 0 var(--tk-space-2); padding: var(--tk-space-2); background: var(--tk-fill); border-radius: var(--tk-radius-control); overflow-x: auto; font: var(--tk-size-small)/16px var(--tk-font-mono); }
+.ak-reply code { font-family: var(--tk-font-mono); font-size: var(--tk-size-small); }
+.ak-muted { margin: 0; font-size: var(--tk-size-small); color: var(--tk-text-3); overflow-wrap: anywhere; }
+.ak-err { margin: 0; font-size: var(--tk-size-small); color: var(--tk-critical-text, var(--tk-critical)); overflow-wrap: anywhere; }
+.ak-ok { margin: 0; color: var(--tk-text); }
+.ak-card { padding: var(--tk-space-3); border-radius: var(--tk-radius-block); background: var(--tk-fill); display: flex; flex-direction: column; gap: var(--tk-space-2); }
+.ak-card-p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 120px; overflow-y: auto; }
+.ak-actions { display: flex; align-items: center; gap: var(--tk-space-2); flex-wrap: wrap; }
+.ak-btn { font: inherit; font-size: var(--tk-size-body); color: var(--tk-text); background: var(--tk-bg-raised); border: 0; border-radius: var(--tk-radius-control); box-shadow: 0 0 0 0.5px var(--tk-separator); padding: 3px 12px; min-height: var(--tk-control-small); cursor: pointer; }
+.ak-btn:hover { background: var(--tk-fill); }
+.ak-btn--primary { color: var(--tk-on-accent); background: var(--tk-accent-fill); box-shadow: none; }
+.ak-btn--primary:hover { background: var(--tk-accent-fill); filter: brightness(1.08); }
+.ak-btn:disabled { opacity: .4; cursor: default; }
+.ak-pick { font: inherit; font-size: var(--tk-size-body); color: var(--tk-text-2); background: var(--tk-fill); border: 0; border-radius: var(--tk-radius-control); padding: 3px 6px; max-width: 180px; }
+.ak-hint { margin: 0; font-size: var(--tk-size-caption); color: var(--tk-text-3); }
+@media (prefers-reduced-motion: no-preference) { .ak-body { transition: none; } }

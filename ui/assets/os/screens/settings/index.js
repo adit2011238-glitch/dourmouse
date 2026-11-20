@@ -16,6 +16,7 @@ import { confirmHere } from '../../kit/confirm-card.js';
 import { isAbort } from '../../core/api.js';
 import { TEXT_SIZES } from '../../core/prefs.js';
 import { wallpaperRows } from './wallpaper.js';
+import { mountAskPanel } from './ask-panel.js';
 import {
   groupFeatures, featurePrompt, foldersPrompt, parseFolders, togglePrompt, shellPrompt, resetPrompt, shellChoices,
   keyTag, tokenTag, bindLine, orchestratorSource, localModelRow, backendRow, osReducedMotion, SHELL_WORD,
@@ -43,6 +44,7 @@ export default {
       </div>
       <div class="card set-gap"><div class="lbl">Privacy</div><div id="setPrivacy" data-region></div></div>
       <div class="card set-gap"><div class="lbl">Appearance</div><div id="setLook" data-region></div></div>
+      <div class="card set-gap"><div class="lbl">Ask panel</div><div id="setAskPanel" data-region></div></div>
       <div class="card set-gap"><div class="lbl">Remote access</div><div id="setAccess" data-region></div></div>
       <div class="card set-gap"><div class="lbl">Background</div><div id="setFeatures" data-region></div></div>
       <div class="card set-gap"><div class="lbl">Behaviour</div><div id="setBehaviour" data-region></div></div>`);
@@ -56,6 +58,7 @@ export default {
     const featEl = $('setFeatures');
     const behEl = $('setBehaviour');
     const privEl = $('setPrivacy');
+    mountAskPanel($('setAskPanel'), ctx);
     const regions = [shellEl, modelsEl, accessEl, featEl, behEl];
 
     const note = (text, tone) => {
