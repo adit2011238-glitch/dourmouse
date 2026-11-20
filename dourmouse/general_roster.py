@@ -5756,6 +5756,7 @@ def build_general_registry() -> DispatchRegistry:
                 browser_pane_hide,
                 browser_pane_show,
                 browser_press,
+                browser_keep_page,
                 browser_screenshot,
                 browser_select,
                 browser_signin,
@@ -5780,6 +5781,7 @@ def build_general_registry() -> DispatchRegistry:
                 "back": browser_back,
                 "extract": browser_extract,
                 "screenshot": browser_screenshot,
+                "keep_page": browser_keep_page,
                 "creds_store": browser_creds_store,
                 "creds_list": browser_creds_list,
                 "creds_forget": browser_creds_forget,
@@ -6126,6 +6128,24 @@ def build_general_registry() -> DispatchRegistry:
                         "required": ["target"],
                     },
                     handler=_browser_h("extract"),
+                ),
+                ToolSpec(
+                    name="browser_keep_page",
+                    description=(
+                        "Keep the web page you are on in the owner's library: its address, title and readable text, "
+                        "with a short comment from you, so it can be found and cited later. Keeping the same address again "
+                        "replaces the earlier copy. Pass the job id when the page belongs to a job and the job "
+                        "gets a short note. Refused for the app's own pages, while Private mode is on, and for "
+                        "text that looks like a key or a password."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "notes": {"type": "string", "description": "What matters on this page and why you saved it, in a few sentences."},
+                            "job": {"type": "string", "description": "The id of the job this page belongs to, if any."},
+                        },
+                    },
+                    handler=_browser_h("keep_page"),
                 ),
                 ToolSpec(
                     name="browser_screenshot",

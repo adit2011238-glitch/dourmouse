@@ -93,7 +93,7 @@ Edits in `browser_agent.py`, `dispatch.py` and `general_roster.py`.
 
 New `dourmouse/browser_memory.py`.
 
-- New tool `browser_save_page(notes, job)`: saves the current page's address, title, readable text
+- New tool `browser_keep_page(notes, job)`: saves the current page's address, title, readable text
   and the agent's notes, with the job id.
 - Writes through T4's `add(source, text, meta)` once T4 has landed. Until then it writes to the
   existing `memory_store` (source `browser_page`), which T4 migrates. No new store.

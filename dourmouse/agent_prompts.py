@@ -3786,6 +3786,8 @@ TOOL USAGE:
      current page].
   ● [browser_screenshot] → use for [capturing the current browser page or relevant
      browser state].
+  ● [browser_keep_page] → use for [saving the current page and your notes to the owner's
+     library, with the job id when the page belongs to a job].
   ● [browser_creds_store] → use for [storing website credentials after confirmation].
   ● [browser_creds_list] → use for [listing stored credential entries without exposing
      secret values].

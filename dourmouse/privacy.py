@@ -100,7 +100,7 @@ _T2_TOOLS: dict[str, str] = {
     # each call), so their output can be anything those tools read.
     "claude_code": "files", "codex_code": "files",
     # Apps, screen and browser pages
-    "browser_snapshot": "screen", "browser_extract": "screen", "browser_screenshot": "screen",
+    "browser_snapshot": "screen", "browser_extract": "screen", "browser_keep_page": "screen", "browser_screenshot": "screen",
     "browser_click": "screen", "browser_type": "screen", "browser_fill": "screen", "browser_fill_form": "screen",
     "browser_select": "screen", "browser_press": "screen", "browser_submit": "screen", "browser_wait": "screen",
     "browser_back": "screen", "browser_media": "screen",

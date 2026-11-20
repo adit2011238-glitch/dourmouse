@@ -47,6 +47,7 @@ _BROWSER_TOOLS = {
     "browser_back",
     "browser_extract",
     "browser_screenshot",
+    "browser_keep_page",
     "browser_creds_store",
     "browser_creds_list",
     "browser_creds_forget",

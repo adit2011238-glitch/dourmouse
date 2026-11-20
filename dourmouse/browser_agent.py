@@ -1954,6 +1954,34 @@ def browser_activity(limit: int = 50) -> list[dict[str, str]]:
         return list(_ACTIVITY[-max(1, min(limit, 300)):])
 
 
+_LOCAL_REDIRECT_REFUSAL = (
+    "REFUSED: that address redirected to {landed}, which is on this Mac or the local network, not the public "
+    "internet. A page the model opens never lands there without the owner asking for that address. The tab was "
+    "left blank and nothing on it was read. If the owner wants that address, ask them to give it, then open it."
+)
+
+
+def _redirected_into_local_network(requested: str, landed: str) -> bool:
+    """T5 step 5 (finding 213): True when ``landed`` is on this machine or the local network and ``requested``
+    was not. ``_url_gate`` asks about a local address the model types, but a redirect (or the page's own script)
+    can carry a public address to one, and the tab was then read as if it had been confirmed. A request that was
+    itself local was confirmed by the owner at the gate, so landing there is not judged again."""
+    import urllib.parse
+
+    from dourmouse.dispatch import _host_is_internal
+
+    def _internal(url: str) -> bool:
+        try:
+            parts = urllib.parse.urlsplit(str(url or "").strip())
+            if parts.scheme not in ("http", "https") or not parts.hostname:
+                return False
+            return _host_is_internal(parts.hostname, parts.port or (443 if parts.scheme == "https" else 80))
+        except ValueError:
+            return False
+
+    return _internal(landed) and not _internal(requested)
+
+
 def browser_open(arguments: dict[str, Any]) -> str:
     url = (arguments.get("url") or "").strip()
     if not url:
@@ -1981,6 +2009,12 @@ def browser_open(arguments: dict[str, Any]) -> str:
                 with contextlib.suppress(Exception):
                     await page.goto("about:blank", timeout=10_000)
                 return _OWN_SERVER_REFUSAL
+            if _redirected_into_local_network(url, page.url):
+                _log("open", f"{url} redirected into the local network; tab blanked")
+                landed = page.url
+                with contextlib.suppress(Exception):
+                    await page.goto("about:blank", timeout=10_000)
+                return _LOCAL_REDIRECT_REFUSAL.format(landed=landed)
         return await _page_summary(page)
 
     _log("open", url)
@@ -2519,6 +2553,35 @@ def browser_pane_hide(arguments: dict[str, Any]) -> str:
         raise RuntimeError(f"BROWSER PANE HIDE FAILED: {result}")
     _log("pane", "hidden")
     return "BROWSER PANE hidden."
+
+
+def browser_keep_page(arguments: dict[str, Any]) -> str:
+    """T5 step 3: save the current page and the agent's notes to the library (``browser_memory.save_page``)."""
+    notes = str(arguments.get("notes") or "")
+    job = str(arguments.get("job") or "")
+
+    async def _read():
+        page = await _ensure_browser()
+        url = getattr(page, "url", "") or ""
+        if _is_own_server_url(url):
+            return None, _OWN_SERVER_REFUSAL
+        try:
+            title = await page.title()
+        except Exception:  # noqa: BLE001
+            title = ""
+        try:
+            text = await page.inner_text("body", timeout=8_000)
+        except Exception as exc:  # noqa: BLE001
+            raise RuntimeError(f"BROWSER SAVE FAILED: could not read the page text: {type(exc).__name__}: {exc}") from exc
+        return (url, title, text), ""
+
+    from dourmouse.browser_memory import save_page
+
+    _log("save_page", job or "page")
+    got, refusal = _call(_read)
+    if got is None:
+        return refusal
+    return save_page(got[0], got[1], got[2], notes, job)
 
 
 def browser_screenshot(arguments: dict[str, Any]) -> str:
