@@ -16,7 +16,7 @@ import { isAbort } from '../../core/api.js';
 import { readSeen, markSeen } from '../apps/walkthrough.js';
 import {
   greetingLine, subLine, coverVar, avatarCover, statusWord, officeLine, calendarEmpty, quickTab, projectTab,
-  threadTitle, tileLine, needsCount, answered,
+  threadTitle, tileLine, needsCount, answered, dataAge, cardNumber, orderedStrip, privacyText, continueLine,
 } from './helpers.js';
 
 function el(tag, cls, text) {
@@ -38,6 +38,7 @@ export default {
     setHtml(root, html`
       <div class="hm">
         <header class="hm-head"><h1 class="hm-title" id="hmTitle"></h1><p class="hm-sub" id="hmSub"></p></header>
+        <section class="hm-strip" id="hmStrip" hidden></section>
         <form class="hm-ask" id="hmAsk" autocomplete="off">
           <label class="sr-only" for="hmIn">Ask anything, or start a project</label>
           <textarea class="hm-in" id="hmIn" rows="1" placeholder="Ask anything, or start a project" data-spec="Enter sends. Shift+Enter starts a new line. With no project picked it is a quick ask: nothing is saved unless you save it."></textarea>
@@ -48,6 +49,8 @@ export default {
         <div class="hm-walk home-walk" id="hmWalk" hidden></div>
         <section class="hm-answer" id="hmAnswer" hidden></section>
         <div class="hm-cards" id="hmCards"></div>
+        <p class="hm-privacy hm-muted" id="hmPrivacy" hidden></p>
+        <section class="hm-continue" id="hmLeft" hidden><h2 class="hm-h2">Continue where you left off</h2><div class="hm-left" id="hmLeftList"></div></section>
         <section class="hm-continue" id="hmContinue" hidden><h2 class="hm-h2">Continue a project</h2><div class="hm-tiles" id="hmTiles"></div></section>
       </div>`);
     const $ = (id) => root.querySelector('#' + id);
@@ -62,6 +65,10 @@ export default {
     const contEl = $('hmContinue');
     const tilesEl = $('hmTiles');
     const walkEl = $('hmWalk');
+    const stripEl = $('hmStrip');
+    const privacyEl = $('hmPrivacy');
+    const leftEl = $('hmLeft');
+    const leftList = $('hmLeftList');
     const thread = ctx.chat;
 
     /* ---------------- greeting and cards ---------------- */
@@ -127,30 +134,77 @@ export default {
       return card;
     }
 
-    function todayCard(t) {
-      const card = el('section', 'hm-card');
-      card.dataset.card = 'today';
-      const head = el('div', 'hm-card-head');
-      head.append(el('h2', 'hm-h2', 'Today'));
-      card.append(head);
-      const cal = t.calendar;
-      if (cal.state !== 'ok') {
-        card.append(el('p', 'hm-muted', calendarEmpty(cal)));
-        return card;
+    /* The Today strip: six cards, each one number, one line and one action, with the age of its data. A card that
+       could not be read says so on its own and the others stay. Collapsed state is remembered on this Mac only. */
+    const COLLAPSE_KEY = 'dm.home.strip.collapsed';
+    function collapsed() {
+      try { return window.localStorage.getItem(COLLAPSE_KEY) === '1'; } catch (e) { return false; }
+    }
+    function setCollapsed(v) {
+      try { window.localStorage.setItem(COLLAPSE_KEY, v ? '1' : '0'); } catch (e) { /* kept for this visit only */ }
+    }
+
+    function stripCard(c) {
+      const card = el('section', 'hm-sc hm-sc--' + c.state);
+      card.dataset.card = c.key;
+      card.dataset.state = c.state;
+      const head = el('div', 'hm-sc-head');
+      head.append(el('h3', 'hm-sc-title', c.title), el('span', 'hm-sc-age', c.state === 'unavailable' ? '' : dataAge(c.at)));
+      card.append(head, el('div', 'hm-sc-num', cardNumber(c)), el('p', 'hm-muted hm-sc-line', c.line || ''));
+      if (c.action && c.action.target) {
+        const a = el('a', 'hm-link', c.action.label || 'Open');
+        a.href = '#/' + c.action.target;
+        a.dataset.spec = 'Opens ' + c.title + '. It changes nothing.';
+        card.append(a);
       }
-      cal.events.forEach((ev) => {
-        const row = el('div', 'hm-event');
-        row.append(el('span', 'hm-time', ev.time), el('span', 'hm-event-t', ev.title));
-        card.append(row);
-      });
-      if (cal.more) card.append(el('p', 'hm-muted', '+' + cal.more + ' more'));
       return card;
+    }
+
+    function paintStrip() {
+      const t = st.today;
+      if (!t) return;
+      const cards = orderedStrip(t.strip);
+      stripEl.hidden = !cards.length;
+      if (!cards.length) return;
+      const isCollapsed = collapsed();
+      const head = el('div', 'hm-strip-head');
+      const toggle = el('button', 'hm-btn hm-strip-toggle', isCollapsed ? 'Show Today' : 'Hide Today');
+      toggle.type = 'button';
+      toggle.setAttribute('aria-expanded', String(!isCollapsed));
+      toggle.dataset.spec = 'Hides or shows the six Today cards. Remembered on this Mac.';
+      toggle.addEventListener('click', () => { setCollapsed(!collapsed()); paintStrip(); });
+      head.append(el('h2', 'hm-h2', 'Today'), toggle);
+      const body = el('div', 'hm-sc-grid');
+      body.hidden = isCollapsed;
+      cards.forEach((c) => body.append(stripCard(c)));
+      stripEl.replaceChildren(head, body);
+    }
+
+    function paintLeft() {
+      const items = (st.today && st.today.continue) || [];
+      leftEl.hidden = !items.length;
+      leftList.replaceChildren(...items.slice(0, 3).map((it) => {
+        const row = el('a', 'hm-left-row');
+        row.href = '#/' + it.target;
+        row.dataset.spec = 'Opens this thread in its project.';
+        const text = el('span', 'hm-left-t');
+        text.append(el('span', 'hm-need-title', it.title), el('span', 'hm-muted', continueLine(it)));
+        row.append(text, el('span', 'hm-muted', whenShort(it.at)));
+        return row;
+      }));
+    }
+
+    function paintPrivacy() {
+      const t = st.today;
+      const text = t ? privacyText(t.privacy) : '';
+      privacyEl.hidden = !text;
+      privacyEl.textContent = text;
     }
 
     function paintCards() {
       const t = st.today;
       if (!t) return;
-      cardsEl.replaceChildren(needsCard(t), officeCard(t), todayCard(t));
+      cardsEl.replaceChildren(needsCard(t), officeCard(t));
     }
 
     function paintTiles() {
@@ -201,8 +255,11 @@ export default {
         root.dataset.state = 'populated';
         root.classList.remove('hm-stale');
         paintHead();
+        paintStrip();
         paintCards();
         paintTiles();
+        paintLeft();
+        paintPrivacy();
         paintPicker();
       } catch (err) {
         if (isAbort(err)) return;

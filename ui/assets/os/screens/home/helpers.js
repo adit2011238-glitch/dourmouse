@@ -78,3 +78,41 @@ export function needsCount(n) {
 }
 
 export { plural };
+
+/* ---------------- the Today strip (plan 4.12) ---------------- */
+
+/* "5 min ago", "just now", "2 h ago". An unreadable stamp gives '' so the card shows no age rather than a wrong one. */
+export function dataAge(at, now = Date.now()) {
+  const ms = at === null || at === undefined || at === '' ? NaN : (typeof at === 'number' ? (at < 1e11 ? at * 1000 : at) : Date.parse(at));
+  if (!Number.isFinite(ms)) return '';
+  const s = Math.max(0, Math.round((now - ms) / 1000));
+  if (s < 60) return 'just now';
+  if (s < 3600) return Math.floor(s / 60) + ' min ago';
+  if (s < 86400) return Math.floor(s / 3600) + ' h ago';
+  return Math.floor(s / 86400) + ' d ago';
+}
+
+/* The big figure of a card: only a real number is shown; unavailable and error cards show a dash. */
+export function cardNumber(card) {
+  if (!card || card.state === 'unavailable' || card.state === 'error') return '–';
+  return typeof card.number === 'number' ? String(card.number) : '–';
+}
+
+/* The cards in the plan's fixed order, whatever order the server sent them in. */
+export const STRIP_ORDER = ['mail', 'calendar', 'goals', 'overnight', 'security', 'usage'];
+export function orderedStrip(strip) {
+  const by = new Map((Array.isArray(strip) ? strip : []).map((c) => [c.key, c]));
+  return STRIP_ORDER.filter((k) => by.has(k)).map((k) => by.get(k));
+}
+
+/* "Last 24 hours: 12 requests went to cloud models, 3 sources shared, 2 redactions." Zero parts stay: zero is the news. */
+export function privacyText(p) {
+  if (!p) return '';
+  const n = (x, one, many) => x + ' ' + (x === 1 ? one : many);
+  return 'Last ' + (p.hours || 24) + ' hours: ' + n(p.requests, 'request', 'requests') + ' to cloud models, '
+    + n(p.sources, 'source', 'sources') + ' shared, ' + n(p.redactions, 'redaction', 'redactions') + '.';
+}
+
+export function continueLine(item) {
+  return [item.project_name, item.line].filter(Boolean).join(', ');
+}

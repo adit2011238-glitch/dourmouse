@@ -5728,6 +5728,9 @@ class _Handler(BaseHTTPRequestHandler):
         with self.server.tab_state_lock:
             session = self.server.sessions_by_tab.get(tab_id)
             if session is None:
+                # plan 1.5: a quick ask from Home (tab "quick:<id>") is not kept. Its ledger goes to the pruned
+                # helper folder and nothing from it is learned into long-term memory.
+                quick = tab_id.startswith("quick:")
                 session = ChatSession(
                     self.server.registry,
                     session_file=None,  # a fresh, independent thread per tab
@@ -5735,9 +5738,6 @@ class _Handler(BaseHTTPRequestHandler):
                     config=self.server.config,
                     job_tracker=self.server.jobs,
                     rbac=self.server.session.rbac,  # shared — see docstring above
-                # plan 1.5: a quick ask from Home (tab "quick:<id>") is not kept. Its ledger goes to the pruned
-                # helper folder and nothing from it is learned into long-term memory.
-                quick = tab_id.startswith("quick:")
                     memory=None if quick else self.server.memory,
                     ephemeral=True if quick else None,
                 )
