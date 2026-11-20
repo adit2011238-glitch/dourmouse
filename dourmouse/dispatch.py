@@ -3247,6 +3247,30 @@ def _url_gate(spec_name: str, url: str, actor: str) -> tuple[str, str] | None:
     return None
 
 
+_SIGNED_IN_REFUSED_TOOLS: frozenset[str] = frozenset(
+    {"browser_signin", "browser_creds_store", "browser_creds_list", "browser_creds_forget"})
+_SIGNED_IN_ASK_TOOLS: frozenset[str] = frozenset(
+    {"browser_fill", "browser_fill_form", "browser_type", "browser_select", "browser_click", "browser_press",
+     "browser_submit"})
+
+
+def _signed_in_prompt(name: str, arguments: dict[str, Any], url: str) -> str:
+    """What the owner is asked on the signed-in Chrome: the page address and the field or button."""
+    what = {
+        "browser_fill": "fill in a field", "browser_fill_form": "fill in a form", "browser_type": "type",
+        "browser_select": "choose an option", "browser_click": "click", "browser_press": "press a key",
+        "browser_submit": "submit the form",
+    }.get(name, name)
+    target = _one_line_text(arguments.get("target") or arguments.get("key") or arguments.get("label"), 80)
+    text = _one_line_text(arguments.get("value") or arguments.get("text"), 80)
+    parts = [f"On the signed-in Dourmouse Chrome, page {url or '(a blank tab)'}: {what}"]
+    if target:
+        parts.append(f"on {target!r}")
+    if text:
+        parts.append(f"with {text!r}")
+    return " ".join(parts) + "? You are signed in on that page, so this acts as you."
+
+
 def _argument_gate(
     spec: ToolSpec, arguments: dict[str, Any], actor: str, routed: frozenset[str] = frozenset(),
     chain: tuple[str, ...] = (),
@@ -3315,6 +3339,17 @@ def _argument_gate(
         decision = browser_agent.press_gate(arguments)
         if decision is not None:
             return decision
+    if name in _SIGNED_IN_REFUSED_TOOLS or name in _SIGNED_IN_ASK_TOOLS:
+        # T5 step 2 (finding 215): in the signed-in Dourmouse Chrome the owner signs in by hand, and every
+        # fill, type, select, click, key press and submit asks first. Reading never asks.
+        from dourmouse import browser_agent
+
+        state = browser_agent.signed_in_state()
+        if state["active"]:
+            if name in _SIGNED_IN_REFUSED_TOOLS:
+                return ("refuse", "the tools are acting in the signed-in Dourmouse Chrome, where the owner signs in "
+                        "by hand. Dourmouse never types, stores or uses a password there.")
+            return ("confirm", _signed_in_prompt(name, arguments, state["url"]))
     if name == "browser_type" and str(arguments.get("mode") or "text").strip().lower() == "keys" and (
         "\n" in str(arguments.get("text") or "") or "\r" in str(arguments.get("text") or "")
     ):

@@ -48,6 +48,9 @@ _BROWSER_TOOLS = {
     "browser_extract",
     "browser_screenshot",
     "browser_keep_page",
+    "dourmouse_chrome_open",
+    "dourmouse_chrome_status",
+    "dourmouse_chrome_quit",
     "browser_creds_store",
     "browser_creds_list",
     "browser_creds_forget",
@@ -177,7 +180,7 @@ class TestRosterWiring:
         registry = build_general_registry()
         sub = registry.get_subagent("browser")
         gated = {t.name for t in sub.tools if t.permission == Permission.REQUIRES_CONFIRMATION}
-        assert gated == {"browser_submit", "browser_signin", "browser_creds_store", "browser_creds_forget"}
+        assert gated == {"browser_submit", "browser_signin", "browser_creds_store", "browser_creds_forget", "dourmouse_chrome_quit"}
         for t in sub.tools:
             if t.permission == Permission.REQUIRES_CONFIRMATION:
                 assert t.confirm_prompt is not None, f"{t.name} lacks a confirm_prompt"

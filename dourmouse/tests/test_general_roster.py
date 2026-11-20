@@ -436,6 +436,7 @@ class TestRosterShape:
         registry = build_general_registry()
         assert registry.gated_tool_names == {
             "security_sentry_dismiss",  # finding P5-53: dismissing a finding asks the owner
+            "dourmouse_chrome_quit",  # finding 214: the owner may have the Dourmouse Chrome window open
             "send_draft",
             "deploy",
             "delete_file",

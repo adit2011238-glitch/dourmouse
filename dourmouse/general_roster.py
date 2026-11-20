@@ -5745,6 +5745,9 @@ def build_general_registry() -> DispatchRegistry:
             from dourmouse.browser_agent import (
                 browser_back,
                 browser_click,
+                dourmouse_chrome_open,
+                dourmouse_chrome_quit,
+                dourmouse_chrome_status,
                 browser_creds_forget,
                 browser_creds_list,
                 browser_creds_store,
@@ -5782,6 +5785,9 @@ def build_general_registry() -> DispatchRegistry:
                 "extract": browser_extract,
                 "screenshot": browser_screenshot,
                 "keep_page": browser_keep_page,
+                "chrome_open": dourmouse_chrome_open,
+                "chrome_status": dourmouse_chrome_status,
+                "chrome_quit": dourmouse_chrome_quit,
                 "creds_store": browser_creds_store,
                 "creds_list": browser_creds_list,
                 "creds_forget": browser_creds_forget,
@@ -5841,7 +5847,11 @@ def build_general_registry() -> DispatchRegistry:
             "that flow opens the owner's OWN real browser and adopts the "
             "session automatically. This applies only to signing THE OWNER "
             "in; visiting a public Google page (search, a shared doc link) is "
-            "ordinary browsing and unaffected.",
+            "ordinary browsing and unaffected. "
+            "The one exception is the owner's own Dourmouse Chrome: for Gmail and the other Google pages "
+            "the owner is signed in on, in that Chrome, use browser_open with signed_in true. Never type, store or "
+            "use a password in that window; if the page asks the owner to sign in, call dourmouse_chrome_open and ask "
+            "them to sign in in that window.",
             [
                 ToolSpec(
                     name="open_browser_pane",
@@ -5877,11 +5887,17 @@ def build_general_registry() -> DispatchRegistry:
                         "switched tabs): read it before the next step. To only "
                         "SHOW the owner a page use open_browser_pane; for a "
                         "plain fact use web_search. "
-                        "Example: browser_open(url='https://example.com')."
+                        "Example: browser_open(url='https://example.com'). "
+                        "signed_in=true opens it in the owner's own Dourmouse Chrome, where they are signed in "
+                        "to Gmail and the like; every "
+                        "fill, click, key press and submit in that Chrome asks the owner first and reading never asks."
                     ),
                     parameters={
                         "type": "object",
-                        "properties": {"url": {"type": "string"}},
+                        "properties": {
+                            "url": {"type": "string"},
+                            "signed_in": {"type": "boolean", "description": "Open it in the signed-in Dourmouse Chrome instead of the pane."},
+                        },
                         "required": ["url"],
                     },
                     handler=_browser_h("open"),
@@ -6128,6 +6144,42 @@ def build_general_registry() -> DispatchRegistry:
                         "required": ["target"],
                     },
                     handler=_browser_h("extract"),
+                ),
+                ToolSpec(
+                    name="dourmouse_chrome_open",
+                    description=(
+                        "Open the owner's Dourmouse Chrome window on Google's sign-in page so the owner can sign "
+                        "in by hand. Nothing is typed and nothing is attached. Use it when the owner asks to open "
+                        "the Dourmouse browser to sign in, or when browser_open with signed_in says the owner is "
+                        "not signed in. control=false starts it with no control port, for a sign-in Google refuses; "
+                        "restart=true closes a running one first."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {"control": {"type": "boolean"}, "restart": {"type": "boolean"}},
+                    },
+                    handler=_browser_h("chrome_open"),
+                ),
+                ToolSpec(
+                    name="dourmouse_chrome_status",
+                    description=(
+                        "Report the Dourmouse Chrome: installed and version, running, control port, attached, the "
+                        "Google account it shows, whether password saving is off and whether password sync is "
+                        "on, off or unknown. Never starts it."
+                    ),
+                    parameters={"type": "object", "properties": {}},
+                    handler=_browser_h("chrome_status"),
+                ),
+                ToolSpec(
+                    name="dourmouse_chrome_quit",
+                    description=(
+                        "Close the owner's Dourmouse Chrome cleanly; it keeps its tabs for next time. REQUIRES "
+                        "confirmation, because the owner may have the window open."
+                    ),
+                    parameters={"type": "object", "properties": {}},
+                    handler=_browser_h("chrome_quit"),
+                    permission=Permission.REQUIRES_CONFIRMATION,
+                    confirm_prompt=lambda _a: "Close the Dourmouse Chrome window? It keeps its tabs, and the owner stays signed in.",
                 ),
                 ToolSpec(
                     name="browser_keep_page",

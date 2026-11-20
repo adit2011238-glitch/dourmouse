@@ -59,7 +59,9 @@ _GLOBAL_LOCK = threading.Lock()
 # Phase C1 state, all owned by the browser thread (the one event loop every tool runs on).
 _PW: Any = None  # the one Playwright driver, shared by the pane connection and a headless launch
 _BROWSER: Any = None  # the CDP connection to the Electron shell (pane mode only)
-_PAGE_MODE: str | None = None  # "pane" (the owner's tab) or "headless" (a separate Chrome)
+_PAGE_MODE: str | None = None  # "pane" (the owner's tab), "headless" (a separate Chrome) or "signed_in" (the Dourmouse Chrome)
+_SIGNED_IN = False  # browser_open chose the Dourmouse Chrome (T5 step 2); the tools after it act there
+_SIGNED_IN_BROWSER: Any = None  # the CDP connection to it
 _PREPARED_CONTEXTS: set[int] = set()  # contexts that already carry the request filter and the page listener
 _TARGET_IDS: dict[Any, str] = {}  # Playwright Page -> CDP target id (matched against the pane bridge)
 _NEW_PAGES: list[Any] = []  # the newest pages that appeared in the context, newest last (headless popup following)
@@ -681,6 +683,8 @@ async def _ensure_browser_raw(quiet: bool = False) -> Any:
     otherwise a Chrome launched here (once per process). ``quiet`` skips the "following the
     owner" notice for a caller that tells the model something more specific itself."""
     global _CONTEXT, _PAGE, _LAUNCH_ERROR, _PAGE_MODE, _PW, _HEADLESS_BROWSER
+    if _SIGNED_IN:
+        return await _ensure_signed_in_page()
     electron_pane = _electron_pane_configured()
     if electron_pane is None and _PAGE is not None and not _PAGE.is_closed():
         return _PAGE
@@ -1927,6 +1931,51 @@ def press_gate(arguments: dict[str, Any]) -> tuple[str, str] | None:
 # --------------------------------------------------------------------------- #
 
 
+def _chrome_status() -> dict[str, Any]:
+    from dourmouse import chrome_profile
+
+    attached = _SIGNED_IN_BROWSER is not None and _SIGNED_IN_BROWSER.is_connected()
+    try:
+        return chrome_profile.status(attached=attached)
+    except Exception as exc:  # noqa: BLE001 - the status page must still load
+        return {"installed": False, "last_error": f"{type(exc).__name__}: {exc}"}
+
+
+def dourmouse_chrome_open(arguments: dict[str, Any]) -> str:
+    """Open the Dourmouse Chrome on Google's sign-in page so the owner signs in by hand. Nothing is attached and
+    nothing is typed. ``control`` false starts it with no control port at all (for when Google objects);
+    ``restart`` closes a running one first."""
+    from dourmouse import chrome_profile
+
+    control = arguments.get("control", True) is not False
+    try:
+        if arguments.get("restart") and chrome_profile.lock_pid() is not None:
+            _select_engine(False)
+            if not chrome_profile.quit_chrome():
+                return "The Dourmouse Chrome did not close, so it was not restarted."
+        info = chrome_profile.launch(remote_control=control, url=chrome_profile.SIGNIN_URL)
+    except chrome_profile.ChromeProfileError as exc:
+        return f"DOURMOUSE CHROME (reported honestly): {exc}"
+    mode = "with its control port" if info.get("port") else "with no control port, so nothing can drive it"
+    return (f"The Dourmouse Chrome is open {mode}. The owner signs in to Google in that window by hand; Dourmouse "
+            "types nothing there. When the owner says they are signed in, use browser_open with signed_in true.")
+
+
+def dourmouse_chrome_status(arguments: dict[str, Any]) -> str:
+    return "DOURMOUSE CHROME STATUS: " + json.dumps(_chrome_status(), sort_keys=True)
+
+
+def dourmouse_chrome_quit(arguments: dict[str, Any]) -> str:
+    from dourmouse import chrome_profile
+
+    _select_engine(False)
+    try:
+        gone = chrome_profile.quit_chrome()
+    except chrome_profile.ChromeProfileError as exc:
+        return f"DOURMOUSE CHROME (reported honestly): {exc}"
+    return "The Dourmouse Chrome is closed." if gone else "The Dourmouse Chrome did not close in time."
+
+
 def browser_status() -> dict[str, Any]:
     """Engine/state report for /api/browser/status (never opens the browser)."""
     from importlib.util import find_spec
@@ -1946,12 +1995,93 @@ def browser_status() -> dict[str, Any]:
         "shots": sorted(p.name for p in _SHOTS_DIR.glob("*.png"))[-5:] if _SHOTS_DIR.exists() else [],
         "activity": activity,
         "note": _UA_NOTE,
+        "dourmouse_chrome": _chrome_status(),
     }
 
 
 def browser_activity(limit: int = 50) -> list[dict[str, str]]:
     with _ACTIVITY_LOCK:
         return list(_ACTIVITY[-max(1, min(limit, 300)):])
+
+
+_SIGNED_IN_OFF = (
+    "NOT SIGNED IN: the Dourmouse Chrome is not running. Dourmouse never starts it on its own, because the owner "
+    "signs in by hand in its window. Ask the owner to say 'open the Dourmouse browser so I can sign in' "
+    "(dourmouse_chrome_open), sign in there, then try again with browser_open signed_in true."
+)
+
+
+async def _ensure_signed_in_page() -> Any:
+    """The page the tools act on when ``browser_open`` chose the Dourmouse Chrome (T5 step 2): attach to the
+    running Chrome over its control port and take its most recent open tab, or open one."""
+    global _CONTEXT, _PAGE, _PAGE_MODE, _PW, _SIGNED_IN_BROWSER
+    from dourmouse import chrome_profile
+
+    if _PAGE_MODE == "signed_in" and _PAGE is not None and not _PAGE.is_closed() \
+            and _SIGNED_IN_BROWSER is not None and _SIGNED_IN_BROWSER.is_connected():
+        return _PAGE
+    if chrome_profile.live_port() is None:
+        _SIGNED_IN_BROWSER = None
+        raise RuntimeError(_SIGNED_IN_OFF)
+    try:
+        from playwright.async_api import async_playwright
+    except ImportError as exc:  # pragma: no cover - env-dependent
+        raise RuntimeError("NOT CONFIGURED: the browser engine (playwright) is not installed in this venv.") from exc
+    if _PW is None:
+        _PW = await async_playwright().start()
+    if _SIGNED_IN_BROWSER is None or not _SIGNED_IN_BROWSER.is_connected():
+        try:
+            _SIGNED_IN_BROWSER = await chrome_profile.attach(_PW)
+        except chrome_profile.ChromeProfileError as exc:
+            raise RuntimeError(f"BROWSER (signed in): {exc}") from exc
+    context = _SIGNED_IN_BROWSER.contexts[0] if _SIGNED_IN_BROWSER.contexts else await _SIGNED_IN_BROWSER.new_context()
+    await _prepare_context(context, filter_requests=False)
+    live = [pg for pg in context.pages if not pg.is_closed()]
+    page = live[-1] if live else await context.new_page()
+    _CONTEXT, _PAGE, _PAGE_MODE = context, page, "signed_in"
+    _log("engine", "Chrome ready (the signed-in Dourmouse Chrome)")
+    return page
+
+
+def _select_engine(signed_in: bool) -> None:
+    """``browser_open`` says which Chrome the tools after it act in. Leaving the signed-in Chrome forgets its page
+    here and leaves the window itself running."""
+    global _SIGNED_IN, _PAGE, _CONTEXT, _PAGE_MODE
+    if signed_in == _SIGNED_IN:
+        return
+    _SIGNED_IN = signed_in
+    if _PAGE_MODE == "signed_in" or signed_in:
+        _PAGE = _CONTEXT = _PAGE_MODE = None
+
+
+def signed_in_state() -> dict[str, Any]:
+    """For dispatch's gate: whether the tools now act in the signed-in Chrome, and on which address."""
+    url = ""
+    if _SIGNED_IN and _PAGE is not None:
+        with contextlib.suppress(Exception):
+            url = str(_PAGE.url or "")
+    return {"active": bool(_SIGNED_IN), "url": url}
+
+
+_SIGNED_IN_REFUSAL = (
+    "REFUSED: the tools are acting in the signed-in Dourmouse Chrome, where the owner signs in by hand. "
+    "Dourmouse never types, stores or uses a password there. Ask the owner to sign in in that window."
+)
+
+
+def google_docs_read_address(url: str) -> str:
+    """A Google Doc's editor draws on a canvas, so its text cannot be read. ``/mobilebasic`` is the plain view of
+    the same document in the same signed-in session. Any other address comes back unchanged."""
+    try:
+        parts = urllib.parse.urlsplit(url)
+    except ValueError:
+        return url
+    if parts.hostname != "docs.google.com":
+        return url
+    found = re.match(r"^/document/(?:u/\d+/)?d/([A-Za-z0-9_-]+)", parts.path)
+    if not found:
+        return url
+    return f"https://docs.google.com/document/d/{found.group(1)}/mobilebasic"
 
 
 _LOCAL_REDIRECT_REFUSAL = (
@@ -1986,6 +2116,10 @@ def browser_open(arguments: dict[str, Any]) -> str:
     url = (arguments.get("url") or "").strip()
     if not url:
         return "ERROR: browser_open requires a url."
+    signed_in = bool(arguments.get("signed_in"))
+    _select_engine(signed_in)
+    if signed_in:
+        url = google_docs_read_address(url)
     if not _is_http_url(url):
         return (
             f"REFUSED: only http(s):// URLs are ever opened — got {url!r}. "
@@ -2671,6 +2805,8 @@ def _vault_load_for_update() -> tuple[dict[str, Any], str]:
 
 def browser_creds_store(arguments: dict[str, Any]) -> str:
     """Store credentials for a site. CONFIRMATION-GATED."""
+    if _SIGNED_IN:
+        return _SIGNED_IN_REFUSAL
     site = (arguments.get("site") or "").strip().lower()
     username = (arguments.get("username") or "").strip()
     password = arguments.get("password")
@@ -2706,6 +2842,8 @@ def browser_creds_store(arguments: dict[str, Any]) -> str:
 
 
 def browser_creds_list(arguments: dict[str, Any]) -> str:
+    if _SIGNED_IN:
+        return _SIGNED_IN_REFUSAL
     sites = _vault_sites()
     if not sites:
         return "VAULT: empty — no credentials stored yet (browser_creds_store)."
@@ -2722,6 +2860,8 @@ def browser_creds_list(arguments: dict[str, Any]) -> str:
 
 def browser_creds_forget(arguments: dict[str, Any]) -> str:
     """Remove stored credentials for a site. CONFIRMATION-GATED."""
+    if _SIGNED_IN:
+        return _SIGNED_IN_REFUSAL
     site = (arguments.get("site") or "").strip().lower()
     if not site:
         return "ERROR: browser_creds_forget requires a site."
@@ -2753,6 +2893,8 @@ def browser_signin(arguments: dict[str, Any]) -> str:
     from the vault, submit, and report where the page landed. Only ever runs
     after a human approves the site.
     """
+    if _SIGNED_IN:
+        return _SIGNED_IN_REFUSAL
     site = (arguments.get("site") or "").strip()
     if not site:
         return "ERROR: browser_signin requires a site."
@@ -2880,7 +3022,15 @@ def close_browser() -> None:
         return
 
     async def _close():
-        global _CONTEXT, _PAGE, _PW, _BROWSER, _PAGE_MODE
+        global _CONTEXT, _PAGE, _PW, _BROWSER, _PAGE_MODE, _SIGNED_IN, _SIGNED_IN_BROWSER
+        if _PAGE_MODE == "signed_in":
+            # The signed-in Chrome is the owner's window: only the connection is dropped, never its tabs.
+            _CONTEXT = None
+        if _SIGNED_IN_BROWSER is not None:
+            with contextlib.suppress(Exception):
+                await _SIGNED_IN_BROWSER.close()  # disconnects; Chrome keeps running
+        _SIGNED_IN_BROWSER = None
+        _SIGNED_IN = False
         if _CONTEXT is not None:
             try:
                 await _CONTEXT.close()
