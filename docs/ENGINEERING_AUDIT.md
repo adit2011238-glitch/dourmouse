@@ -6307,3 +6307,13 @@ Verification. `test_memory_pl06.py`, 16 tests: an old file keeps every row and g
 
 Honest limits. The model backend returns 402 so no real reply used a memory; the chat run is a stand-in client and the "why" button was driven with a stubbed stream. The Memory view works on the local store only: with a remote store set it says so (503), and per-turn use counting is off for the remote and fallback stores. Export goes through the browser download path (Electron shows its save dialog), not a dedicated IPC dialog, and the Electron window was not run. Project memory is a column and a recall filter, not yet a per-project screen; kind and origin are guessed from the source only, and the model-written facts from `remember` are not classified beyond fact. Stage 4 (retiring the old stores) is still to do. Two shell tests fail for reasons outside this change (an en dash in `screens/home/helpers.js`, and the home screen contract check), both in files this change did not touch.
 
+
+### Finding #211 (2026-11-20, low, fix): Home strip helper and screen contract (follows #207 to #210 full-suite run)
+
+What was wrong. The Today strip commit (f9223cf) broke two tests in the full suite. `ui/assets/os/screens/home/helpers.js` returned an en dash for a card with no number, which `test_os_shell_route.py` forbids in shell sources (style rule), and `ui/assets/os/screens/home/index.js` kept the strip's collapsed state through `window.localStorage`, which `test_os_screen_contract.py::test_no_forbidden_calls[home]` forbids (a screen stores through `ctx.prefs`).
+
+What changed. `cardNumber` returns a plain hyphen. The collapsed state reads and writes `ctx.prefs` under the key `stripCollapsed` (the shell prefs layer already tolerates a blocked store). `test_os_today_strip.py` expects the hyphen. The old `dm.home.strip.collapsed` localStorage value is no longer read, so a strip a person had collapsed opens expanded once.
+
+Verification. Full suite before the fix: 3 failed, 10854 passed, 12 skipped, 1 xpassed. After the fix: the two Home failures pass, and the contract, shell route, today strip and Home v2 files together give 190 passed. The full suite was not re-run after the fix.
+
+Honest limits. The third failure, `test_fix_FU_legacy.py::test_console_copy_button_copies_only_the_code`, is not caused by this change: with the change stashed it also failed in the same file run and passed alone, so it is a timing flake (the test clicks Copy while the code block is still streaming and copies a partial `echo o`). It is not fixed here.

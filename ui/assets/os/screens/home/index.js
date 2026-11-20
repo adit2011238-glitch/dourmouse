@@ -135,13 +135,12 @@ export default {
     }
 
     /* The Today strip: six cards, each one number, one line and one action, with the age of its data. A card that
-       could not be read says so on its own and the others stay. Collapsed state is remembered on this Mac only. */
-    const COLLAPSE_KEY = 'dm.home.strip.collapsed';
+       could not be read says so on its own and the others stay. Collapsed state is remembered on this Mac only, through the screen prefs. */
     function collapsed() {
-      try { return window.localStorage.getItem(COLLAPSE_KEY) === '1'; } catch (e) { return false; }
+      return ctx.prefs.get('stripCollapsed') === '1';
     }
     function setCollapsed(v) {
-      try { window.localStorage.setItem(COLLAPSE_KEY, v ? '1' : '0'); } catch (e) { /* kept for this visit only */ }
+      ctx.prefs.set('stripCollapsed', v ? '1' : '0');
     }
 
     function stripCard(c) {

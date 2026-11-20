@@ -175,6 +175,6 @@ R.priv = h.privacyText({ hours: 24, requests: 1, sources: 0, redactions: 2 });
 R.none = h.privacyText(null);
 """)
     assert out["ages"] == ["just now", "5 min ago", "3 h ago", "2 d ago"] and out["bad"] == ""
-    assert out["nums"] == ["0", "–", "–", "–"]
+    assert out["nums"] == ["0", "-", "-", "-"]
     assert out["order"] == ["mail", "goals", "usage"]
     assert out["priv"] == "Last 24 hours: 1 request to cloud models, 0 sources shared, 2 redactions." and out["none"] == ""

@@ -92,10 +92,10 @@ export function dataAge(at, now = Date.now()) {
   return Math.floor(s / 86400) + ' d ago';
 }
 
-/* The big figure of a card: only a real number is shown; unavailable and error cards show a dash. */
+/* The big figure of a card: only a real number is shown; unavailable and error cards show a hyphen. */
 export function cardNumber(card) {
-  if (!card || card.state === 'unavailable' || card.state === 'error') return '–';
-  return typeof card.number === 'number' ? String(card.number) : '–';
+  if (!card || card.state === 'unavailable' || card.state === 'error') return '-';
+  return typeof card.number === 'number' ? String(card.number) : '-';
 }
 
 /* The cards in the plan's fixed order, whatever order the server sent them in. */
