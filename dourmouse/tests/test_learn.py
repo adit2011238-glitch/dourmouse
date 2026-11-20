@@ -261,10 +261,11 @@ class TestChatLearning:
         # v4.2: recall is injected as its OWN trailing system message so the
         # base prompt stays immutable (KV-cache stability) — search ALL
         # system messages, not just messages[0].
-        system_msgs = [m.get("content", "") for m in sent if m.get("role") == "system"]
-        assert any("REMEMBERED CONTEXT" in s for s in system_msgs)
-        assert any("nebula" in s for s in system_msgs)
-        assert any("argon" in s for s in system_msgs)
+        # PL-06 (SEC2-10): recalled text is DATA, a fenced user-role block, never a system message.
+        assert not any("REMEMBERED CONTEXT" in m.get("content", "") for m in sent if m.get("role") == "system")
+        recalled = [m.get("content", "") for m in sent if m.get("role") == "user" and "REMEMBERED CONTEXT" in m.get("content", "")]
+        assert len(recalled) == 1 and "<memory-data>" in recalled[0]
+        assert "nebula" in recalled[0] and "argon" in recalled[0]
         assert sent[0]["content"] == system_message(_registry())
 
     def test_no_match_leaves_system_message_unchanged(
@@ -359,7 +360,7 @@ class TestChatLearning:
         recall_blocks = [
             m
             for m in resumed.messages
-            if m.get("role") == "system" and "REMEMBERED CONTEXT" in m.get("content", "")
+            if m.get("role") == "user" and "REMEMBERED CONTEXT" in m.get("content", "")
         ]
         assert len(recall_blocks) == 1
         assert "nebula" in recall_blocks[0]["content"]

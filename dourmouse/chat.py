@@ -39,7 +39,7 @@ from dourmouse.dispatch import (
     system_message,
 )
 from dourmouse.governance import BudgetTracker, DlpFilter, RbacPolicy
-from dourmouse.learn import learn_enabled, recall_block
+from dourmouse.learn import learn_enabled, recall_block, take_recalled_ids
 from dourmouse.memory_store import MemoryStore
 
 # Delay general_roster import so chat.py stays importable for engine tests
@@ -202,6 +202,8 @@ class ChatSession:
         # The system/recall/skill blocks added for ONE turn, tracked by
         # identity so the next turn can drop them (finding P4-14).
         self._turn_blocks: list[dict[str, Any]] = []
+        self._recalled_ids: list[int] = []
+        self._memory_event: dict[str, Any] | None = None
         #: Set when a corrupt state snapshot was replaced by a rebuild.
         self.state_recovery: str | None = None
         self._recovery_announced = False
@@ -331,6 +333,8 @@ class ChatSession:
         self.cost_budget.reset_run()
         # Last turn's recall and skill blocks were for THAT turn's prompt.
         self._drop_turn_blocks()
+        self._recalled_ids = []
+        self._memory_event = None
         self.messages.append({"role": "user", "content": prompt})
         # v2.9 Store & Learn: before each turn, deterministically recall the
         # stored knowledge most relevant to THIS prompt and inject it into the
@@ -366,9 +370,23 @@ class ChatSession:
                 # the new directive — the model reads it as context, and the
                 # bounded window in dispatch.py always keeps it.
                 if block:
-                    recall_msg = {"role": "system", "content": block}
+                    # PL-06 (SEC2-10): stored text is data, so it travels as a fenced user-role block, never as a
+                    # system message that a stored sentence could pose as.
+                    recall_msg = {"role": "user", "content": block}
                     self.messages.insert(-1, recall_msg)
                     self._turn_blocks.append(recall_msg)
+                    self._recalled_ids = take_recalled_ids()
+                    if self._recalled_ids and hasattr(self.memory, "record_uses") and isinstance(self.memory, MemoryStore):
+                        try:
+                            self.memory.record_uses(self._recalled_ids, self.session_file.stem, self._turn_count + 1)
+                            # "Why did you say that": ids only, no memory text. Streamed to the screen now and kept
+                            # in the ledger record so a reloaded thread can still ask.
+                            self._memory_event = {"type": "memory_used", "count": len(self._recalled_ids),
+                                                  "session": self.session_file.stem, "turn": self._turn_count + 1}
+                            if event_sink is not None:
+                                event_sink(self._memory_event)
+                        except Exception:  # noqa: BLE001 - counting uses must never break a turn
+                            pass
         # Domain H piece 3 (Skills-as-modular-capability-packages): same
         # trailing-system-message pattern as the memory recall block just
         # above, for the same reason (KV-cache stability: messages[0] never
@@ -420,6 +438,8 @@ class ChatSession:
             # Persist even when the API call raises, so a resumed session
             # never silently loses the turn that was already in memory.
             self._turn_count += 1
+            if self._memory_event and isinstance(report, dict):
+                report["transcript"] = [self._memory_event, *report.get("transcript", [])]
             elapsed_ms = round((time.monotonic() - started) * 1000, 1)
             try:
                 self._persist(prompt, report, elapsed_ms, display_text=display_text, screen=screen)
@@ -545,17 +565,13 @@ class ChatSession:
         # ask(), so a resumed session must not carry recalled facts from
         # turns ago. messages[0] is the freshly re-injected base above and is
         # never a recall block, so this only removes the trailing ones.
-        loaded = [
-            m
-            for m in loaded
-            if not (
-                m.get("role") == "system"
-                and (
-                    "REMEMBERED CONTEXT" in (m.get("content") or "")
-                    or (m.get("content") or "").startswith("[SKILL:")
-                )
-            )
-        ]
+        def _turn_block(m: dict[str, Any]) -> bool:
+            text = str(m.get("content") or "")
+            if m.get("role") == "system":
+                return "REMEMBERED CONTEXT" in text or text.startswith("[SKILL:")
+            return m.get("role") == "user" and text.lstrip().startswith("=== REMEMBERED CONTEXT")
+
+        loaded = [m for m in loaded if not _turn_block(m)]
         self.messages = loaded
         self._turn_count = sum(1 for m in self.messages if m["role"] == "user")
 
@@ -631,6 +647,7 @@ class ChatSession:
             "final_text": report.get("final_text", ""),
             "interventions": interventions,
             "role_changes": list(self.role_changes),
+            "memory_ids": list(getattr(self, "_recalled_ids", []) or []),
             "transcript": report.get("transcript", []),
             "prev_hash": self._prev_hash,
         }

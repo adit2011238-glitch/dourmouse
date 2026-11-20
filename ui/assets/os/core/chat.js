@@ -145,6 +145,10 @@ export function applyEvent(turn, e, hooks = {}) {
     case 'delegate_parallel_burst':
       capPush(turn.steps, { kind: 'plan', label: 'FAN-OUT ' + e.total + ' branches, ' + e.concurrent + ' at once' }, STEP_CAP);
       break;
+    case 'memory_used':
+      /* plan 2.4: how many remembered facts went into this reply, and where to ask which ones */
+      turn.memory = { count: Number(e.count) || 0, session: String(e.session || ''), turn: Number(e.turn) || 0 };
+      break;
     case 'confirmation_requested':
       turn.status = 'waiting';
       if (hooks.approval) {

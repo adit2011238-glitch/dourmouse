@@ -341,6 +341,8 @@ class TestRegistry:
         # whole point is live server-pushed data a static page cannot show, so it
         # is inserted here rather than into ui/os_mockup.html's own ORDER array.
         expected.insert(expected.index("SECURITY") + 1, "COMMAND_CENTER")
+        # Plan 2.4 (PL-06): MEMORY sits right after WIKI, a second view in the Library place.
+        expected.insert(expected.index("WIKI") + 1, "MEMORY")
         out = run(tmp_path, "R.ids = IDS; R.slugs = SCREENS.map((s) => s.slug); R.threads = THREAD_SCREENS; R.dock = DOCK.map((d) => d[0]);", self.IMPORTS)
         assert out["ids"] == expected
         assert out["slugs"] == [i.lower() for i in expected]

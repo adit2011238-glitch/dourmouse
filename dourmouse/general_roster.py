@@ -1788,11 +1788,17 @@ def _remember_tool(arguments: dict[str, Any]) -> str:
     store = _open_memory_store()
     if isinstance(store, Exception):
         return f"NOT CONFIGURED: {store}"
+    from dourmouse.memory_store import MemoryStore
+
+    # Plan 2.4: a remember call is the owner's instruction passed on, so its origin is "you_said". Only the local
+    # store keeps fact properties; a remote one stores the text as before.
+    extra = {"origin": "you_said"} if isinstance(store, MemoryStore) else {}
     try:
         return store.remember(
             source=arguments.get("source", "agent"),
             title=arguments.get("title", ""),
             body=arguments.get("body", ""),
+            **extra,
         )
     except ValueError as exc:
         return f"ERROR: {exc}"

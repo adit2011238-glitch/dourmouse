@@ -51,6 +51,54 @@ def is_duplicate_result(result: str) -> bool:
     return isinstance(result, str) and result.startswith(DUPLICATE_PREFIX)
 
 
+#: PL-06 (plan 2.4). Columns added to ``facts``. Facts the owner wrote or the model chose to keep are kind
+#: ``fact`` (or ``preference``, ``person``, ``project``, ``instruction``, ``event``); the ledgers, vault notes,
+#: repo index and ratings the store also holds are kind ``record``: searchable, never shown as "what it knows".
+_PL06_COLUMNS = (
+    ("kind", "TEXT"),
+    ("origin", "TEXT"),
+    ("valid_from", "TEXT"),
+    ("valid_to", "TEXT"),
+    ("superseded_by", "INTEGER"),
+    ("pinned", "INTEGER NOT NULL DEFAULT 0"),
+    ("hidden", "INTEGER NOT NULL DEFAULT 0"),
+    ("uses", "INTEGER NOT NULL DEFAULT 0"),
+    ("last_used", "TEXT"),
+    ("reviewed", "INTEGER NOT NULL DEFAULT 1"),
+    ("project", "TEXT NOT NULL DEFAULT ''"),
+)
+
+KINDS = ("preference", "fact", "person", "project", "instruction", "event")
+ORIGINS = ("you_said", "learned_from_chat", "from_file", "from_mail", "from_research")
+
+#: Sources the store fills by itself. They are records, not things the owner was told to remember.
+_RECORD_PREFIXES = ("session:", "repo", "vault", "feedback", "history", "device_wiki", "bulk", "import", "bus",
+                    "chat_history", "claude_history", "codex_history", "manual_upload", "laptop_file", "gdrive_file")
+PINNED_RECALL_CAP = 3
+
+
+def classify_kind(source: str) -> str:
+    """Deterministic, no model call: sources the store fills by itself are ``record``, everything else ``fact``."""
+    src = (source or "").lower()
+    return "record" if src.startswith(_RECORD_PREFIXES) else "fact"
+
+
+def classify_origin(source: str) -> str:
+    src = (source or "").lower()
+    if src.startswith(("session:", "chat_history", "claude_history", "codex_history", "bus")):
+        return "learned_from_chat"
+    if src.startswith(("mail", "gmail", "email")):
+        return "from_mail"
+    if src.startswith(("research", "paper")):
+        return "from_research"
+    if src.startswith(("vault", "repo", "device_wiki", "bulk", "import", "history", "file", "manual_upload",
+                       "laptop_file", "gdrive_file")):
+        return "from_file"
+    if src in ("you", "owner", "user", "ui"):
+        return "you_said"
+    return "learned_from_chat"
+
+
 class MemoryStoreUnavailable(RuntimeError):
     """Raised when SQLite FTS5 is not available — honest NOT CONFIGURED."""
 
@@ -151,6 +199,41 @@ class MemoryStore:
                     "UPDATE facts SET content_hash = ? WHERE id = ?",
                     (_content_hash(row["body"]), row["id"]),
                 )
+            # PL-06 (plan 2.4): fact properties, additive like content_hash above. Rows that already exist keep
+            # every value they had: they are facts the owner can see, already reviewed, still valid.
+            for col, ddl in _PL06_COLUMNS:
+                if col not in existing_cols:
+                    cur.execute(f"ALTER TABLE facts ADD COLUMN {col} {ddl}")
+            for row in cur.execute("SELECT id, source FROM facts WHERE kind IS NULL").fetchall():
+                cur.execute("UPDATE facts SET kind = ?, origin = ? WHERE id = ?",
+                            (classify_kind(row["source"]), classify_origin(row["source"]), row["id"]))
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_facts_kind ON facts(kind, hidden)")
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS fact_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    fact_id INTEGER NOT NULL,
+                    at TEXT NOT NULL,
+                    change TEXT NOT NULL,
+                    before TEXT NOT NULL DEFAULT '',
+                    after TEXT NOT NULL DEFAULT ''
+                )
+                """
+            )
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_fact_history_fact ON fact_history(fact_id)")
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS fact_uses (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    fact_id INTEGER NOT NULL,
+                    session TEXT NOT NULL,
+                    turn INTEGER NOT NULL,
+                    at TEXT NOT NULL
+                )
+                """
+            )
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_fact_uses_fact ON fact_uses(fact_id)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_fact_uses_turn ON fact_uses(session, turn)")
             # v4.1 (P6): optional semantic-recall layer. Cached embeddings for
             # fact bodies (one row per fact, json vector). Empty by design —
             # the layer is populated lazily only when DOURMOUSE_EMBED is on.
@@ -187,8 +270,13 @@ class MemoryStore:
 
     # -- write ------------------------------------------------------------- #
 
-    def remember(self, source: str, title: str, body: str) -> str:
-        """Upsert one fact/note; returns a plain confirmation."""
+    def remember(self, source: str, title: str, body: str, *, kind: str | None = None, origin: str | None = None,
+                 project: str = "") -> str:
+        """Upsert one fact/note; returns a plain confirmation.
+
+        ``kind`` and ``origin`` are guessed from the source when not given (``classify_kind``, ``classify_origin``).
+        A new fact the owner did not say is put in the review queue. Changing the body of an existing fact keeps
+        the earlier text in its history."""
         source = (source or "agent").strip()[:200]
         title = (title or "").strip()[:500]
         body = (body or "").strip()
@@ -228,17 +316,24 @@ class MemoryStore:
                     f"{DUPLICATE_PREFIX}: identical content already stored "
                     f"as [{dup['source']}] {dup['title']} — skipped re-insert"
                 )
+            kind = kind if kind in KINDS + ("record",) else classify_kind(source)
+            origin = origin if origin in ORIGINS else classify_origin(source)
+            reviewed = 0 if (kind != "record" and origin != "you_said") else 1
+            before = cur.execute("SELECT id, body FROM facts WHERE source = ? AND title = ?", (source, title)).fetchone()
             cur.execute(
                 """
-                INSERT INTO facts(source, title, body, content_hash, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO facts(source, title, body, content_hash, created_at, updated_at,
+                                  kind, origin, valid_from, reviewed, project)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(source, title) DO UPDATE SET
                     body = excluded.body,
                     content_hash = excluded.content_hash,
                     updated_at = excluded.updated_at
                 """,
-                (source, title, body, content_hash, now, now),
+                (source, title, body, content_hash, now, now, kind, origin, now, reviewed, str(project or "")[:80]),
             )
+            if before is not None and kind != "record":
+                self._log(cur, before["id"], "edited", before["body"], body)
             # v4.1 (P6): an updated fact body invalidates its cached embedding
             # so semantic recall never scores against a stale vector (the
             # next semantic_search re-embeds it lazily).
@@ -264,7 +359,7 @@ class MemoryStore:
     # -- read -------------------------------------------------------------- #
 
     def search(
-        self, query: str, limit: int = 10, source: str | None = None
+        self, query: str, limit: int = 10, source: str | None = None, project: str = ""
     ) -> list[dict[str, Any]]:
         """FTS5-ranked full-text search; returns real matches only.
 
@@ -285,7 +380,8 @@ class MemoryStore:
             return []
         src = str(source).strip() if source else None
         sql = """
-            SELECT f.source AS source,
+            SELECT f.id AS id,
+                   f.source AS source,
                    f.title AS title,
                    snippet(facts_fts, 2, '[', ']', '…', 8) AS snippet,
                    bm25(facts_fts) AS score
@@ -293,15 +389,19 @@ class MemoryStore:
             JOIN facts f ON f.id = facts_fts.rowid
             WHERE facts_fts MATCH ?
               AND (? IS NULL OR f.source = ?)
+              AND f.hidden = 0
+              AND (f.valid_to IS NULL OR f.valid_to > ?)
+              AND (f.project = '' OR f.project = ?)
             ORDER BY score
             LIMIT ?
         """
         with self._lock:
             rows = self._conn.execute(
-                sql, (match_expr, src, src, limit)
+                sql, (match_expr, src, src, _now_iso(), str(project or ""), limit)
             ).fetchall()
         return [
             {
+                "id": r["id"],
                 "source": r["source"],
                 "title": r["title"],
                 "snippet": r["snippet"],
@@ -398,6 +498,296 @@ class MemoryStore:
                 out[int(r["fact_id"])] = [float(x) for x in vec]
         return out
 
+    # -- PL-06: the owner's view of what is known (plan 2.4) ---------------- #
+
+    _FACT_COLS = ("id, source, title, body, kind, origin, valid_from, valid_to, superseded_by, pinned, hidden, "
+                  "uses, last_used, reviewed, project, created_at, updated_at")
+
+    @staticmethod
+    def _fact_dict(r: sqlite3.Row) -> dict[str, Any]:
+        d = {k: r[k] for k in r.keys()}
+        for flag in ("pinned", "hidden", "reviewed"):
+            d[flag] = bool(d.get(flag))
+        d["closed"] = bool(d.get("valid_to"))
+        return d
+
+    @staticmethod
+    def _log(cur: sqlite3.Cursor, fact_id: int, change: str, before: str = "", after: str = "") -> None:
+        cur.execute("INSERT INTO fact_history(fact_id, at, change, before, after) VALUES (?, ?, ?, ?, ?)",
+                    (fact_id, _now_iso(), change, before[:4000], after[:4000]))
+
+    def list_facts(self, *, query: str = "", kind: str = "", origin: str = "", pinned: bool | None = None,
+                   expiring: bool = False, used_days: int = 0, closed: bool = False, review: bool = False,
+                   records: bool = False, limit: int = 100, offset: int = 0) -> dict[str, Any]:
+        """What the store knows, newest first, with the filters the Memory view offers. Records (ledgers, notes the
+        store filled by itself) are left out unless ``records``. Hidden facts are listed: the owner can unhide."""
+        where: list[str] = ["1=1"]
+        args: list[Any] = []
+        if not records:
+            where.append("f.kind != 'record'")
+        if kind:
+            where.append("f.kind = ?")
+            args.append(kind)
+        if origin:
+            where.append("f.origin = ?")
+            args.append(origin)
+        if pinned is not None:
+            where.append("f.pinned = ?")
+            args.append(1 if pinned else 0)
+        where.append("f.valid_to IS NOT NULL" if closed else "f.valid_to IS NULL")
+        if expiring:
+            where.append("f.valid_to IS NOT NULL AND f.valid_to > ?")
+            args.append(_now_iso())
+        if used_days:
+            from datetime import timedelta
+
+            where.append("f.last_used >= ?")
+            args.append((datetime.now() - timedelta(days=int(used_days))).isoformat(timespec="seconds"))
+        if review:
+            where.append("f.reviewed = 0")
+        join = ""
+        match = _fts_query(query) if (query or "").strip() else ""
+        if (query or "").strip() and not match:
+            return {"facts": [], "total": 0}
+        if match:
+            join = "JOIN facts_fts ON facts_fts.rowid = f.id"
+            where.append("facts_fts MATCH ?")
+            args.append(match)
+        limit = max(1, min(int(limit), 500))
+        offset = max(0, int(offset))
+        with self._lock:
+            total = self._conn.execute(f"SELECT COUNT(*) AS n FROM facts f {join} WHERE {' AND '.join(where)}",
+                                       args).fetchone()["n"]
+            rows = self._conn.execute(
+                f"SELECT {', '.join('f.' + c.strip() for c in self._FACT_COLS.split(','))} FROM facts f {join} "
+                f"WHERE {' AND '.join(where)} ORDER BY f.pinned DESC, f.updated_at DESC, f.id DESC LIMIT ? OFFSET ?",
+                [*args, limit, offset]).fetchall()
+        return {"facts": [self._fact_dict(r) for r in rows], "total": int(total)}
+
+    def get_fact(self, fact_id: int) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._conn.execute(f"SELECT {self._FACT_COLS} FROM facts WHERE id = ?", (int(fact_id),)).fetchone()
+            if row is None:
+                return None
+            hist = self._conn.execute(
+                "SELECT at, change, before, after FROM fact_history WHERE fact_id = ? ORDER BY id DESC LIMIT 50",
+                (int(fact_id),)).fetchall()
+            used = self._conn.execute(
+                "SELECT session, turn, at FROM fact_uses WHERE fact_id = ? ORDER BY id DESC LIMIT 50",
+                (int(fact_id),)).fetchall()
+        out = self._fact_dict(row)
+        out["history"] = [dict(h) for h in hist]
+        out["used_in"] = [dict(u) for u in used]
+        return out
+
+    def counts(self) -> dict[str, int]:
+        """Numbers for the Memory view's chips. Records are not counted as things it knows."""
+        with self._lock:
+            def one(sql: str, *a: Any) -> int:
+                return int(self._conn.execute(sql, a).fetchone()[0])
+
+            base = "FROM facts WHERE kind != 'record' AND valid_to IS NULL"
+            return {"facts": one(f"SELECT COUNT(*) {base}"), "review": one(f"SELECT COUNT(*) {base} AND reviewed = 0"),
+                    "pinned": one(f"SELECT COUNT(*) {base} AND pinned = 1"),
+                    "hidden": one(f"SELECT COUNT(*) {base} AND hidden = 1"),
+                    "closed": one("SELECT COUNT(*) FROM facts WHERE kind != 'record' AND valid_to IS NOT NULL"),
+                    "records": one("SELECT COUNT(*) FROM facts WHERE kind = 'record'")}
+
+    def add_by_hand(self, text: str, kind: str = "fact", project: str = "") -> dict[str, Any]:
+        """A fact the owner typed. Origin ``you_said``, already reviewed."""
+        text = (text or "").strip()
+        if not text:
+            raise ValueError("a fact needs some text")
+        kind = kind if kind in KINDS else "fact"
+        title = " ".join(text.split())[:80]
+        title = f"{title} #{_content_hash(text)[:6]}"
+        self.remember("you", title, text, kind=kind, origin="you_said", project=project)
+        with self._lock:
+            row = self._conn.execute("SELECT id FROM facts WHERE source = 'you' AND title = ?", (title,)).fetchone()
+            self._log(self._conn.cursor(), row["id"], "added by hand", "", text)
+            self._conn.commit()
+        return self.get_fact(row["id"]) or {}
+
+    def edit_fact(self, fact_id: int, *, body: str | None = None, kind: str | None = None) -> dict[str, Any]:
+        """Change a fact's text or kind. The earlier text stays in its history. The cached vector is dropped."""
+        with self._lock:
+            cur = self._conn.cursor()
+            row = cur.execute("SELECT body, kind FROM facts WHERE id = ?", (int(fact_id),)).fetchone()
+            if row is None:
+                raise LookupError("no such fact")
+            if body is not None:
+                body = body.strip()
+                if not body:
+                    raise ValueError("a fact needs some text")
+                if body != row["body"]:
+                    cur.execute("UPDATE facts SET body = ?, content_hash = ?, updated_at = ? WHERE id = ?",
+                                (body, _content_hash(body), _now_iso(), int(fact_id)))
+                    cur.execute("DELETE FROM fact_embeddings WHERE fact_id = ?", (int(fact_id),))
+                    self._log(cur, int(fact_id), "edited", row["body"], body)
+            if kind is not None and kind in KINDS and kind != row["kind"]:
+                cur.execute("UPDATE facts SET kind = ? WHERE id = ?", (kind, int(fact_id)))
+                self._log(cur, int(fact_id), "kind changed", row["kind"] or "", kind)
+            cur.execute("UPDATE facts SET reviewed = 1 WHERE id = ?", (int(fact_id),))
+            self._conn.commit()
+        return self.get_fact(fact_id) or {}
+
+    def set_flag(self, fact_id: int, flag: str, value: bool) -> dict[str, Any]:
+        """Pin (always recalled, capped) or hide (never recalled, kept)."""
+        if flag not in ("pinned", "hidden"):
+            raise ValueError("flag must be pinned or hidden")
+        with self._lock:
+            cur = self._conn.cursor()
+            cur.execute(f"UPDATE facts SET {flag} = ?, reviewed = 1 WHERE id = ?", (1 if value else 0, int(fact_id)))
+            if cur.rowcount == 0:
+                raise LookupError("no such fact")
+            self._log(cur, int(fact_id), flag if value else f"un{flag}")
+            self._conn.commit()
+        return self.get_fact(fact_id) or {}
+
+    def mark_reviewed(self, fact_id: int) -> None:
+        with self._lock:
+            self._conn.execute("UPDATE facts SET reviewed = 1 WHERE id = ?", (int(fact_id),))
+            self._conn.commit()
+
+    def supersede(self, old_id: int, new_text: str) -> dict[str, Any]:
+        """Replace a fact without deleting it: the old one is closed (``valid_to``, ``superseded_by``) and stays in
+        the history; the new one starts now."""
+        new_text = (new_text or "").strip()
+        if not new_text:
+            raise ValueError("a fact needs some text")
+        with self._lock:
+            old = self._conn.execute("SELECT * FROM facts WHERE id = ?", (int(old_id),)).fetchone()
+        if old is None:
+            raise LookupError("no such fact")
+        title = f"{' '.join(new_text.split())[:80]} #{_content_hash(new_text)[:6]}"
+        self.remember("you", title, new_text, kind=old["kind"] if old["kind"] in KINDS else "fact",
+                      origin="you_said", project=old["project"] or "")
+        with self._lock:
+            cur = self._conn.cursor()
+            new_id = cur.execute("SELECT id FROM facts WHERE source = 'you' AND title = ?", (title,)).fetchone()["id"]
+            if new_id != int(old_id):
+                cur.execute("UPDATE facts SET valid_to = ?, superseded_by = ? WHERE id = ?",
+                            (_now_iso(), new_id, int(old_id)))
+                self._log(cur, int(old_id), "replaced", old["body"], new_text)
+                self._log(cur, new_id, "replaces an earlier fact", old["body"], new_text)
+            self._conn.commit()
+        return self.get_fact(new_id) or {}
+
+    def forget(self, fact_id: int) -> bool:
+        """Hard delete: the row, its full-text entry (trigger), its vector, its history and its use log."""
+        with self._lock:
+            cur = self._conn.cursor()
+            cur.execute("DELETE FROM facts WHERE id = ?", (int(fact_id),))
+            gone = cur.rowcount > 0
+            if gone:
+                cur.execute("DELETE FROM fact_embeddings WHERE fact_id = ?", (int(fact_id),))
+                cur.execute("DELETE FROM fact_history WHERE fact_id = ?", (int(fact_id),))
+                cur.execute("DELETE FROM fact_uses WHERE fact_id = ?", (int(fact_id),))
+                cur.execute("UPDATE facts SET superseded_by = NULL WHERE superseded_by = ?", (int(fact_id),))
+            self._conn.commit()
+        return gone
+
+    def forget_where(self, *, source: str = "", since: str = "", until: str = "", dry_run: bool = False) -> int:
+        """Forget every fact from one source, or created in a date range (ISO dates). Returns how many (or would)."""
+        if not (source or since or until):
+            raise ValueError("say a source or a date range")
+        where, args = ["kind != 'record'"], []
+        if source:
+            where.append("source = ?")
+            args.append(source)
+        if since:
+            where.append("created_at >= ?")
+            args.append(since)
+        if until:
+            where.append("created_at <= ?")
+            args.append(until if "T" in until else until + "T23:59:59")
+        with self._lock:
+            ids = [r["id"] for r in self._conn.execute(f"SELECT id FROM facts WHERE {' AND '.join(where)}", args)]
+        if dry_run:
+            return len(ids)
+        return sum(1 for i in ids if self.forget(i))
+
+    def merge_suggestions(self, limit: int = 20) -> list[dict[str, Any]]:
+        """Pairs that look like the same fact: identical text, or most words shared. Deterministic."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, body, content_hash FROM facts WHERE kind != 'record' AND valid_to IS NULL ORDER BY id"
+            ).fetchall()
+        words = {r["id"]: set(re.findall(r"[a-z0-9]{3,}", r["body"].lower())) for r in rows}
+        out: list[dict[str, Any]] = []
+        for i, a in enumerate(rows):
+            for b in rows[i + 1:]:
+                wa, wb = words[a["id"]], words[b["id"]]
+                if not wa or not wb:
+                    continue
+                score = len(wa & wb) / len(wa | wb)
+                if a["content_hash"] == b["content_hash"] or score >= 0.7:
+                    out.append({"keep": a["id"], "drop": b["id"], "score": round(score, 2),
+                                "keep_text": a["body"][:200], "drop_text": b["body"][:200]})
+                    if len(out) >= limit:
+                        return out
+        return out
+
+    def merge(self, keep_id: int, drop_id: int) -> dict[str, Any]:
+        """The dropped fact is closed and points at the kept one; it keeps its history."""
+        if int(keep_id) == int(drop_id):
+            raise ValueError("pick two different facts")
+        with self._lock:
+            cur = self._conn.cursor()
+            if cur.execute("SELECT 1 FROM facts WHERE id = ?", (int(keep_id),)).fetchone() is None:
+                raise LookupError("no such fact")
+            cur.execute("UPDATE facts SET valid_to = ?, superseded_by = ? WHERE id = ?",
+                        (_now_iso(), int(keep_id), int(drop_id)))
+            if cur.rowcount == 0:
+                raise LookupError("no such fact")
+            self._log(cur, int(drop_id), "merged into another fact")
+            self._conn.commit()
+        return self.get_fact(keep_id) or {}
+
+    def export_all(self) -> dict[str, Any]:
+        """Every fact the owner can see, closed ones included, as plain data (no vectors)."""
+        facts = self.list_facts(limit=500)["facts"] + self.list_facts(closed=True, limit=500)["facts"]
+        return {"exported_at": _now_iso(), "facts": facts}
+
+    # -- recall bookkeeping --------------------------------------------------- #
+
+    def recall_facts(self, query: str, limit: int = 5, project: str = "") -> list[dict[str, Any]]:
+        """Search hits, plus the pinned facts (at most ``PINNED_RECALL_CAP``), never hidden or closed ones."""
+        hits = self.search(query, limit=limit, project=project)
+        seen = {h["id"] for h in hits}
+        with self._lock:
+            pins = self._conn.execute(
+                "SELECT id, source, title, body FROM facts WHERE pinned = 1 AND hidden = 0 AND valid_to IS NULL "
+                "AND (project = '' OR project = ?) ORDER BY updated_at DESC LIMIT ?",
+                (str(project or ""), PINNED_RECALL_CAP)).fetchall()
+        for r in pins:
+            if r["id"] not in seen:
+                hits.append({"id": r["id"], "source": r["source"], "title": r["title"], "snippet": r["body"][:300],
+                             "score": 0.0})
+        return hits
+
+    def record_uses(self, fact_ids: list[int], session: str, turn: int) -> None:
+        """The facts that were put in this turn's prompt (ids only)."""
+        ids = sorted({int(i) for i in fact_ids})
+        if not ids:
+            return
+        now = _now_iso()
+        with self._lock:
+            for i in ids:
+                self._conn.execute("INSERT INTO fact_uses(fact_id, session, turn, at) VALUES (?, ?, ?, ?)",
+                                   (i, str(session)[:200], int(turn), now))
+                self._conn.execute("UPDATE facts SET uses = uses + 1, last_used = ? WHERE id = ?", (now, i))
+            self._conn.commit()
+
+    def used_in_turn(self, session: str, turn: int) -> list[dict[str, Any]]:
+        """"Why did you say that": the facts injected into one turn. Facts forgotten since are simply absent."""
+        with self._lock:
+            rows = self._conn.execute(
+                f"SELECT {', '.join('f.' + c.strip() for c in self._FACT_COLS.split(','))} FROM fact_uses u "
+                "JOIN facts f ON f.id = u.fact_id WHERE u.session = ? AND u.turn = ? GROUP BY f.id ORDER BY f.id",
+                (str(session), int(turn))).fetchall()
+        return [self._fact_dict(r) for r in rows]
+
     # -- ingestion --------------------------------------------------------- #
 
     def ingest_session_file(self, path: Path | str) -> int:
@@ -462,6 +852,10 @@ class MemoryStore:
     def close(self) -> None:
         with self._lock:
             self._conn.close()
+
+
+def _now_iso() -> str:
+    return datetime.now().isoformat(timespec="seconds")
 
 
 def _fts_query(query: str) -> str:
@@ -709,6 +1103,21 @@ class RemoteMemoryStore:
         pass  # stateless HTTP client — nothing to close
 
 
+def _pl06_unsupported(op: str):
+    def method(self: "RemoteMemoryStore", *args: Any, **kwargs: Any) -> Any:
+        raise self._unsupported(op, "the owner's Memory view, which works on the local store")
+
+    method.__name__ = op
+    return method
+
+
+#: The Memory view edits the local store. A remote store gets an honest refusal for each of these, not an AttributeError.
+for _op in ("list_facts", "get_fact", "counts", "add_by_hand", "edit_fact", "set_flag", "mark_reviewed", "supersede",
+            "forget", "forget_where", "merge_suggestions", "merge", "export_all", "recall_facts", "record_uses",
+            "used_in_turn"):
+    setattr(RemoteMemoryStore, _op, _pl06_unsupported(_op))
+
+
 class LocalFallbackMemoryStore:
     """A RemoteMemoryStore that keeps working when the remote is down.
 
@@ -866,3 +1275,18 @@ class LocalFallbackMemoryStore:
         self._remote.close()
         if self._local is not None:
             self._local.close()
+
+
+def _pl06_local(op: str):
+    def method(self: "LocalFallbackMemoryStore", *args: Any, **kwargs: Any) -> Any:
+        return getattr(self._local_store(), op)(*args, **kwargs)
+
+    method.__name__ = op
+    return method
+
+
+#: The owner's Memory view and the per-turn recall bookkeeping work on this machine's own file, remote or not.
+for _op in ("list_facts", "get_fact", "counts", "add_by_hand", "edit_fact", "set_flag", "mark_reviewed", "supersede",
+            "forget", "forget_where", "merge_suggestions", "merge", "export_all", "recall_facts", "record_uses",
+            "used_in_turn"):
+    setattr(LocalFallbackMemoryStore, _op, _pl06_local(_op))

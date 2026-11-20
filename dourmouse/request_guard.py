@@ -181,6 +181,7 @@ OWNER_ONLY_POST_PREFIXES: tuple[str, ...] = (
     "/api/os/comms/",     # trash, archive and flag act on the owner's mailbox
     "/api/security/",     # dismissals, lockdown on and off, quarantine
     "/api/os/automations/",  # creates and runs things that act unattended (plan 2.2)
+    "/api/os/memory/",    # edits and deletes what Dourmouse knows about the owner (plan 2.4)
     "/api/setup/",        # writes the config file and restarts the server
 )
 

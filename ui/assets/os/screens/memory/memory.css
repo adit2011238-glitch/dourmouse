@@ -1,0 +1,46 @@
+/* Memory. Native-Mac look (plan 2.4, finding 210): grouped boxes like System Settings, system font, tokens only,
+   no pills, no uppercase, no hover-only actions. */
+
+[data-screen="MEMORY"] .mm { max-width: 760px; margin: 0 auto; padding: var(--tk-space-6); display: flex; flex-direction: column; gap: var(--tk-space-5); }
+[data-screen="MEMORY"] .mm-note { padding: var(--tk-space-2) var(--tk-space-3); border-radius: var(--tk-radius-block); font-size: var(--tk-size-small); color: var(--tk-text); background: var(--tk-fill); overflow-wrap: anywhere; }
+[data-screen="MEMORY"] .mm-note[hidden] { display: none; }
+[data-screen="MEMORY"] .mm-note[data-tone="error"] { color: var(--tk-critical-text); }
+[data-screen="MEMORY"] #mmConfirm:not(:empty) { margin: 0; }
+[data-screen="MEMORY"] .mm-slot { display: flex; flex-direction: column; gap: var(--tk-space-5); }
+[data-screen="MEMORY"] .mm-slot:empty { display: none; }
+
+[data-screen="MEMORY"] .mm-group { display: flex; flex-direction: column; min-width: 0; }
+[data-screen="MEMORY"] .mm-h { margin: 0 0 var(--tk-space-2); font-size: var(--tk-size-section); font-weight: 600; color: var(--tk-text); }
+[data-screen="MEMORY"] .mm-box { background: var(--tk-bg-raised); border-radius: var(--tk-radius-sheet); box-shadow: 0 0 0 0.5px var(--tk-separator); overflow: hidden; min-width: 0; }
+[data-screen="MEMORY"] .mm-box > [data-state] { min-height: 0; }
+[data-screen="MEMORY"] .mm-pad { padding: var(--tk-space-4); }
+
+[data-screen="MEMORY"] .mm-bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--tk-space-2); }
+[data-screen="MEMORY"] .mm-search { flex: 1 1 220px; min-width: 0; }
+[data-screen="MEMORY"] .mm-chips { display: flex; flex-wrap: wrap; gap: var(--tk-space-1); }
+[data-screen="MEMORY"] .mm-chip { padding: var(--tk-space-1) var(--tk-space-3); border: 0; border-radius: var(--tk-radius-control); background: none; color: var(--tk-text-2); font: inherit; font-size: var(--tk-size-small); cursor: pointer; }
+[data-screen="MEMORY"] .mm-chip[aria-pressed="true"] { background: var(--tk-fill); color: var(--tk-text); font-weight: 600; }
+[data-screen="MEMORY"] .mm-chip:focus-visible, [data-screen="MEMORY"] .mm-in:focus-visible, [data-screen="MEMORY"] .mm-main:focus-visible { outline: 2px solid var(--tk-accent); outline-offset: 2px; }
+[data-screen="MEMORY"] .mm-sel { padding: var(--tk-space-1) var(--tk-space-2); border: 0; border-radius: var(--tk-radius-control); background: var(--tk-fill); color: var(--tk-text); font: inherit; font-size: var(--tk-size-small); }
+
+[data-screen="MEMORY"] .mm-row { box-sizing: border-box; display: flex; align-items: center; gap: var(--tk-space-3); min-height: 44px; padding: var(--tk-space-2) var(--tk-space-4); font-size: var(--tk-size-body); color: var(--tk-text); }
+[data-screen="MEMORY"] .mm-row + .mm-row { border-top: 1px solid var(--tk-separator); }
+[data-screen="MEMORY"] .mm-row[data-open="true"] { background: var(--tk-fill); }
+[data-screen="MEMORY"] .mm-main { flex: 1; min-width: 0; display: flex; padding: 0; margin: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+[data-screen="MEMORY"] .mm-rt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; overflow-wrap: anywhere; }
+[data-screen="MEMORY"] .mm-name { color: var(--tk-text); }
+[data-screen="MEMORY"] .mm-name[data-dim="true"] { color: var(--tk-text-2); }
+[data-screen="MEMORY"] .mm-sub { font-size: var(--tk-size-small); color: var(--tk-text-2); }
+[data-screen="MEMORY"] .mm-actions { gap: var(--tk-space-2); flex-wrap: wrap; justify-content: flex-start; }
+[data-screen="MEMORY"] .mm-more { padding: var(--tk-space-3) var(--tk-space-4); }
+
+[data-screen="MEMORY"] .mm-l { display: block; margin: 0 0 var(--tk-space-1); font-size: var(--tk-size-small); color: var(--tk-text-2); }
+[data-screen="MEMORY"] .mm-in { width: 100%; box-sizing: border-box; padding: var(--tk-space-2) var(--tk-space-3); border-radius: var(--tk-radius-control); border: 0; background: var(--tk-fill); color: var(--tk-text); font: inherit; font-size: var(--tk-size-body); }
+[data-screen="MEMORY"] textarea.mm-in { min-height: 76px; resize: vertical; }
+[data-screen="MEMORY"] .mm-two { display: grid; grid-template-columns: 1fr 1fr; gap: var(--tk-space-3); }
+[data-screen="MEMORY"] .mm-btns { display: flex; flex-wrap: wrap; gap: var(--tk-space-2); margin-top: var(--tk-space-3); }
+[data-screen="MEMORY"] .mm-err { color: var(--tk-critical-text); font-size: var(--tk-size-small); margin-top: var(--tk-space-2); overflow-wrap: anywhere; }
+[data-screen="MEMORY"] .mm-line { font-size: var(--tk-size-small); color: var(--tk-text-2); }
+[data-screen="MEMORY"] .mm-reviewbar { display: flex; align-items: center; gap: var(--tk-space-3); padding: var(--tk-space-3) var(--tk-space-4); background: var(--tk-fill); border-radius: var(--tk-radius-block); }
+[data-screen="MEMORY"] .mm-reviewbar[hidden] { display: none; }
+[data-screen="MEMORY"] .mm-reviewbar span { flex: 1; }

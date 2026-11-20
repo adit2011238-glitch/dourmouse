@@ -17,6 +17,9 @@ export const SCREENS = [
   S('CODE', true, 'diff and run', () => import('../screens/code/index.js')),
   S('PROJECTS', true, 'projects and their threads', () => import('../screens/projects/index.js')),
   S('WIKI', false, 'device wiki', () => import('../screens/wiki/index.js')),
+  /* Plan 2.4 (PL-06): what Dourmouse knows about the owner. Not one of the mockup's eighteen, a deliberate addition
+     like COMMAND_CENTER; it lives in the Library place. */
+  S('MEMORY', false, 'what it knows', () => import('../screens/memory/index.js')),
   S('GOALS', false, 'long-running goals', () => import('../screens/goals/index.js')),
   S('TIMETABLE', false, 'schedules', () => import('../screens/timetable/index.js')),
   S('ORCHESTRATION', false, 'live fan-out', () => import('../screens/orchestration/index.js')),
@@ -46,7 +49,7 @@ export const PLACES = [
   P('PROJECTS', 'Projects', 'PROJECTS', ['PROJECTS', 'CODE']),
   P('OFFICE', 'Office', 'OFFICE', ['OFFICE', 'COMMAND_CENTER', 'ORCHESTRATION', 'GOALS', 'TIMETABLE', 'AGENTSMITH', 'APPS']),
   P('RESEARCH', 'Research', 'RESEARCH', ['RESEARCH', 'NEWS', 'ATLAS']),
-  P('LIBRARY', 'Library', 'WIKI', ['WIKI', 'COMMS', 'MEDIA']),
+  P('LIBRARY', 'Library', 'WIKI', ['WIKI', 'MEMORY', 'COMMS', 'MEDIA']),
   P('BROWSER', 'Browser', 'BROWSER', ['BROWSER']),
   P('SECURITY', 'Security', 'SECURITY', ['SECURITY']),
   P('SETTINGS', 'Settings', 'SETTINGS', ['SETTINGS']),
@@ -56,7 +59,7 @@ export const PLACES = [
 export const VIEW_LABELS = {
   HOME: 'Ask', VOICE: 'Voice', PROJECTS: 'Projects', CODE: 'Code', OFFICE: 'Floor', COMMAND_CENTER: 'Activity',
   ORCHESTRATION: 'Runs', GOALS: 'Jobs', TIMETABLE: 'Automations', AGENTSMITH: 'Toolsmith', APPS: 'Apps',
-  RESEARCH: 'Jobs', NEWS: 'News', ATLAS: 'World', WIKI: 'Wiki', COMMS: 'Mail', MEDIA: 'Media',
+  RESEARCH: 'Jobs', NEWS: 'News', ATLAS: 'World', WIKI: 'Wiki', MEMORY: 'Memory', COMMS: 'Mail', MEDIA: 'Media',
   BROWSER: 'Browser', SECURITY: 'Status', SETTINGS: 'Settings',
 };
 

@@ -184,8 +184,14 @@ export function mountThreadView(region, ctx, opts = {}) {
     const regen = el('button', 'os-btn', 'Regenerate');
     regen.type = 'button';
     regen.dataset.spec = 'Re-runs the same directive as a fresh turn. The previous answer stays in the transcript.';
-    acts.append(copy, regen);
-    bot.append(head, chips, detail, think, aprs, reply, terr, acts);
+    const why = el('button', 'os-btn', 'Why did you say that');
+    why.type = 'button';
+    why.hidden = true;
+    why.dataset.spec = 'Shows the remembered facts that were put in front of the model for this reply.';
+    const whyBox = el('div', 'why');
+    whyBox.hidden = true;
+    acts.append(copy, regen, why);
+    bot.append(head, chips, detail, think, aprs, reply, terr, acts, whyBox);
     wrap.append(you, bot);
     if (turn.restored) wrap.dataset.restored = 'true';
 
@@ -257,6 +263,7 @@ export function mountThreadView(region, ctx, opts = {}) {
       const finished = !isLive(turn);
       acts.hidden = !finished || (!turn.reply && turn.status !== 'stopped' && turn.status !== 'error');
       copy.disabled = !turn.reply;
+      why.hidden = !(turn.memory && turn.memory.count > 0);
       regen.disabled = thread.busy();
       const failed = turn.status === 'error';
       regen.textContent = failed ? 'Retry' : 'Regenerate';
@@ -267,6 +274,27 @@ export function mountThreadView(region, ctx, opts = {}) {
     copy.addEventListener('click', () => {
       const write = navigator.clipboard && navigator.clipboard.writeText ? navigator.clipboard.writeText(copyText(turn)) : Promise.reject(new Error('This browser does not allow clipboard access here.'));
       write.then(() => ctx.notify({ level: 'ok', title: 'Copied', detail: 'The reply is on the clipboard.', ttl: 2500 }), (err) => ctx.notify({ level: 'warn', title: 'Could not copy', detail: err && err.message }));
+    });
+    why.addEventListener('click', async () => {
+      if (!whyBox.hidden) {
+        whyBox.hidden = true;
+        return;
+      }
+      whyBox.hidden = false;
+      whyBox.replaceChildren(el('div', 'who', 'Reading'));
+      try {
+        const out = await ctx.api.get('/api/os/memory/why?session=' + encodeURIComponent(turn.memory.session) + '&turn=' + turn.memory.turn);
+        const facts = out.facts || [];
+        whyBox.replaceChildren(el('div', 'who', facts.length ? 'Remembered facts used in this reply' : 'The facts used here have since been forgotten'),
+          ...facts.map((f) => el('div', 'why-fact', f.body)));
+        const manage = el('button', 'os-btn', 'Open Memory');
+        manage.type = 'button';
+        manage.dataset.spec = 'Opens the Memory view, where you can edit, hide or forget these.';
+        manage.addEventListener('click', () => { window.location.hash = '#/memory'; });
+        whyBox.append(manage);
+      } catch (err) {
+        whyBox.replaceChildren(el('div', 'terr', err && err.message ? err.message : 'Could not read which facts were used.'));
+      }
     });
     regen.addEventListener('click', () => {
       thread.send(turn.text).catch((err) => ctx.notify({ level: 'error', title: 'Send failed', detail: err && err.message }));
