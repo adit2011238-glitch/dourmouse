@@ -22,7 +22,7 @@ import { setHtml } from './html.js';
 import { states } from './states.js';
 import { md, wireCodeCopy } from './md.js';
 import { isAbort } from '../core/api.js';
-import { headerText, toolSteps, chipTone, copyText, shouldFollow, recordsFor, isLive } from './thread-helpers.js';
+import { headerText, toolSteps, chipTone, verifyBadge, copyText, shouldFollow, recordsFor, isLive } from './thread-helpers.js';
 
 /* Thread keys whose ledger was already read back this page load: the thread
    survives leaving and re-entering a screen (core/chat.js keeps it), so the
@@ -196,11 +196,11 @@ export function mountThreadView(region, ctx, opts = {}) {
 
     function paintChips() {
       const steps = toolSteps(turn);
-      const sig = steps.map((s) => s.name + (s.running ? '*' : '') + (chipTone(s) || '') + (open.has(s) ? '+' : '')).join('|');
+      const sig = steps.map((s) => s.name + (s.running ? '*' : '') + (chipTone(s) || '') + verifyBadge(s) + (open.has(s) ? '+' : '')).join('|');
       if (sig === lastSteps) return;
       lastSteps = sig;
       chips.replaceChildren(...steps.map((s) => {
-        const b = el('button', 'tag ' + chipTone(s), '◆ ' + s.name);
+        const b = el('button', 'tag ' + chipTone(s), '◆ ' + s.name + (verifyBadge(s) ? ' · ' + verifyBadge(s) : ''));
         b.type = 'button';
         b.setAttribute('aria-expanded', String(open.has(s)));
         b.dataset.spec = 'Tool chip. Click expands the real arguments and the real result. Never a summary.';
@@ -222,6 +222,7 @@ export function mountThreadView(region, ctx, opts = {}) {
           el('div', 'who', 'Arguments'), el('pre', 'chip-pre', shown.args || '(none)'),
           el('div', 'who', shown.running ? 'Result (running)' : 'Result'), el('pre', 'chip-pre', shown.result || (shown.running ? '' : '(empty)')),
         );
+        if (shown.verify && verifyBadge(shown)) detail.append(el('div', 'who', 'Check'), el('pre', 'chip-pre', verifyBadge(shown) + '. ' + shown.verify.detail));
       }
     }
 

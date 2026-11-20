@@ -53,6 +53,7 @@ from typing import Any, Callable
 from openai import OpenAI
 
 from dourmouse import model_router
+from dourmouse import verify as _verify_mod
 from dourmouse.agent_prompts import TOOL_USE_GUIDE as _TOOL_USE_GUIDE
 from dourmouse.backend_fallback import load_llm_config_with_fallback
 from dourmouse.config import (
@@ -3363,6 +3364,7 @@ def _execute_tool(
     from dourmouse import execution_policy as _ep
 
     actor = actor or (getattr(policy, "actor", "") if policy is not None else "")
+    _verify_mod.remember(None)
     _ep.record("proposed", spec.name, arguments, actor, permission=spec.permission.name)
     decision = (
         _argument_gate(spec, arguments, actor, routed, chain)
@@ -3407,6 +3409,13 @@ def _execute_tool(
         _ep.record("failed", spec.name, arguments, actor, error=result[:300])
     else:
         _ep.record("executed", spec.name, arguments, actor)
+        # PL-07: read the change back. The app writes the outcome line, the model does not.
+        outcome = _verify_mod.verify(spec.name, arguments, str(result))
+        if outcome is not None:
+            _verify_mod.remember(outcome)
+            _ep.record("verified", spec.name, arguments, actor, status=outcome.status, detail=outcome.detail[:200],
+                       tool_class=outcome.tool_class)
+            result = f"{result}\n{outcome.line()}"
     return result
 
 
@@ -6024,6 +6033,14 @@ def _run_dispatch_loop(
                     transcript[-1]["text"] = shown(text)
                 if messages and messages[-1].get("role") == "assistant":
                     messages[-1]["content"] = text
+            _audit_note = _verify_mod.audit_final_answer(
+                text, [e.get("verify") for e in transcript if e.get("type") == "tool_result"])
+            if _audit_note:
+                text += _audit_note
+                if transcript and transcript[-1].get("type") == "assistant_text":
+                    transcript[-1]["text"] = shown(text)
+                if messages and messages[-1].get("role") == "assistant":
+                    messages[-1]["content"] = text
             _maybe_ingest_memory(ctx.depth, str(last_user), shown(text), plan_agents)
             return {"final_text": shown(text), "transcript": transcript, "messages": messages}
 
@@ -6252,6 +6269,9 @@ def _run_dispatch_loop(
                 )
 
             result_entry = {"type": "tool_result", "name": name, "text": result_text}
+            _outcome = _verify_mod.take_last()
+            if _outcome is not None:
+                result_entry["verify"] = _outcome.as_dict()
             transcript.append(result_entry)
             _emit_event(event_sink, result_entry, ctx=ctx)
             tool_message = {"role": "tool", "tool_call_id": tool_call.id, "content": result_text}

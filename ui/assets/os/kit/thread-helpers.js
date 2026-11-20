@@ -32,7 +32,15 @@ export function headerText(turn, now = Date.now()) {
 export function chipTone(step) {
   if (step.running) return 'warn';
   if (step.ok === false || /^ERROR:/.test(step.result || '')) return 'bad';
+  if (step.verify && step.verify.status === 'failed') return 'bad';
   return '';
+}
+
+/* the outcome badge the app adds to a tool step that changes something (plan PL-07); the model never writes it */
+const VERIFY_LABELS = { verified: 'Verified', not_checked: 'Not checked', failed: 'Failed' };
+export function verifyBadge(step) {
+  const v = step && step.verify;
+  return v && VERIFY_LABELS[v.status] ? VERIFY_LABELS[v.status] : '';
 }
 
 /* the text COPY puts on the clipboard: the raw reply, never a summary */

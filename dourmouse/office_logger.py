@@ -345,6 +345,18 @@ class OfficeLogger:
         return [{"seq": r[0], "ts": r[1], "kind": r[2], "subject_type": r[3], "subject_id": r[4],
                  "actor": r[5], "payload": json.loads(r[6] or "{}")} for r in rows]
 
+    def events_since_time(self, since_ts: float, kind_prefix: str = "", limit: int = 5000) -> list[dict[str, Any]]:
+        """Events at or after ``since_ts`` (epoch seconds), oldest first; for day counts (finding 208)."""
+        limit = max(1, min(int(limit), 20000))
+        with self._lock, self._conn() as conn:
+            rows = conn.execute(
+                "SELECT seq, ts, kind, subject_type, subject_id, actor, payload FROM events "
+                "WHERE ts >= ? AND kind LIKE ? ORDER BY seq ASC LIMIT ?",
+                (float(since_ts), kind_prefix.replace("%", "") + "%", limit),
+            ).fetchall()
+        return [{"seq": r[0], "ts": r[1], "kind": r[2], "subject_type": r[3], "subject_id": r[4],
+                 "actor": r[5], "payload": json.loads(r[6] or "{}")} for r in rows]
+
     def recent_meetings(self, limit: int = 30) -> list[dict[str, Any]]:
         """Finding #123 (A1): recent multi-agent runs, newest first."""
         limit = max(1, min(int(limit), 200))

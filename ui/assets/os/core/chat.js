@@ -117,6 +117,7 @@ export function applyEvent(turn, e, hooks = {}) {
       }
       step.running = false;
       step.result = String(e.text || '').slice(0, RESULT_CAP);
+      step.verify = e.verify && e.verify.status ? { status: String(e.verify.status), detail: String(e.verify.detail || '') } : null;
       break;
     }
     case 'delegate_parallel_branch': {
